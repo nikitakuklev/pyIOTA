@@ -1,0 +1,209 @@
+import sys, os, shutil
+from pathlib import Path
+import numpy as np
+import pandas as pd
+
+sys.path.insert(1, Path.home().joinpath('rpms/usr/lib/python3.6/site-packages').as_posix())
+import sdds
+
+sd = sdds.SDDS(15)
+
+
+class SDDS:
+    """
+    SDDSPython wrapper that provides nice dictionary-like interface, or a DataFrame view
+    """
+    def __init__(self, path, fast=False):
+        if not os.path.exists(path):
+            raise Exception(f'Path {path} is missing you fool!')
+        sd.load(path)
+        self.path = path
+        self.cname = [sd.columnName[i] for i in range(len(sd.columnName))]
+        self.pname = [sd.parameterName[i] for i in range(len(sd.parameterName))]
+        self.cdict = {sd.columnName[i]: i for i in range(len(sd.columnName))}
+        self.pdict = {sd.parameterName[i]: i for i in range(len(sd.parameterName))}
+        if not fast:
+            self.cdef = [sd.columnDefinition[i].copy() for i in range(len(sd.columnName))]
+            self.pdef = [sd.parameterDefinition[i].copy() for i in range(len(sd.parameterName))]
+        self.cdata = [np.array(sd.columnData[i]) for i in range(len(sd.columnName))]
+        self.pdata = [np.array(sd.parameterData[i]) for i in range(len(sd.parameterName))]
+        if len(self.cname) > 0:
+            self.pagecnt = self.cdata[0].shape[0]
+        else:
+            self.pagecnt = self.pdata[0].shape[0]
+
+    def summary(self):
+        """
+        Print a brief file summary
+        :return:
+        """
+        print(f'File:{self.path}')
+        print(f'Pages:{self.pagecnt} | Cols:{len(self.cname)} | Pars:{len(self.pname)}')
+
+    def __getitem__(self, name):
+        """
+        Key access method. Prioritizes columns over parameters, and returns page 0 only.
+        :param name:
+        :return:
+        """
+        if name in self.cname:
+            return self.c(name)
+        elif name in self.pname:
+            return self.p(name)
+        else:
+            raise IndexError
+
+    def c(self, name, p=None):
+        """
+        Get SDDS column.
+        :param name:
+        :param p:
+        :return:
+        """
+        if name not in self.cname:
+            raise IndexError
+        if p is None:
+            return self.cdata[self.cdict[name]][:, :]
+        else:
+            return self.cdata[self.cdict[name]][p, :]
+
+    def p(self, name):
+        """
+        Get SDDS parameter.
+        :param name:
+        :return:
+        """
+        return self.pdata[self.pdict[name]]
+
+    def df(self, p=0):
+        """
+        Return columns as a DataFrame. To save on memory, it IS NOT GUARANTEED to be a deep copy.
+        :param p:
+        :return:
+        """
+        d = {k: v[p, :] for (k, v) in zip(self.cname, self.cdata)}
+        return pd.DataFrame(data=d)
+
+
+def read_parameters_to_df(knob, columns=None, p=0, enforce_unique_index=True):
+    if columns is None:
+        columns = ['ElementName', 'ElementType', 'ElementParameter', 'ParameterValue']
+    sd2 = SDDS(knob)
+    data = {k:sd2.c(k)[p,:] for k in columns}
+    df = pd.DataFrame(data=data, index=[data['ElementName'], data['ElementType'], data['ElementParameter']])
+    if enforce_unique_index:
+        df = df[df.ElementType != 'MARK']
+        assert df.index.is_unique
+    del sd2
+    return df.sort_index()
+
+
+def interpolate_parameters(reference_df, value, max_df, max_val, min_df=None, min_val=None, el_name=None, el_type=None, el_parameter=None):
+    """
+    Interpolates from a reference parameter set to a knob set, proportional to the desired value. If no min state given, assumed to be the negative of max knob.
+    """
+    df = reference_df
+    if el_name:
+        df = df.loc[(df.ElementName.str.startswith(el_name))]
+    if el_type:
+        df = df.loc[(df.ElementType == el_type)]
+    if el_parameter:
+        df = df.loc[(df.ElementParameter == el_parameter)]
+    assert len(df) > 0
+    assert max_val > 0
+    df = df.copy()
+    #print('Initial:',df.iloc[0].values)
+    if value == 0:
+        return df
+    elif value < 0:
+        if min_df is None:
+            endpoint = max_df
+            ratio = value/max_val
+        else:
+            assert min_val < 0
+            endpoint = min_df
+            ratio = value/min_val
+        #print(minfile)
+    else:
+        endpoint = max_df
+        ratio = value/max_val
+    #if not df.index.equals(_filter_df(endpoint, el_name, el_type, el_parameter).index):
+    if not np.all(df.index.isin(endpoint.index)):
+        print(df.index)
+        print(endpoint.index)
+        raise Exception('Parameter file index mismatch - aborting!')
+    assert df.index.is_unique
+    delta = ratio*(endpoint.loc[:,'ParameterValue']-df.loc[:,'ParameterValue'])
+    df.loc[:,'ParameterValue'] = df.loc[:,'ParameterValue'] + delta
+    #print(ratio)
+    #print(dfend.iloc[0], dfref.iloc[0])
+    #print('Final:',df.iloc[0].values)
+    return df
+
+
+def _filter_df(df, el_name, el_type, el_parameter):
+    if el_name:
+        df = df.loc[(df.ElementName.str.startswith(el_name))]
+    if el_type:
+        df = df.loc[(df.ElementType == el_type)]
+    if el_parameter:
+        df = df.loc[(df.ElementParameter == el_parameter)]
+    return df
+
+# pyIOTA.elegant.io.interpolate_parameters(df_baseline, 0.1, quad_knobs['nux'][0][0], 0.1).loc['QA2R','KQUAD','K1']
+# pyIOTA.elegant.io.interpolate_parameters(df_baseline, -0.1, quad_knobs['nux'][0][0], 0.1).loc['QA2R','KQUAD','K1']
+# pyIOTA.elegant.io.interpolate_parameters(df_baseline, -0.1, quad_knobs['nux'][0][0], 0.1, quad_knobs['nux'][0][0], -0.1).loc['QA2R','KQUAD','K1']
+# pyIOTA.elegant.io.interpolate_parameters(df_baseline, 0, quad_knobs['nux'][0][0], 0.1).loc['QA2R','KQUAD','K1']
+# pyIOTA.elegant.io.interpolate_parameters(quad_knobs['nux'][0][0], 0, quad_knobs['nux'][0][0], 0.1).loc['QA2R','KQUAD','K1']
+
+def write_df_to_parameter_file(knob, df):
+    df = df.loc[:,['ElementName','ElementParameter','ParameterValue']]
+    #print(df)
+    x = sdds.SDDS(10)
+    x.setDescription("params", knob)
+    names = ['ElementName', 'ElementParameter', 'ParameterValue']
+    types = [x.SDDS_STRING, x.SDDS_STRING, x.SDDS_DOUBLE]
+    for i,n in enumerate(names):
+        x.defineSimpleColumn(names[i], types[i])
+    columnData = [[[]],[[]],[[]]]
+    for row in df.itertuples():
+        #print(row)
+        for i,r in enumerate(row):
+            if i > 0:
+                columnData[i-1][0].append(r)
+    for i,n in enumerate(names):
+         x.setColumnValueLists(names[i], columnData[i])
+    #print(columnData)
+    x.save(knob)
+    del x
+
+
+def prepare_folders(work_folder, data_folder, dirs_to_wipe, dirs_to_create, wipe=True):
+    print('Work folder: ', work_folder)
+    print('Data folder: ', data_folder)
+
+    def wipe_directory(d):
+        if wipe:
+            n_deleted = 0
+            dobj = Path(d)
+            if dobj.exists():
+                for p in Path(d).iterdir():
+                    if p.is_dir():
+                        shutil.rmtree(p)
+                    else:
+                        p.unlink()
+                    n_deleted += 1
+            return n_deleted
+        else:
+            return -1
+    for path in dirs_to_wipe:
+        n = wipe_directory(path)
+        print(f'Wiping {path:<60s} deleted {n} objects')
+
+    for path in dirs_to_create:
+        pp = Path(path)
+        if not pp.is_dir():
+            print('Making dir: ', path)
+            pp.mkdir(parents=True, exist_ok=True)
+        else:
+            print('Directory exists: ', path)
