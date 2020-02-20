@@ -2,9 +2,12 @@ import asyncio
 import collections
 import sys
 import datetime
+import time
+
 import numpy as np
 
-data_entry = collections.namedtuple('DataEntry',['id','value','ts','src'])
+data_entry = collections.namedtuple('DataEntry', ['id', 'value', 'ts', 'src'])
+
 
 class Device:
 
@@ -22,12 +25,13 @@ class Device:
     def get_history(self) -> list:
         return list(self.history)
 
-    def update(self, data, timestamp, source:str):
+    def update(self, data, timestamp, source: str):
         self.value = data.copy()
         self.value_tuple = data_entry(self.update_cnt, self.value, timestamp, source)
         self.last_update = timestamp
         self.history.append(self.value_tuple)
         self.update_cnt += 1
+
 
 class DoubleDevice(Device):
     def __init__(self, name, drf2, history=10):
@@ -35,6 +39,7 @@ class DoubleDevice(Device):
         Floating point device with a circular history buffer
         """
         super().__init__(name, drf2, history)
+
 
 class BPMDevice(Device):
     def __init__(self, name, drf2, array_length=1000, history=10):
@@ -53,11 +58,12 @@ class BPMDevice(Device):
     #     values = ds.getValues()
     #     return values[self.name]
 
-    def _update_oneshot(self, data, timestamp, source):
-        self.value = data.copy()
-        self.last_update = timestamp
-        self.history.append((self.cnt, self.last_update, source, self.value))
-        self.cnt += 1
+    # def _update_oneshot(self, data, timestamp, source):
+    #     self.value = data.copy()
+    #     self.last_update = timestamp
+    #     self.history.append((self.cnt, self.last_update, source, self.value))
+    #     self.cnt += 1
+
 
 #####
 
@@ -67,25 +73,23 @@ class DeviceSet:
     an unbalanced tree, with 'nodes' containing only other device sets and 'leafs' containing only devices.
     Supports iterable and dictionary access modes.
     """
-    def __init__(self, name:str, members:list):
-        # This is classical tree structure
-        node =  all([isinstance(ds,DeviceSet) for ds in members])
-        leaf =  all([isinstance(ds,Device) for ds in members])
+
+    def __init__(self, name: str, members: list):
+        node = all([isinstance(ds, DeviceSet) for ds in members])
+        leaf = all([isinstance(ds, Device) for ds in members])
         assert node or leaf
 
         if node:
             self.leaf = False
-            self.children = {ds.name:ds for ds in members}
+            self.children = {ds.name: ds for ds in members}
             assert len(self.children) == len(members)
             self.devices = None
-            #self.device_names = None
             for c in self.children:
                 c.parent = self
         else:
             self.leaf = True
-            self.devices = {d.name:d for d in members}
+            self.devices = {d.name: d for d in members}
             assert len(self.devices) == len(members)
-            #self.device_names = [d.name for d in args]
             self.children = None
             self.parent = None
         self.adapter = None
@@ -100,12 +104,16 @@ class DeviceSet:
         Depth-first pre-order traversal
         :return:
         """
-        if not self.iter_node.leaf:
+        if not self.leaf:
             for c in self.children:
                 yield next(c)
+            raise StopIteration
         else:
-            for d in self.devices:
+            for d in self.devices.values():
+                print(d)
+                time.sleep(1)
                 yield d
+            raise StopIteration
 
     def add(self, device):
         if isinstance(device, Device):
@@ -116,7 +124,7 @@ class DeviceSet:
         else:
             raise AttributeError('You must add a device object!')
 
-    def remove(self, name:str):
+    def remove(self, name: str):
         """
         Removes and returns the desired device or device set, or None if not found
         :param name: Unique name of the element
@@ -129,20 +137,17 @@ class DeviceSet:
             if name in self.children:
                 return self.children.pop(name)
 
-    def gather(self):
-        return
-
-    def check_acquisition_available(self, method:str) -> bool:
+    def check_acquisition_available(self, method: str) -> bool:
         if not self.adapter:
             raise AttributeError('Adapter is not set!')
         if self.leaf:
             if len(self.devices) == 0:
                 raise Exception("Add devices before starting acquisition!")
-            return self.adapter.check_availability(self.devices, method)
+            return self.adapter.check_available(self.devices, method)
         else:
             return all([c.check_acquisition_available(method) for c in self.children])
 
-    def check_acquisition_supported(self, method:str) -> bool:
+    def check_acquisition_supported(self, method: str) -> bool:
         if not self.adapter:
             raise AttributeError('Adapter is not set!')
         if self.leaf:
@@ -150,58 +155,61 @@ class DeviceSet:
         else:
             return all([c.check_acquisition_supported(method) for c in self.children])
 
-    def start_oneshot(self) -> bool:
-        if not self.check_acquisition_supported():
+    def start_oneshot(self) -> int:
+        if not self.check_acquisition_supported('oneshot'):
             raise Exception('Acquisition is not supported for method: {}'.format('oneshot'))
         if not self.check_acquisition_available('oneshot'):
             return False
+        if not self.devices:
+            raise AttributeError("Cannot start acquisition on an empty set")
         if self.leaf:
-            self.adapter.oneshot()
+            cnt = self.adapter.start_oneshot(self)
         else:
+            cnt = 0
             for c in self.children:
-                c.adapter.oneshot()
+                cnt += c.update(c.adapter.oneshot())
+        return cnt
 
     def start_polling(self) -> bool:
-        if not self.check_acquisition_supported():
+        if not self.check_acquisition_supported('polling'):
             raise Exception('Acquisition is not supported for method: {}'.format('polling'))
         if not self.check_acquisition_available('polling'):
             return False
+        if not self.devices:
+            raise AttributeError("Cannot start acquisition on an empty set")
         if self.leaf:
             self.adapter.start()
         else:
             for c in self.children:
                 c.adapter.start()
 
-    # def stopAcquisition(self):
-    #     if not running:
-    #         print('Acquisition is not running!')
-    #     if method == 'aclasync':
-    #         continue
-    #     elif method == 'dpm_polling':
-    #         try:
-    #             self.DPM.stop()
-    #             self.DPM = None
-    #             self.acnet._close()
-    #         except Exception e:
-    #             print(e)
-    #             raise
-    #     else:
-    #         raise Exception('Continuous acquisition is not supported for method: {}'.format(self.method))
+    def stop_polling(self) -> bool:
+        if not self.running:
+            print('Acquisition is not running!')
+            return False
+        if self.leaf:
+            return self.adapter.stop()
+        else:
+            success = True
+            for c in self.children:
+                success &= c.adapter.stop()
+            return success
 
 
 class BPMDeviceSet(DeviceSet):
     """
     Leaf container of BPM and other array devices. Exposes methods for fast batch readout, and enforces data uniformity.
     """
-    def __init__(self, name:str, members:list, enforce_array_length:int=1000):
-        leaf = all([isinstance(ds,Device) for ds in members])
+
+    def __init__(self, name: str, members: list, enforce_array_length: int = 1000):
+        leaf = all([isinstance(ds, Device) for ds in members])
         if not leaf:
             raise AttributeError('BPM set can only contain devices - use generic DeviceSet for coalescing')
-        assert enforce_array_length is None or isinstance(enforce_array_length,int)
+        assert enforce_array_length is None or isinstance(enforce_array_length, int)
         super().__init__(name, members)
         self.array_length = enforce_array_length
 
-    def add(self, device:Device):
+    def add(self, device: Device):
         if isinstance(device, BPMDevice):
             if self.array_length is not None and self.array_length != device.array_length:
                 print('Device array length does not match set - using set value {}'.format(self.array_length))
@@ -212,12 +220,17 @@ class BPMDeviceSet(DeviceSet):
 
 class Adapter:
     supported = []
+    can_set = False
 
     def __init__(self):
         pass
 
     def check_supported(self, devices, method):
         return method in self.supported
+
+    def check_supported_write(self):
+        return self.can_set
+
 
 # class DPM(Adapter):
 #     def __init__(self):
@@ -235,30 +248,39 @@ class Adapter:
 #             self.device_tags[i] = self.name
 #
 #         dpm.start()
+    #     elif method == 'dpm_polling':
+    #         try:
+    #             self.DPM.stop()
+    #             self.DPM = None
+    #             self.acnet._close()
 
 
-class ACLAsync(Adapter):
+class ACL(Adapter):
     """
     ACL web adapter. Works by fetching from the ACL web proxy via HTTP. Supports single-shot with many parallel
     requests using AsyncIO framework, with fallback to single thread via urllib,
     and quasi-polling mode that loops over single-shot commands.
     """
-    def __init__(self, fallback:bool=False):
+
+    arrayurlstring = 'http://www-ad.fnal.gov/cgi-bin/acl.pl?acl=read/row/pendWait=0.5+devices="{}"+/num_elements={}'
+    urlstring = 'http://www-ad.fnal.gov/cgi-bin/acl.pl?acl=read/row/pendWait=0.5+devices="{}"+/num_elements={}'
+
+    def __init__(self, fallback: bool = False):
         super().__init__()
-        self.name = 'ACL Async'
+        self.name = 'ACL'
         self.supported = ['oneshot', 'polling']
         self.rate_limit = [-1, -1]
         self.fallback = fallback
         try:
             import httpx
-            #import yarl
+            # import yarl
         except ImportError:
             print('HTTP functionality requires httpx library')
             raise
         if fallback:
             self.client = httpx.Client()
         else:
-            self.client = httpx.AsyncClient()
+            self.aclient = httpx.AsyncClient()
 
     def __del__(self):
         try:
@@ -266,73 +288,86 @@ class ACLAsync(Adapter):
                 self.client.close()
             else:
                 async def terminate():
-                    await self.client.aclose()
+                    await self.aclient.aclose()
+
                 asyncio.run(terminate())
         except Exception as e:
             print(f'Issue with disposing adapter {self.name}')
             print(e)
 
-    def start_oneshot(self, ds:DeviceSet) -> dict:
+    def check_available(self, devices:list, method:str):
+        return len(devices) < 500
+
+    def start_oneshot(self, ds: DeviceSet) -> int:
         assert ds.leaf
-        devices = ds.devices
-        dev_drf2 = [d.drf2 for d in devices.values()]
-        bpmlist = [d.name for d in devices]
-        bpmstring = ','.join(bpmlist)
+        device_dict = ds.devices
+        dev_names = [d.name for d in device_dict.values()]
         if self.fallback:
             c = self.client
+            url = self._generate_url(ds, ','.join(dev_names))
             try:
-                txt = ('http://www-ad.fnal.gov/cgi-bin/acl.pl?acl=' +
-                       f'read/row/pendWait=0.5+devices="{bpmstring[:-1]}"+/num_elements=1000')
-                print(txt)
-                resp = c.get(txt)
-                t1 = datetime.datetime.utcnow().timestamp()
+                resp = c.get(url)
                 text = resp.text
-                if "DPM_PEND" in text:
-                    print('Bad ACL output - DPM_PEND')
-                if 'mm' not in text or 'raw' not in text:
-                    raise Exception("Bad ACL output")
-                split_text = text.strip().split('\n')
-                data = {}
-                for line in filter(None, split_text):
-                    spl = line.strip().split(' ')
-                    devname = spl[0].split('@')[0].split('[')[0]
-                    data[devname] = np.array([float(v) for v in spl[2:-1]])
-                for d in ds.devices:
-                    d.update(data[d.name],t1,'unknown')
-                return data
+                t1 = datetime.datetime.utcnow().timestamp()
+                data = self._process_string(ds, text)
+                for k, v in device_dict.items():
+                    v.update(data[k], t1, self.name)
+                return len(data)
             except Exception as e:
                 print(e, sys.exc_info())
-                # (None, datetime.datetime.utcnow().timestamp(), 'error')
-                return None
-        # else:
-        #     # Split tasks into sets
-        #     num_lists = min(len(bpmlist), 5)
-        #     bpm_lists = [list(l) for l in np.array_split(bpmlist_initial, numlists)]
-        #     bpm_strings = []
-        #     for bpm_list in bpm_lists:
-        #         bpm_string = ''
-        #         for b in bpm_list:
-        #             bpm_string += '{{{}}},'.format(b)
-        #         bpm_string = ("http://www-ad.fnal.gov/cgi-bin/acl.pl?acl=read/row/pendWait=0.5+devices=\'"
-        #                       + bpm_string[:-1] + '\'+/num_elements=1000')
-        #         bpm_strings.append(bpmstring)
-        #     print(bpm_strings)
-        #     try:
-        #         data = {}
-        #         loop = asyncio.get_event_loop()
-        #         responses = loop.run_until_complete(_http_fetch_async(loop, bpm_strings))
-        #         t1 = datetime.datetime.utcnow().timestamp()
-        #         for r in responses:
-        #             if 'mm' not in r or 'raw' not in r:
-        #                 raise Exception('ACL async error - bad response')
-        #             split_text = r.strip().split('\n')
-        #             for line in filter(None, split_text):
-        #                 spl = line.strip().split(' ')
-        #                 data[spl[0][:-3]] = np.array([float(v) for v in spl[2:-1]])
-        #         return (data, t1, 'unknown')
-        #     except Exception as e:
-        #         print(e, sys.exc_info())
-        #         return (None, datetime.datetime.utcnow().timestamp(), 'error')
+                raise
+                return 0
+        else:
+            c = self.aclient
+            # Split tasks into sets
+            num_lists = min(len(ds.devices), 5)
+            dev_lists = [list(l) for l in np.array_split(dev_names, num_lists)]
+            #print(dev_lists)
+            urls = [self._generate_url(ds, ','.join(dl)) for dl in dev_lists]
+            try:
+                data = {}
+
+                async def get(urls_inner):
+                    rs = [await c.get(u) for u in urls_inner]
+                    return rs
+
+                responses = asyncio.run(get(urls))
+                t1 = datetime.datetime.utcnow().timestamp()
+                for r in responses:
+                    data.update(self._process_string(ds, r.text))
+                assert len(data) == len(device_dict)
+                for k, v in device_dict.items():
+                    v.update(data[k], t1, self.name)
+                return len(data)
+            except Exception as e:
+                print(e, sys.exc_info())
+                raise
+                return 0
+
+    def _generate_url(self, ds: DeviceSet, devstring: str):
+        if isinstance(ds, BPMDeviceSet):
+            url = ACL.arrayurlstring.format(devstring, ds.array_length)
+        else:
+            url = ACL.urlstring.format(devstring)
+        return url
+
+    def _process_string(self, ds: DeviceSet, text: str):
+        text = text.strip()
+        if isinstance(ds, BPMDeviceSet):
+            if not (text.endswith('mm') or text.endswith('raw')):
+                # print(f'URL: {url}')
+                print(f'Text: {text}')
+                raise Exception("Bad ACL output")
+        if "DPM_PEND" in text:
+            print('Bad ACL output - DPM_PEND')
+        split_text = text.split('\n')
+        data = {}
+        for line in filter(None, split_text):
+            spl = line.strip().split()
+            # print(spl)
+            devname = spl[0].split('@')[0].split('[')[0]
+            data[devname] = np.array([float(v) for v in spl[2:-1]])
+        return data
 
     # def getHistory(self):
     #     bpmlist = [dev.name for dev in self.devices]
