@@ -1,6 +1,7 @@
 from unittest import TestCase
 from .frontends import BPMDeviceSet, BPMDevice, ACL
-
+#from ..iota.run2 import BPMS, MAGNETS
+from ...pyIOTA import iota
 
 class TestWrap(TestCase):
     def setUp(self):
@@ -17,6 +18,7 @@ class TestWrap(TestCase):
         self.ds_async = ds_async
 
 
+
 class TestDeviceSet(TestWrap):
     def test_device_set(self):
         devs = list(self.ds)
@@ -25,8 +27,13 @@ class TestDeviceSet(TestWrap):
     def test_start_oneshot(self):
         d1 = list(self.ds.devices.values())[0]
         print(f'\nOld ts: {d1.last_update} | {d1.value}')
+        old_ts = d1.last_update
         self.ds.start_oneshot()
         print(f'New ts: {d1.last_update} | {d1.value}')
+        self.assertTrue(old_ts != d1.last_update)
+
+    def test_start_oneshot2(self):
+        devices = iota.BPMS.HA
 
     def test_check_acquisition_supported(self):
         self.assertTrue(self.ds.check_acquisition_supported('oneshot'))
