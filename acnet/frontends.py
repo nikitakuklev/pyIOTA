@@ -1,9 +1,10 @@
 import asyncio
+import base64
 import collections
 import sys
 import datetime
 import time
-
+import json
 import numpy as np
 
 data_entry = collections.namedtuple('DataEntry', ['id', 'value', 'ts', 'src'])
@@ -26,28 +27,40 @@ class Device:
         return list(self.history)
 
     def update(self, data, timestamp, source: str):
-        self.value = data.copy()
+        self.value = data
         self.value_tuple = data_entry(self.update_cnt, self.value, timestamp, source)
         self.last_update = timestamp
         self.history.append(self.value_tuple)
         self.update_cnt += 1
 
+    def __str__(self):
+        return f'Device {self.name}: {self.value}'
+
+    def __repr__(self):
+        return f'Device {self.name}: {self.value}'
+
 
 class DoubleDevice(Device):
-    def __init__(self, name, drf2, history=10):
+    def __init__(self, name, drf2=None, history=10):
         """
         Floating point device with a circular history buffer
         """
         super().__init__(name, drf2, history)
 
+    def __str__(self):
+        return super().__str__()
+
 
 class BPMDevice(Device):
-    def __init__(self, name, drf2, array_length=1000, history=10):
+    def __init__(self, name, drf2=None, array_length=None, history=10):
         """
         BPM device with a circular history buffer
         """
         self.array_length = array_length
         super().__init__(name, drf2, history)
+
+    def __str__(self):
+        return super().__str__()
 
     # def get_value(self):
     #     if not self.access_method:
@@ -248,12 +261,116 @@ class Adapter:
 #             self.device_tags[i] = self.name
 #
 #         dpm.start()
-    #     elif method == 'dpm_polling':
-    #         try:
-    #             self.DPM.stop()
-    #             self.DPM = None
-    #             self.acnet._close()
+#     elif method == 'dpm_polling':
+#         try:
+#             self.DPM.stop()
+#             self.DPM = None
+#             self.acnet._close()
 
+class ACNETRelay(Adapter):
+    def __init__(self, address: str = "http://127.0.0.1:8080/test", method=0):
+        super().__init__()
+        self.name = 'ACNETRelay'
+        self.supported = ['oneshot', 'polling']
+        self.rate_limit = [-1, -1]
+        self.address = address
+        self.method = method
+
+        try:
+            import httpx
+            import nest_asyncio
+            nest_asyncio.apply()
+        except ImportError:
+            print('Relay functionality requires certain libraries')
+            raise
+        self.aclient = httpx.AsyncClient()
+
+    def check_available(self, devices: list, method: str):
+        return len(devices) < 500
+
+    def start_oneshot(self, ds: DeviceSet) -> int:
+        assert ds.leaf
+        device_dict = ds.devices
+        dev_names = [d.name for d in device_dict.values()]
+        c = self.aclient
+        try:
+            async def get(json_lists):
+                rs = [await c.post(self.address, json=p) for p in json_lists]
+                print(rs)
+                return rs
+
+            if self.method == 0:
+                params = [{'requestType': 'V1_DRF2_READ_MULTI_CACHED', 'request': ';'.join(dev_names)}]
+            elif self.method == 1:
+                params = [{'requestType': 'V1_DRF2_READ_SINGLE', 'request': ';'.join(dev_names)}]
+
+            print(params)
+            responses = asyncio.run(get(params))
+            t1 = datetime.datetime.utcnow().timestamp()
+            data = {}
+            for r in responses:
+                print(type(r),r.__dict__)
+                #if r['status_code'] == 200:
+                if r.status_code == 200:
+                    data.update(self._process(ds, r.json()))
+                else:
+                    return -1
+            assert len(data) == len(device_dict)
+            for k, v in device_dict.items():
+                v.update(data[k], t1, self.name)
+            return len(data)
+        except Exception as e:
+            print(e, sys.exc_info())
+            raise
+
+    def start_oneshot_serial(self, ds: DeviceSet) -> int:
+        assert ds.leaf
+        device_dict = ds.devices
+        dev_names = [d.name for d in device_dict.values()]
+        c = self.aclient
+        try:
+            async def get(json_lists):
+                rs = [await c.post(self.address, json=p) for p in json_lists]
+                print(rs)
+                return rs
+
+            params = [{'requestType': 'V1_DRF2_READ_SINGLE', 'request': ';'.join(dev_names)}]
+            print(params)
+            responses = asyncio.run(get(params))
+            t1 = datetime.datetime.utcnow().timestamp()
+            data = {}
+            for r in responses:
+                print(type(r),r.__dict__)
+                #if r['status_code'] == 200:
+                if r.status_code == 200:
+                    data.update(self._process(ds, r.json()))
+                else:
+                    return -1
+            assert len(data) == len(device_dict)
+            for k, v in device_dict.items():
+                v.update(data[k], t1, self.name)
+            return len(data)
+        except Exception as e:
+            print(e, sys.exc_info())
+            raise
+
+    def _process(self, ds: DeviceSet, r):
+        print(r)
+        responses = r['responseJson']
+        #print(responses)
+        data = {}
+        if isinstance(ds, BPMDeviceSet):
+            # Working in array base 64 mode
+            for (k, v) in responses.items():
+                #print(v)
+                v_decoded = base64.b64decode(v)
+                #print(v_decoded)
+                data[k] = np.frombuffer(v_decoded, dtype='>f8')[:ds.array_length]
+        else:
+            # Double values
+            for (k, v) in responses.items():
+                data[k] = float(v)
+        return data
 
 class ACL(Adapter):
     """
@@ -263,7 +380,7 @@ class ACL(Adapter):
     """
 
     arrayurlstring = 'http://www-ad.fnal.gov/cgi-bin/acl.pl?acl=read/row/pendWait=0.5+devices="{}"+/num_elements={}'
-    urlstring = 'http://www-ad.fnal.gov/cgi-bin/acl.pl?acl=read/row/pendWait=0.5+devices="{}"+/num_elements={}'
+    urlstring = 'http://www-ad.fnal.gov/cgi-bin/acl.pl?acl=read/row/pendWait=0.5+devices="{}"'
 
     def __init__(self, fallback: bool = False):
         super().__init__()
@@ -280,6 +397,7 @@ class ACL(Adapter):
         if fallback:
             self.client = httpx.Client()
         else:
+            # define async client in separate variable to not forget
             self.aclient = httpx.AsyncClient()
 
     def __del__(self):
@@ -288,14 +406,16 @@ class ACL(Adapter):
                 self.client.close()
             else:
                 async def terminate():
-                    await self.aclient.aclose()
+                    if self.aclient:
+                        await self.aclient.aclose()
 
                 asyncio.run(terminate())
         except Exception as e:
             print(f'Issue with disposing adapter {self.name}')
             print(e)
+            # raise
 
-    def check_available(self, devices:list, method:str):
+    def check_available(self, devices: list, method: str):
         return len(devices) < 500
 
     def start_oneshot(self, ds: DeviceSet) -> int:
@@ -305,6 +425,7 @@ class ACL(Adapter):
         if self.fallback:
             c = self.client
             url = self._generate_url(ds, ','.join(dev_names))
+            print('Url: ', url)
             try:
                 resp = c.get(url)
                 text = resp.text
@@ -316,14 +437,14 @@ class ACL(Adapter):
             except Exception as e:
                 print(e, sys.exc_info())
                 raise
-                return 0
         else:
             c = self.aclient
             # Split tasks into sets
             num_lists = min(len(ds.devices), 5)
             dev_lists = [list(l) for l in np.array_split(dev_names, num_lists)]
-            #print(dev_lists)
+            # print(dev_lists)
             urls = [self._generate_url(ds, ','.join(dl)) for dl in dev_lists]
+            print('Urls: ', urls)
             try:
                 data = {}
 
@@ -342,7 +463,6 @@ class ACL(Adapter):
             except Exception as e:
                 print(e, sys.exc_info())
                 raise
-                return 0
 
     def _generate_url(self, ds: DeviceSet, devstring: str):
         if isinstance(ds, BPMDeviceSet):

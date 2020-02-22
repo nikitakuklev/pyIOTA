@@ -16,16 +16,19 @@ class BPMS:
     LATTICE_NAMES = ['IBB2R', 'IBC1R', 'IBC2R', 'IBD1R', 'IBD2R', 'IBE1R', 'IBE2R', 'IBE2L', 'IBE1L', 'IBD2L', 'IBD1L',
                      'IBC2L', 'IBC1L', 'IBB2L', 'IBB1L', 'IBA3L', 'IBA2L', 'IBA1C', 'IBA2R', 'IBA3R', 'IBB1R']
 
-    ACNET_NAMES = to_acnet(LATTICE_NAMES)
+    ACNET_NAMES = to_acnet.__func__(LATTICE_NAMES)
 
-    H = add_axis(LATTICE_NAMES, 'H')
-    HA = to_acnet(H)
+    H = add_axis.__func__(LATTICE_NAMES, 'H')
+    HA = to_acnet.__func__(H)
 
-    V = add_axis(LATTICE_NAMES, 'V')
-    VA = to_acnet(H)
+    V = add_axis.__func__(LATTICE_NAMES, 'V')
+    VA = to_acnet.__func__(V)
 
-    S = add_axis(LATTICE_NAMES, 'S')
-    SA = to_acnet(H)
+    S = add_axis.__func__(LATTICE_NAMES, 'S')
+    SA = to_acnet.__func__(S)
+
+    ALL = H+V+S
+    ALLA = HA+VA+SA
 
 
 class CORRECTORS:
@@ -34,12 +37,9 @@ class CORRECTORS:
 
     DIPOLE_SHIMS = ['N:IHM' + str(i) + 'LI' for i in range(1, 5)] + ['N:IHM' + str(i) + 'RI' for i in range(1, 5)]
 
-    COMBINED_COILS = []
-    [COMBINED_COILS.extend(['N:I1' + k + 'I', 'N:I2' + k + 'I', 'N:I3' + k + 'I', 'N:I4' + k + 'I']) for k in
-     __combfun]
+    COMBINED_COILS = [i for sl in [['N:I1' + k + 'I', 'N:I2' + k + 'I', 'N:I3' + k + 'I', 'N:I4' + k + 'I'] for k in __combfun] for i in sl]
 
-    COMBINED_VIRTUAL = []
-    [COMBINED_VIRTUAL.extend(['N:IV' + k + 'I', 'N:IH' + k + 'I']) for k in __combfun]
+    COMBINED_VIRTUAL = [i for sl in [['N:IV' + k + 'I', 'N:IH' + k + 'I'] for k in __combfun] for i in sl]
 
     OTHER_CORRECTORS = ['N:IBMPLI', 'N:IBMPRI', 'N:IBEND', 'N:ILAM', 'N:IHLAMI']
 
@@ -86,7 +86,7 @@ class SEXTUPOLES:
 
 class OCTUPOLES:
     ALL_CURRENTS = ['N:IO' + str(i) + 'LI' for i in range(1, 19)] + ['N:OB9L6I', 'N:O4L6I', 'N:O14L6I']
-    ALL_VOLTAGES = ['N:IO' + str(i) + 'LI' for i in range(1, 19)] + ['N:OB9L6V', 'N:O4L6V', 'N:O14L6V']
+    ALL_VOLTAGES = ['N:IO' + str(i) + 'LV' for i in range(1, 19)] + ['N:OB9L6V', 'N:O4L6V', 'N:O14L6V']
     ALL_CURRENTS_ACTIVE = ['N:IO' + str(i) + 'LI' for i in range(1, 9)] + ['N:OB9L6I'] + \
                           ['N:IO' + str(i) + 'LI' for i in range(10, 18)]
     ALL_VOLTAGES_ACTIVE = ['N:IO' + str(i) + 'LV' for i in range(1, 9)] + ['N:OB9L6V'] + \
