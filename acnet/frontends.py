@@ -5,6 +5,8 @@ import sys
 import datetime
 import time
 import json
+from typing import Optional, Tuple
+
 import numpy as np
 
 data_entry = collections.namedtuple('DataEntry', ['id', 'value', 'ts', 'src'])
@@ -12,73 +14,133 @@ data_entry = collections.namedtuple('DataEntry', ['id', 'value', 'ts', 'src'])
 
 class Device:
 
-    def __init__(self, name, drf2, history=10):
-        self.name = name
-        self.drf2 = drf2
-        self.history_len = history
+    def __init__(self, name: str, drf2: str, history: int = 10):
+        self.name: str = name
+        self.drf2: str = drf2
+        self.history_len: int = history
         self.history = collections.deque(maxlen=history)
-        self.update_cnt = 0
-        self.access_method = None
+        self.update_cnt: int = 0
+        self.access_method: Optional[str] = None
+        self.value_string: Optional[str] = None
+        self.value_tuple: Optional[Tuple] = None
+        self.last_update: Optional[float] = None
         self.value = None
-        self.value_tuple = None
-        self.last_update = None
+        self.debug: bool = True
+        self._device_set: Optional[DeviceSet] = None;
 
     def get_history(self) -> list:
         return list(self.history)
 
-    def update(self, data, timestamp, source: str):
-        self.value = data
-        self.value_tuple = data_entry(self.update_cnt, self.value, timestamp, source)
+    def update(self, data: str, timestamp: float, source: str):
+        self.value_string = data
+        self.value_tuple = data_entry(self.update_cnt, self.value_string, timestamp, source)
         self.last_update = timestamp
         self.history.append(self.value_tuple)
         self.update_cnt += 1
 
-    def __str__(self):
-        return f'Device {self.name}: {self.value}'
+    def __str__(self) -> str:
+        return f'Device {self.name}: {self.value_string}'
 
-    def __repr__(self):
-        return f'Device {self.name}: {self.value}'
+    def __repr__(self) -> str:
+        return f'Device {self.name}: {self.value_string}'
 
 
 class DoubleDevice(Device):
-    def __init__(self, name, drf2=None, history=10):
+    def __init__(self, name: str, drf2: str = None, history=10):
         """
-        Floating point device with a circular history buffer
+        Floating point device
         """
+        self.value = None
         super().__init__(name, drf2, history)
 
-    def __str__(self):
-        return super().__str__()
+    def update(self, data, timestamp, source: str):
+        try:
+            self.value = float(data)
+        except:
+            raise
+        super().update(data, timestamp, source)
+
+
+class StatusDevice(Device):
+    def __init__(self, name, drf2=None, history=10):
+        """
+        Basic status device
+        """
+        self.on = None
+        self.ready = None
+        super().__init__(name, drf2, history)
+
+    def update(self, data, timestamp: float, source: str):
+        v = data
+        if self.debug: print(f'Status device {self.name} update {data}')
+        assert ('ON' in v) != ('OFF' in v)
+        self.on = 'ON' in v
+        assert ('READY' in v) != ('TRIPPED' in v)
+        self.ready = 'READY' in v
+        super().update(data, timestamp, source)
+        if self.debug: print(f'Status device on|ready: {self.on} | {self.ready}')
+
+    def is_on(self) -> bool:
+        if self.value_string is None:
+            raise Exception("No measurement available")
+        return self.on
+
+    def is_ready(self) -> bool:
+        if self.value_string is None:
+            raise Exception("No measurement available")
+        return self.ready
+
+    def read(self, adapter=None):
+        if not self._device_set:
+            adapter = adapter or ACL(fallback=True)
+            self._device_set = StatusDeviceSet(self.name, members=[self], adapter=adapter)
+        self._device_set.readonce()
+        return self.value_string
+
+    def __set(self, value, adapter=None):
+        if not self._device_set:
+            adapter = adapter or ACL(fallback=True)
+            self._device_set = StatusDeviceSet(self.name, members=[self], adapter=adapter)
+        return self._device_set.set([value])
+
+    def set_on(self):
+        self.__set('ON')
+
+    def set_off(self):
+        self.__set('OFF')
+
+    def reset(self):
+        self.__set('RESET')
 
 
 class BPMDevice(Device):
-    def __init__(self, name, drf2=None, array_length=None, history=10):
+    def __init__(self, name, drf2=None, history=10):
         """
         BPM device with a circular history buffer
         """
-        self.array_length = array_length
         super().__init__(name, drf2, history)
 
-    def __str__(self):
-        return super().__str__()
+    def read(self, adapter=None):
+        if not self._device_set:
+            adapter = adapter or ACL(fallback=True)
+            self._device_set = BPMDeviceSet(self.name, members=[self], adapter=adapter)
+        self._device_set.readonce()
+        return self.value_string
 
-    # def get_value(self):
-    #     if not self.access_method:
-    #         raise ValueError('This device does not have an associated adapter')
-    #     print('This method is discouraged - please consider using device sets')
-    #     ds = devicesets.BPMDeviceSet(method)
-    #     ds.add(self)
-    #     values = ds.getValues()
-    #     return values[self.name]
+    def set(self, value):
+        ds = StatusDeviceSet(self.name, members=[self], adapter=ACL(fallback=True))
+        return ds.set([value])
 
-    # def _update_oneshot(self, data, timestamp, source):
-    #     self.value = data.copy()
-    #     self.last_update = timestamp
-    #     self.history.append((self.cnt, self.last_update, source, self.value))
-    #     self.cnt += 1
+    def update(self, data, timestamp, source: str):
+        try:
+            self.value = np.array(data)
+        except:
+            raise
+        super().update(data, timestamp, source)
 
 
 #####
+
 
 class DeviceSet:
     """
@@ -87,7 +149,7 @@ class DeviceSet:
     Supports iterable and dictionary access modes.
     """
 
-    def __init__(self, name: str, members: list):
+    def __init__(self, name: str, members: list, adapter=None, method="oneshot"):
         node = all([isinstance(ds, DeviceSet) for ds in members])
         leaf = all([isinstance(ds, Device) for ds in members])
         assert node or leaf
@@ -105,8 +167,9 @@ class DeviceSet:
             assert len(self.devices) == len(members)
             self.children = None
             self.parent = None
-        self.adapter = None
+        self.adapter = adapter
         self.name = name
+        self.method = method
 
     def __iter__(self):
         self.iter_node = self
@@ -151,6 +214,7 @@ class DeviceSet:
                 return self.children.pop(name)
 
     def check_acquisition_available(self, method: str) -> bool:
+        assert method
         if not self.adapter:
             raise AttributeError('Adapter is not set!')
         if self.leaf:
@@ -161,6 +225,7 @@ class DeviceSet:
             return all([c.check_acquisition_available(method) for c in self.children])
 
     def check_acquisition_supported(self, method: str) -> bool:
+        assert method
         if not self.adapter:
             raise AttributeError('Adapter is not set!')
         if self.leaf:
@@ -168,36 +233,59 @@ class DeviceSet:
         else:
             return all([c.check_acquisition_supported(method) for c in self.children])
 
-    def start_oneshot(self) -> int:
-        if not self.check_acquisition_supported('oneshot'):
-            raise Exception('Acquisition is not supported for method: {}'.format('oneshot'))
-        if not self.check_acquisition_available('oneshot'):
-            return False
+    def set(self, values) -> int:
+        if not self.adapter.check_setting_supported():
+            raise Exception(f'Setting is not support for adapter {self.adapter.__class__}')
+        if not self.check_acquisition_available(method='oneshot'):
+            return 0
         if not self.devices:
             raise AttributeError("Cannot start acquisition on an empty set")
         if self.leaf:
-            cnt = self.adapter.start_oneshot(self)
+            cnt = self.adapter.set(self, values)
+        else:
+            raise ValueError("Tree traversing writes are not supported")
+        return cnt
+
+    def readonce(self, settings=False) -> int:
+        if not self.check_acquisition_supported(method='oneshot'):
+            raise Exception(f'Acquisition not supported - have {self.adapter.supported}')
+        if not self.check_acquisition_available(method='oneshot'):
+            return 0
+        if not self.devices:
+            raise AttributeError("Cannot start acquisition on an empty set")
+        if self.leaf:
+            cnt = self.adapter.readonce(self, settings=settings)
         else:
             cnt = 0
             for c in self.children:
                 cnt += c.update(c.adapter.oneshot())
         return cnt
 
+    def start_streaming(self):
+        raise Exception('Not yet supported')
+
+    def stop_streaming(self):
+        raise Exception('Not yet supported')
+
     def start_polling(self) -> bool:
-        if not self.check_acquisition_supported('polling'):
+        if not self.check_acquisition_supported():
             raise Exception('Acquisition is not supported for method: {}'.format('polling'))
-        if not self.check_acquisition_available('polling'):
+        if not self.check_acquisition_available():
             return False
         if not self.devices:
             raise AttributeError("Cannot start acquisition on an empty set")
+        if self.adapter.running:
+            print('Acquisition is already running!')
+            return False
         if self.leaf:
             self.adapter.start()
         else:
             for c in self.children:
                 c.adapter.start()
+        return True
 
     def stop_polling(self) -> bool:
-        if not self.running:
+        if not self.adapter.running:
             print('Acquisition is not running!')
             return False
         if self.leaf:
@@ -214,12 +302,12 @@ class BPMDeviceSet(DeviceSet):
     Leaf container of BPM and other array devices. Exposes methods for fast batch readout, and enforces data uniformity.
     """
 
-    def __init__(self, name: str, members: list, enforce_array_length: int = 1000):
+    def __init__(self, name: str, members: list, adapter=None, enforce_array_length: int = 1000):
         leaf = all([isinstance(ds, Device) for ds in members])
         if not leaf:
-            raise AttributeError('BPM set can only contain devices - use generic DeviceSet for coalescing')
+            raise AttributeError('BPM set can only contain devices - use DeviceSet for coalescing')
         assert enforce_array_length is None or isinstance(enforce_array_length, int)
-        super().__init__(name, members)
+        super().__init__(name, members, adapter)
         self.array_length = enforce_array_length
 
     def add(self, device: Device):
@@ -231,146 +319,121 @@ class BPMDeviceSet(DeviceSet):
             raise Exception("Device is not a BPM!")
 
 
+class StatusDeviceSet(DeviceSet):
+    """"
+    Status device set
+    """
+
+    def __init__(self, name: str, members: list, adapter=None):
+        leaf = all([isinstance(ds, Device) for ds in members])
+        if not leaf:
+            raise AttributeError('Status set can only contain devices - use DeviceSet for coalescing')
+        super().__init__(name, members, adapter)
+
+    def add(self, device: Device):
+        if isinstance(device, StatusDevice):
+            super().add(device)
+        else:
+            raise Exception("Incorrect device type!")
+
+
 class Adapter:
     supported = []
     can_set = False
+    running = False
 
     def __init__(self):
         pass
+        # if method not in self.supported:
+        #     raise AttributeError('Acquisition method not supported')
+        # else:
+        #     self.method = method
 
-    def check_supported(self, devices, method):
-        return method in self.supported
+    def check_supported(self, devices: dict, method: str = None) -> bool:
+        if not method or method not in self.supported:
+            raise AttributeError(f'Acquisition method {method} not supported - have {self.supported}')
+        else:
+            self.method = method
+            return True
+        # if self.method:
+        #     return True
+        # else:
+        #     return method in self.supported
 
-    def check_supported_write(self):
+    def check_available(self, devices: dict, method: str = None) -> bool:
+        return len(devices) < 500
+
+    def check_setting_supported(self) -> bool:
         return self.can_set
 
 
-# class DPM(Adapter):
-#     def __init__(self):
-#        import DPM, acnet
-#         self.name = 'DPM'
-#         self.supported = ['oneshot', 'polling']
-#
-#
-#     def start_polling(self):
-#         self.acnet = acnet.Connection()
-#         self.DPM = dpm = DPM.Polling(self.acnet)
-#
-#         for i, name in enumerate(self.names):
-#             dpm.add_entry(i, device)
-#             self.device_tags[i] = self.name
-#
-#         dpm.start()
-#     elif method == 'dpm_polling':
-#         try:
-#             self.DPM.stop()
-#             self.DPM = None
-#             self.acnet._close()
+class FakeAdapter(Adapter):
+    """
+    Fake adapter for internal testing
+    """
 
-class ACNETRelay(Adapter):
-    def __init__(self, address: str = "http://127.0.0.1:8080/test", method=0):
+    def __init__(self):
+        self.name = 'Fake'
+        self.supported = ['oneshot', 'polling', 'streaming']
+        self.rate_limit = [-1, -1, -1]
+        self.can_set = True
+        self.state = {'status': 'OFF', 'double': 0.0, 'ready': 'TRIPPED'}
         super().__init__()
-        self.name = 'ACNETRelay'
-        self.supported = ['oneshot', 'polling']
-        self.rate_limit = [-1, -1]
-        self.address = address
-        self.method = method
 
-        try:
-            import httpx
-            import nest_asyncio
-            nest_asyncio.apply()
-        except ImportError:
-            print('Relay functionality requires certain libraries')
-            raise
-        self.aclient = httpx.AsyncClient()
-
-    def check_available(self, devices: list, method: str):
-        return len(devices) < 500
-
-    def start_oneshot(self, ds: DeviceSet) -> int:
+    def readonce(self, ds: DeviceSet, settings=False) -> int:
         assert ds.leaf
-        device_dict = ds.devices
-        dev_names = [d.name for d in device_dict.values()]
-        c = self.aclient
-        try:
-            async def get(json_lists):
-                rs = [await c.post(self.address, json=p) for p in json_lists]
-                print(rs)
-                return rs
-
-            if self.method == 0:
-                params = [{'requestType': 'V1_DRF2_READ_MULTI_CACHED', 'request': ';'.join(dev_names)}]
-            elif self.method == 1:
-                params = [{'requestType': 'V1_DRF2_READ_SINGLE', 'request': ';'.join(dev_names)}]
-
-            print(params)
-            responses = asyncio.run(get(params))
-            t1 = datetime.datetime.utcnow().timestamp()
-            data = {}
-            for r in responses:
-                print(type(r),r.__dict__)
-                #if r['status_code'] == 200:
-                if r.status_code == 200:
-                    data.update(self._process(ds, r.json()))
-                else:
-                    return -1
-            assert len(data) == len(device_dict)
-            for k, v in device_dict.items():
-                v.update(data[k], t1, self.name)
-            return len(data)
-        except Exception as e:
-            print(e, sys.exc_info())
-            raise
-
-    def start_oneshot_serial(self, ds: DeviceSet) -> int:
-        assert ds.leaf
-        device_dict = ds.devices
-        dev_names = [d.name for d in device_dict.values()]
-        c = self.aclient
-        try:
-            async def get(json_lists):
-                rs = [await c.post(self.address, json=p) for p in json_lists]
-                print(rs)
-                return rs
-
-            params = [{'requestType': 'V1_DRF2_READ_SINGLE', 'request': ';'.join(dev_names)}]
-            print(params)
-            responses = asyncio.run(get(params))
-            t1 = datetime.datetime.utcnow().timestamp()
-            data = {}
-            for r in responses:
-                print(type(r),r.__dict__)
-                #if r['status_code'] == 200:
-                if r.status_code == 200:
-                    data.update(self._process(ds, r.json()))
-                else:
-                    return -1
-            assert len(data) == len(device_dict)
-            for k, v in device_dict.items():
-                v.update(data[k], t1, self.name)
-            return len(data)
-        except Exception as e:
-            print(e, sys.exc_info())
-            raise
-
-    def _process(self, ds: DeviceSet, r):
-        print(r)
-        responses = r['responseJson']
-        #print(responses)
         data = {}
-        if isinstance(ds, BPMDeviceSet):
-            # Working in array base 64 mode
-            for (k, v) in responses.items():
-                #print(v)
-                v_decoded = base64.b64decode(v)
-                #print(v_decoded)
-                data[k] = np.frombuffer(v_decoded, dtype='>f8')[:ds.array_length]
-        else:
-            # Double values
-            for (k, v) in responses.items():
-                data[k] = float(v)
-        return data
+        for k, d in ds.devices.items():
+            assert k == d.name
+            if isinstance(d, BPMDevice):
+                data[d.name] = np.random.rand(100)
+                print(f'Fake array {data[d.name][0:5]}... returned')
+            elif isinstance(d, StatusDevice):
+                data[
+                    d.name] = f"[{self.state['status']},{self.state['ready']},LOCAL,NEGATIVE,DC] 2020-02-23T13:41:44.153-0600"
+                print(f'Fake status {data[d.name]} returned')
+            elif isinstance(d, DoubleDevice):
+                if settings:
+                    data[d.name] = self.state['double']
+                    print(f'Fake double state setting of {data[d.name]} returned')
+                else:
+                    data[d.name] = self.state['double'] + np.random.rand(1)
+                    print(f'Fake double state reading of {data[d.name]} returned')
+            else:
+                raise Exception
+        t1 = datetime.datetime.utcnow().timestamp()
+        for k, v in ds.devices.items():
+            print(f'Fake updating device {k} with {data[k]}')
+            v.update(data[k], t1, self.name)
+        print(f'Fake updated {len(data)} devices - returning')
+        return len(data)
+
+    def set(self, ds: DeviceSet, values: list) -> int:
+        assert ds.leaf
+        assert len(values) == len(ds.devices) and np.ndim(values) == 1
+        data = {}
+        for d, v in zip(ds.devices.values(), values):
+            if isinstance(d, BPMDevice):
+                raise Exception
+            elif isinstance(d, StatusDevice):
+                if v in ['ON', 'OFF']:
+                    self.state['status'] = v
+                elif v in ['READY', 'TRIPPED']:
+                    self.state['ready'] = v
+                elif v == 'RESET':
+                    self.state['ready'] = 'READY'
+                else:
+                    raise
+                print(f'Fake status state updated to {self.state["status"]} {self.state["ready"]}')
+                data[d.name] = f"ok"
+            elif isinstance(d, DoubleDevice):
+                print(f'Fake double state updated to {v}')
+                self.state['double'] = v
+                data[d.name] = f"ok2"
+            else:
+                raise Exception
+        return len(data)
+
 
 class ACL(Adapter):
     """
@@ -383,10 +446,10 @@ class ACL(Adapter):
     urlstring = 'http://www-ad.fnal.gov/cgi-bin/acl.pl?acl=read/row/pendWait=0.5+devices="{}"'
 
     def __init__(self, fallback: bool = False):
-        super().__init__()
         self.name = 'ACL'
         self.supported = ['oneshot', 'polling']
         self.rate_limit = [-1, -1]
+        self.can_set = False
         self.fallback = fallback
         try:
             import httpx
@@ -399,6 +462,7 @@ class ACL(Adapter):
         else:
             # define async client in separate variable to not forget
             self.aclient = httpx.AsyncClient()
+        super().__init__()
 
     def __del__(self):
         try:
@@ -415,13 +479,13 @@ class ACL(Adapter):
             print(e)
             # raise
 
-    def check_available(self, devices: list, method: str):
-        return len(devices) < 500
-
-    def start_oneshot(self, ds: DeviceSet) -> int:
+    def readonce(self, ds: DeviceSet, settings=False) -> int:
         assert ds.leaf
         device_dict = ds.devices
-        dev_names = [d.name for d in device_dict.values()]
+        if settings:
+            dev_names = [d.name + '.SETTING' for d in device_dict.values()]
+        else:
+            dev_names = [d.name for d in device_dict.values()]
         if self.fallback:
             c = self.client
             url = self._generate_url(ds, ','.join(dev_names))
@@ -489,83 +553,228 @@ class ACL(Adapter):
             data[devname] = np.array([float(v) for v in spl[2:-1]])
         return data
 
-    # def getHistory(self):
-    #     bpmlist = [dev.name for dev in self.devices]
-    #     if self.method == 0:
-    #         bpmstring = ''
-    #         try:
-    #             for b in bpmlist:
-    #                 bpmstring += '{{{}}},'.format(b)
-    #             txt = ("http://www-ad.fnal.gov/cgi-bin/acl.pl?acl="
-    #                    "read/row/pendWait=0.5+devices=\'" + bpmstring[:-1] + '\'+/num_elements=1000')
-    #             # print(txt)
-    #             resp = urlopen(txt)
-    #             r = resp.read().decode("ascii")
-    #             t1 = datetime.datetime.utcnow().timestamp()
-    #             if "DPM_PEND" in r:
-    #                 print('Bad ACL output - DPM_PEND')
-    #             if 'mm' not in r or 'raw' not in r:
-    #                 raise Exception("Bad ACL output")
-    #             split_text = r.strip().split('\n')
-    #             data = {}
-    #             for line in filter(None, split_text):
-    #                 spl = line.strip().split(' ')
-    #                 data[spl[0][:-3]] = np.array([float(v) for v in spl[2:-1]])
-    #             return (data, t1, 'unknown')
-    #         except Exception as e:
-    #             print(e, sys.exc_info())
-    #             return (None, datetime.datetime.utcnow().timestamp(), 'error')
-    #     elif self.method == 1:
-    #         return getBPMdataACLAsync()
 
-    # async def _fetch_task(session, url):
-    #     async with session.get(url) as response:
-    #         return await response.read().decode('ascii')
+class ACNETRelay(Adapter):
+    """
+    Adapter based on Java commmand proxy. One of quickest, but can be error-prone. Requires async libraries.
+    """
 
-    # async def _http_fetch_async(loop, urls):
-    #     connector = aiohttp.TCPConnector(limit=None, ssl=False)
-    #     tasks = []
-    #
-    #     # Fetch all responses within one Client session
-    #     # keep connection alive for all requests.
-    #     async with aiohttp.ClientSession(loop=loop, connector=connector) as session:
-    #         # async with aiohttp.ClientSession(loop=loop) as session:
-    #         for url in urls:
-    #             url_enc = yarl.URL(url, encoded=True)
-    #             task = asyncio.ensure_future(fetch_task(session, url_enc))
-    #             tasks.append(task)
-    #             # await asyncio.sleep(0.01)
-    #         responses = await asyncio.gather(*tasks, return_exceptions=True)
-    #         # you now have all response bodies in this variable
-    #         # print(responses)
-    #         return responses
-    #
-    # def _getBPMdataACLAsync(bpmlist):
-    #     # Split tasks into sets
-    #     num_lists = min(len(bpmlist), 5)
-    #     bpm_lists = [list(l) for l in np.array_split(bpmlist_initial, numlists)]
-    #     bpm_strings = []
-    #     for bpm_list in bpm_lists:
-    #         bpm_string = ''
-    #         for b in bpm_list:
-    #             bpm_string += '{{{}}},'.format(b)
-    #         bpm_string = ("http://www-ad.fnal.gov/cgi-bin/acl.pl?acl=read/row/pendWait=0.5+devices=\'"
-    #                       + bpm_string[:-1] + '\'+/num_elements=1000')
-    #         bpm_strings.append(bpmstring)
-    #     print(bpm_strings)
-    #     try:
-    #         data = {}
-    #         loop = asyncio.get_event_loop()
-    #         responses = loop.run_until_complete(_http_fetch_async(loop, bpm_strings))
-    #         t1 = datetime.datetime.utcnow().timestamp()
-    #         for r in responses:
-    #             if 'mm' not in r or 'raw' not in r:
-    #                 raise Exception('ACL async error - bad response')
-    #             split_text = r.strip().split('\n')
-    #             for line in filter(None, split_text):
-    #                 spl = line.strip().split(' ')
-    #                 data[spl[0][:-3]] = np.array([float(v) for v in spl[2:-1]])
-    #         return (data, t1, 'unknown')
-    #     except Exception as e:
-    #         print(e, sys.exc_info())
-    #         return (None, datetime.datetime.utcnow().timestamp(), 'error')
+    def __init__(self, address: str = "http://127.0.0.1:8080/", method=0):
+        self.name = 'ACNETRelay'
+        self.supported = ['oneshot', 'polling']
+        self.rate_limit = [-1, -1]
+        self.can_set = True
+        self.address = address
+        self.method = method
+        super().__init__()
+
+        try:
+            import httpx
+            import nest_asyncio
+            nest_asyncio.apply()
+        except ImportError:
+            print('Relay functionality requires certain libraries')
+            raise
+        self.aclient = httpx.AsyncClient()
+
+    def check_available(self, devices: dict, method=None):
+        return len(devices) < 500
+
+    def readonce(self, ds: DeviceSet) -> int:
+        assert ds.leaf
+        device_dict = ds.devices
+        dev_names = [d.name for d in device_dict.values()]
+        c = self.aclient
+        try:
+            async def get(json_lists):
+                rs = [await c.post(self.address, json=p) for p in json_lists]
+                print(rs)
+                return rs
+
+            if self.method == 0:
+                params = [{'requestType': 'V1_DRF2_READ_MULTI_CACHED', 'request': ';'.join(dev_names)}]
+            elif self.method == 1:
+                params = [{'requestType': 'V1_DRF2_READ_SINGLE', 'request': ';'.join(dev_names)}]
+
+            print(params)
+            responses = asyncio.run(get(params))
+            t1 = datetime.datetime.utcnow().timestamp()
+            data = {}
+            for r in responses:
+                print(type(r), r.__dict__)
+                # if r['status_code'] == 200:
+                if r.status_code == 200:
+                    data.update(self._process(ds, r.json()))
+                else:
+                    return -1
+            assert len(data) == len(device_dict)
+            for k, v in device_dict.items():
+                v.update(data[k], t1, self.name)
+            return len(data)
+        except Exception as e:
+            print(e, sys.exc_info())
+            raise
+
+    def _process(self, ds: DeviceSet, r):
+        print(r)
+        responses = r['responseJson']
+        # print(responses)
+        data = {}
+        if isinstance(ds, BPMDeviceSet):
+            # Working in array base 64 mode
+            for (k, v) in responses.items():
+                # print(v)
+                v_decoded = base64.b64decode(v)
+                # print(v_decoded)
+                data[k] = np.frombuffer(v_decoded, dtype='>f8')[:ds.array_length]
+        else:
+            # Double values
+            for (k, v) in responses.items():
+                data[k] = float(v)
+        return data
+
+    def set(self, ds: DeviceSet, values: list) -> int:
+        assert ds.leaf
+        assert len(values) == len(ds.devices) and np.ndim(values) == 1
+        c = self.aclient
+        try:
+            async def __submit(json_lists):
+                rs = [await c.post(self.address, json=p) for p in json_lists]
+                print(f'{self.name} : result {rs}')
+                return rs
+
+            params = []
+            for device, value in zip(ds.devices.values(), values):
+                if isinstance(device, BPMDevice):
+                    raise Exception(f'Not allowed to set BPM device {device.name}')
+                elif isinstance(device, StatusDevice):
+                    params.append({'requestType': 'V1_DRF2_SET_SINGLE',
+                                   'request': device.name + 'CONTROL',
+                                   'requestValue': value})
+                elif isinstance(device, DoubleDevice):
+                    params.append({'requestType': 'V1_DRF2_SET_SINGLE',
+                                   'request': device.name,
+                                   'requestValue': str(value)})
+                else:
+                    raise Exception
+            print(f'{self.name} : params {params}')
+            responses = asyncio.run(__submit(params))
+            t1 = datetime.datetime.utcnow().timestamp()
+            data = {}
+            for r in responses:
+                print(f'{self.name} : result {type(r)} {r.__dict__}')
+                # if r['status_code'] == 200:
+                if r.status_code == 200:
+                    data.update(self._process(ds, r.json()))
+                else:
+                    return -1
+            assert len(data) == len(ds.devices)
+            for dev_name, device in ds.devices.items():
+                device.update(data[dev_name], t1, self.name)
+            return len(data)
+        except Exception as e:
+            print(e, sys.exc_info())
+            raise
+# class DPM(Adapter):
+#     def __init__(self):
+#        import DPM, acnet
+#         self.name = 'DPM'
+#         self.supported = ['oneshot', 'polling']
+#
+#
+#     def start_polling(self):
+#         self.acnet = acnet.Connection()
+#         self.DPM = dpm = DPM.Polling(self.acnet)
+#
+#         for i, name in enumerate(self.names):
+#             dpm.add_entry(i, device)
+#             self.device_tags[i] = self.name
+#
+#         dpm.start()
+#     elif method == 'dpm_polling':
+#         try:
+#             self.DPM.stop()
+#             self.DPM = None
+#             self.acnet._close()
+
+
+# def getHistory(self):
+#     bpmlist = [dev.name for dev in self.devices]
+#     if self.method == 0:
+#         bpmstring = ''
+#         try:
+#             for b in bpmlist:
+#                 bpmstring += '{{{}}},'.format(b)
+#             txt = ("http://www-ad.fnal.gov/cgi-bin/acl.pl?acl="
+#                    "read/row/pendWait=0.5+devices=\'" + bpmstring[:-1] + '\'+/num_elements=1000')
+#             # print(txt)
+#             resp = urlopen(txt)
+#             r = resp.read().decode("ascii")
+#             t1 = datetime.datetime.utcnow().timestamp()
+#             if "DPM_PEND" in r:
+#                 print('Bad ACL output - DPM_PEND')
+#             if 'mm' not in r or 'raw' not in r:
+#                 raise Exception("Bad ACL output")
+#             split_text = r.strip().split('\n')
+#             data = {}
+#             for line in filter(None, split_text):
+#                 spl = line.strip().split(' ')
+#                 data[spl[0][:-3]] = np.array([float(v) for v in spl[2:-1]])
+#             return (data, t1, 'unknown')
+#         except Exception as e:
+#             print(e, sys.exc_info())
+#             return (None, datetime.datetime.utcnow().timestamp(), 'error')
+#     elif self.method == 1:
+#         return getBPMdataACLAsync()
+
+# async def _fetch_task(session, url):
+#     async with session.get(url) as response:
+#         return await response.read().decode('ascii')
+
+# async def _http_fetch_async(loop, urls):
+#     connector = aiohttp.TCPConnector(limit=None, ssl=False)
+#     tasks = []
+#
+#     # Fetch all responses within one Client session
+#     # keep connection alive for all requests.
+#     async with aiohttp.ClientSession(loop=loop, connector=connector) as session:
+#         # async with aiohttp.ClientSession(loop=loop) as session:
+#         for url in urls:
+#             url_enc = yarl.URL(url, encoded=True)
+#             task = asyncio.ensure_future(fetch_task(session, url_enc))
+#             tasks.append(task)
+#             # await asyncio.sleep(0.01)
+#         responses = await asyncio.gather(*tasks, return_exceptions=True)
+#         # you now have all response bodies in this variable
+#         # print(responses)
+#         return responses
+#
+# def _getBPMdataACLAsync(bpmlist):
+#     # Split tasks into sets
+#     num_lists = min(len(bpmlist), 5)
+#     bpm_lists = [list(l) for l in np.array_split(bpmlist_initial, numlists)]
+#     bpm_strings = []
+#     for bpm_list in bpm_lists:
+#         bpm_string = ''
+#         for b in bpm_list:
+#             bpm_string += '{{{}}},'.format(b)
+#         bpm_string = ("http://www-ad.fnal.gov/cgi-bin/acl.pl?acl=read/row/pendWait=0.5+devices=\'"
+#                       + bpm_string[:-1] + '\'+/num_elements=1000')
+#         bpm_strings.append(bpmstring)
+#     print(bpm_strings)
+#     try:
+#         data = {}
+#         loop = asyncio.get_event_loop()
+#         responses = loop.run_until_complete(_http_fetch_async(loop, bpm_strings))
+#         t1 = datetime.datetime.utcnow().timestamp()
+#         for r in responses:
+#             if 'mm' not in r or 'raw' not in r:
+#                 raise Exception('ACL async error - bad response')
+#             split_text = r.strip().split('\n')
+#             for line in filter(None, split_text):
+#                 spl = line.strip().split(' ')
+#                 data[spl[0][:-3]] = np.array([float(v) for v in spl[2:-1]])
+#         return (data, t1, 'unknown')
+#     except Exception as e:
+#         print(e, sys.exc_info())
+#         return (None, datetime.datetime.utcnow().timestamp(), 'error')
