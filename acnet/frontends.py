@@ -97,20 +97,20 @@ class StatusDevice(Device):
         self._device_set.readonce()
         return self.value_string
 
-    def __set(self, value, adapter=None):
+    def set(self, value, adapter=None):
         if not self._device_set:
             adapter = adapter or ACL(fallback=True)
             self._device_set = StatusDeviceSet(self.name, members=[self], adapter=adapter)
         return self._device_set.set([value])
 
     def set_on(self):
-        self.__set('ON')
+        self.set('ON')
 
     def set_off(self):
-        self.__set('OFF')
+        self.set('OFF')
 
     def reset(self):
-        self.__set('RESET')
+        self.set('RESET')
 
 
 class BPMDevice(Device):
@@ -164,7 +164,9 @@ class DeviceSet:
         else:
             self.leaf = True
             self.devices = {d.name: d for d in members}
-            assert len(self.devices) == len(members)
+            if not len(self.devices) == len(members):
+                un, uc = np.unique(list(self.devices.keys()), return_counts=True)
+                raise Exception(f'There are non-unique devices in the list: {un}{un[uc>1]}, {len(self.devices)}, {len(members)}')
             self.children = None
             self.parent = None
         self.adapter = adapter
@@ -458,10 +460,10 @@ class ACL(Adapter):
             print('HTTP functionality requires httpx library')
             raise
         if fallback:
-            self.client = httpx.Client()
+            self.client = httpx.Client(timeout=10.0)
         else:
             # define async client in separate variable to not forget
-            self.aclient = httpx.AsyncClient()
+            self.aclient = httpx.AsyncClient(timeout=10.0)
         super().__init__()
 
     def __del__(self):
@@ -531,8 +533,12 @@ class ACL(Adapter):
     def _generate_url(self, ds: DeviceSet, devstring: str):
         if isinstance(ds, BPMDeviceSet):
             url = ACL.arrayurlstring.format(devstring, ds.array_length)
-        else:
+        elif isinstance(ds, StatusDeviceSet):
+            url = ACL.arrayurlstring.format(devstring+'.STATUS')
+        elif isinstance(ds, DeviceSet):
             url = ACL.urlstring.format(devstring)
+        else:
+            raise
         return url
 
     def _process_string(self, ds: DeviceSet, text: str):
@@ -575,16 +581,20 @@ class ACNETRelay(Adapter):
         except ImportError:
             print('Relay functionality requires certain libraries')
             raise
-        self.aclient = httpx.AsyncClient()
+        self.aclient = httpx.AsyncClient(timeout=10.0)
 
     def check_available(self, devices: dict, method=None):
         return len(devices) < 500
 
-    def readonce(self, ds: DeviceSet) -> int:
+    def readonce(self, ds: DeviceSet, settings=False) -> int:
         assert ds.leaf
         device_dict = ds.devices
         dev_names = [d.name for d in device_dict.values()]
         c = self.aclient
+        if settings:
+            adds = '.SETTING'
+        else:
+            adds = '.READING'
         try:
             async def get(json_lists):
                 rs = [await c.post(self.address, json=p) for p in json_lists]
@@ -592,9 +602,11 @@ class ACNETRelay(Adapter):
                 return rs
 
             if self.method == 0:
-                params = [{'requestType': 'V1_DRF2_READ_MULTI_CACHED', 'request': ';'.join(dev_names)}]
+                params = [{'requestType': 'V1_DRF2_READ_MULTI_CACHED',
+                           'request': ';'.join([d+adds for d in dev_names])}]
             elif self.method == 1:
-                params = [{'requestType': 'V1_DRF2_READ_SINGLE', 'request': ';'.join(dev_names)}]
+                params = [{'requestType': 'V1_DRF2_READ_SINGLE',
+                           'request': ';'.join([d+adds for d in dev_names])}]
 
             print(params)
             responses = asyncio.run(get(params))
@@ -649,7 +661,7 @@ class ACNETRelay(Adapter):
                     raise Exception(f'Not allowed to set BPM device {device.name}')
                 elif isinstance(device, StatusDevice):
                     params.append({'requestType': 'V1_DRF2_SET_SINGLE',
-                                   'request': device.name + 'CONTROL',
+                                   'request': device.name + '.CONTROL',
                                    'requestValue': value})
                 elif isinstance(device, DoubleDevice):
                     params.append({'requestType': 'V1_DRF2_SET_SINGLE',
@@ -660,18 +672,22 @@ class ACNETRelay(Adapter):
             print(f'{self.name} : params {params}')
             responses = asyncio.run(__submit(params))
             t1 = datetime.datetime.utcnow().timestamp()
-            data = {}
+            ok_cnt = 0
             for r in responses:
                 print(f'{self.name} : result {type(r)} {r.__dict__}')
                 # if r['status_code'] == 200:
                 if r.status_code == 200:
-                    data.update(self._process(ds, r.json()))
+                    js = r.json()
+                    if "0 0" not in js['responseJson'][js['request']]:
+                        print(f'Setting failure: {js}')
+                        #raise Exception
+                        return -1
+                    else:
+                        ok_cnt += 1
                 else:
                     return -1
-            assert len(data) == len(ds.devices)
-            for dev_name, device in ds.devices.items():
-                device.update(data[dev_name], t1, self.name)
-            return len(data)
+            assert ok_cnt == len(ds.devices)
+            return ok_cnt
         except Exception as e:
             print(e, sys.exc_info())
             raise
