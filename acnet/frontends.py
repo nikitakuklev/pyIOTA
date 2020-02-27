@@ -11,6 +11,8 @@ import numpy as np
 
 data_entry = collections.namedtuple('DataEntry', ['id', 'value', 'ts', 'src'])
 
+default_adapter = None
+
 
 class Device:
 
@@ -60,6 +62,22 @@ class DoubleDevice(Device):
             raise
         super().update(data, timestamp, source)
 
+    def read(self, adapter=None):
+        if not self._device_set:
+            adapter = adapter or default_adapter or ACL(fallback=True)
+            DoubleDeviceSet(self.name, members=[self], adapter=adapter).readonce()
+        else:
+            self._device_set.readonce()
+        return self.value
+
+    def set(self, value, adapter=None):
+        if not self._device_set:
+            adapter = adapter or default_adapter or ACL(fallback=True)
+            resp = DoubleDeviceSet(self.name, members=[self], adapter=adapter).set([value])
+        else:
+            resp = self._device_set.set([value])
+        return resp
+
 
 class StatusDevice(Device):
     def __init__(self, name, drf2=None, history=10):
@@ -68,17 +86,22 @@ class StatusDevice(Device):
         """
         self.on = None
         self.ready = None
+        self.remote = None
         super().__init__(name, drf2, history)
 
     def update(self, data, timestamp: float, source: str):
         v = data
-        if self.debug: print(f'Status device {self.name} update {data}')
+        if self.debug:
+            print(f'Status device {self.name} update {data}')
         assert ('ON' in v) != ('OFF' in v)
         self.on = 'ON' in v
         assert ('READY' in v) != ('TRIPPED' in v)
         self.ready = 'READY' in v
+        assert ('LOCAL' in v) != ('REMOTE' in v)
+        self.remote = 'REMOTE' in v
         super().update(data, timestamp, source)
-        if self.debug: print(f'Status device on|ready: {self.on} | {self.ready}')
+        if self.debug:
+            print(f'Status device on|ready|rem: {self.on} | {self.ready} | {self.remote}')
 
     def is_on(self) -> bool:
         if self.value_string is None:
@@ -92,9 +115,10 @@ class StatusDevice(Device):
 
     def read(self, adapter=None):
         if not self._device_set:
-            adapter = adapter or ACL(fallback=True)
-            self._device_set = StatusDeviceSet(self.name, members=[self], adapter=adapter)
-        self._device_set.readonce()
+            adapter = adapter or default_adapter or ACL(fallback=True)
+            StatusDeviceSet(self.name, members=[self], adapter=adapter).readonce()
+        else:
+            self._device_set.readonce()
         return self.value_string
 
     def set(self, value, adapter=None):
@@ -122,9 +146,10 @@ class BPMDevice(Device):
 
     def read(self, adapter=None):
         if not self._device_set:
-            adapter = adapter or ACL(fallback=True)
-            self._device_set = BPMDeviceSet(self.name, members=[self], adapter=adapter)
-        self._device_set.readonce()
+            adapter = adapter or default_adapter or ACL(fallback=True)
+            BPMDeviceSet(self.name, members=[self], adapter=adapter).readonce()
+        else:
+            self._device_set.readonce()
         return self.value_string
 
     def set(self, value):
@@ -177,7 +202,7 @@ class DeviceSet:
         self.iter_node = self
         return self
 
-    def __next__(self):
+    def __next__(self) -> Device:
         """
         Depth-first pre-order traversal
         :return:
@@ -193,7 +218,7 @@ class DeviceSet:
                 yield d
             raise StopIteration
 
-    def add(self, device):
+    def add(self, device: Device) -> None:
         if isinstance(device, Device):
             if device.name not in self.devices.keys():
                 self.devices[device.name] = device
@@ -202,18 +227,23 @@ class DeviceSet:
         else:
             raise AttributeError('You must add a device object!')
 
-    def remove(self, name: str):
+    def remove(self, name: str) -> Device:
         """
-        Removes and returns the desired device or device set, or None if not found
+        Removes and returns the desired device or device set.
+        Raises exception if not found
         :param name: Unique name of the element
         :return: The removed member
         """
         if self.leaf:
             if name in self.devices:
                 return self.devices.pop(name)
+            else:
+                raise ValueError(f'No such device in set: {name}')
         else:
             if name in self.children:
                 return self.children.pop(name)
+            else:
+                raise ValueError(f'No such device set: {name}')
 
     def check_acquisition_available(self, method: str) -> bool:
         assert method
@@ -299,6 +329,20 @@ class DeviceSet:
             return success
 
 
+class DoubleDeviceSet(DeviceSet):
+    def __init__(self, name: str, members: list, adapter=None):
+        leaf = all([isinstance(ds, Device) for ds in members])
+        if not leaf:
+            raise AttributeError('Can only contain devices - use DeviceSet for coalescing')
+        super().__init__(name, members, adapter)
+
+    def add(self, device: Device):
+        if isinstance(device, DoubleDevice):
+            super().add(device)
+        else:
+            raise Exception("Device is not a BPM!")
+
+
 class BPMDeviceSet(DeviceSet):
     """
     Leaf container of BPM and other array devices. Exposes methods for fast batch readout, and enforces data uniformity.
@@ -314,8 +358,8 @@ class BPMDeviceSet(DeviceSet):
 
     def add(self, device: Device):
         if isinstance(device, BPMDevice):
-            if self.array_length is not None and self.array_length != device.array_length:
-                print('Device array length does not match set - using set value {}'.format(self.array_length))
+            # if self.array_length is not None and self.array_length != device.array_length:
+            #     print('Device array length does not match set - using set value {}'.format(self.array_length))
             super().add(device)
         else:
             raise Exception("Device is not a BPM!")

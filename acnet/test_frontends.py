@@ -36,6 +36,7 @@ class TestWrap(TestCase):
             self.dd = dd
             self.ds = ds
 
+
 class TestWrap2(TestCase):
     sync = True
 
@@ -65,21 +66,24 @@ class TestWrap2(TestCase):
             self.dd = dd
             self.ds = ds
 
+
 class TestDeviceSet(TestWrap):
     def test_device_set(self):
+        print()
         devs = list(self.dbpm)
         self.assertEqual(devs, ['N:IBB1RH', 'N:IBB1RV'])
 
-
     def test_start_oneshot(self):
+        print()
         d1 = list(self.dbpm.devices.values())[0]
-        print(f'\nOld ts: {d1.last_update} | {d1.value}')
+        print(f'Old ts: {d1.last_update} | {d1.value[0:5]}')
         old_ts = d1.last_update
         self.dbpm.readonce()
-        print(f'New ts: {d1.last_update} | {d1.value}')
-        self.assertTrue(old_ts != d1.last_update)
+        print(f'New ts: {d1.last_update} | {d1.value[0:5]}')
+        self.assertTrue(old_ts < d1.last_update)
 
     def test_start_oneshot2(self):
+        print()
         devs = [BPMDevice(b) for b in iota.BPMS.HA]
         dstest = BPMDeviceSet(name='bpms', members=devs, enforce_array_length=1000)
         dstest.adapter = ACL(fallback=False)
@@ -87,28 +91,48 @@ class TestDeviceSet(TestWrap):
         print(devs)
 
     def test_check_acquisition_supported(self):
-        self.assertTrue(self.dbpm.check_acquisition_supported())
-        self.assertFalse(self.dbpm.check_acquisition_supported())
+        print()
+        self.assertTrue(self.dbpm.check_acquisition_supported('oneshot'))
+        self.assertRaises(Exception, self.dbpm.check_acquisition_supported, 'fakeshot')
+        self.assertTrue(self.dbpm.check_acquisition_available('oneshot'))
+
+
+class TestBPMDeviceSet(TestWrap):
+    def test_add(self):
+        print()
+        self.dbpm.add(BPMDevice('N:IBB1RS', ''))
+        self.assertTrue('N:IBB1RS' in self.dbpm.devices)
+        self.assertEqual(list(self.dbpm.devices.keys()), ['N:IBB1RH', 'N:IBB1RV', 'N:IBB1RS'])
+
+    def test_remove(self):
+        print()
+        self.dbpm.remove('N:IBB1RV')
+        self.assertEqual(list(self.dbpm.devices.keys()), ['N:IBB1RH'])
+        self.dbpm.remove('N:IBB1RH')
+        self.assertEqual(list(self.dbpm.devices.keys()), [])
+        self.assertRaises(ValueError, self.dbpm.remove, 'FAKEBPM')
 
 
 class TestFakeAdapter(TestWrap):
     def test_readonce(self):
-        dev = list(self.dbpm.devices.values())[0]
-        print(dev.read()[0:5])
-        self.assertTrue(dev.value_string is not None)
+        print()
+        device = list(self.dbpm.devices.values())[0]
+        print(device.read(adapter=self.dbpm.adapter)[0:5])
+        self.assertTrue(device.value_string is not None)
+        self.assertTrue(device.value_tuple)
 
     def test_readonce2(self):
-        #print(self.ds.devices)
-        #print([d.name for d in self.ds.devices.values()])
+        # print(self.ds.devices)
+        # print([d.name for d in self.ds.devices.values()])
         self.assertTrue(self.dbpm.readonce() == 2)
         tbefore = [d.last_update for k, d in self.dbpm.devices.items()]
         time.sleep(0.01)
         self.assertTrue(self.dbpm.readonce() == 2)
         # for k,d in self.ds.devices.items():
         #     print(k, d.value)
-        for t1,t2 in zip(tbefore, [d.last_update for k,d in self.dbpm.devices.items()]):
+        for t1, t2 in zip(tbefore, [d.last_update for k, d in self.dbpm.devices.items()]):
             self.assertGreater(t2, t1)
-        for k,d in self.dbpm.devices.items():
+        for k, d in self.dbpm.devices.items():
             self.assertTrue(len(d.value) == 100)
             self.assertTrue(isinstance(d.value, np.ndarray))
 
@@ -155,17 +179,17 @@ class TestACL(TestWrap2):
         self.assertTrue(device.value_string is not None)
 
     def test_readonce2(self):
-        #print(self.ds.devices)
-        #print([d.name for d in self.ds.devices.values()])
+        # print(self.ds.devices)
+        # print([d.name for d in self.ds.devices.values()])
         self.assertTrue(self.dbpm.readonce() == 2)
         tbefore = [d.last_update for k, d in self.dbpm.devices.items()]
         time.sleep(0.01)
         self.assertTrue(self.dbpm.readonce() == 2)
         # for k,d in self.ds.devices.items():
         #     print(k, d.value)
-        for t1,t2 in zip(tbefore, [d.last_update for k,d in self.dbpm.devices.items()]):
+        for t1, t2 in zip(tbefore, [d.last_update for k, d in self.dbpm.devices.items()]):
             self.assertGreater(t2, t1)
-        for k,d in self.dbpm.devices.items():
+        for k, d in self.dbpm.devices.items():
             self.assertTrue(len(d.value) == 100)
             self.assertTrue(isinstance(d.value, np.ndarray))
 
@@ -190,26 +214,3 @@ class TestACL(TestWrap2):
         self.ds.set(['RESET'])
         self.assertTrue(self.ds.readonce(settings=True) == 1)
         self.assertTrue(dev.ready)
-
-
-class TestBPMDeviceSet(TestWrap):
-    def test_add(self):
-        self.dbpm.add(BPMDevice('N:IBB1RS', '', array_length=1500))
-        self.assertTrue('N:IBB1RS' in self.dbpm.devices)
-        self.assertEqual(list(self.dbpm.devices.keys()), ['N:IBB1RH', 'N:IBB1RV', 'N:IBB1RS'])
-
-    def test_remove(self):
-        self.dbpm.remove('N:IBB1RV')
-        self.assertEqual(list(self.dbpm.devices.keys()), ['N:IBB1RH'])
-
-    def test_remove2(self):
-        self.dbpm.remove('N:IBB1RV')
-        self.dbpm.remove('N:IBB1RH')
-        self.assertEqual(list(self.dbpm.devices.keys()), [])
-
-    def test_remove3(self):
-        self.dbpm.remove('BLA')
-        self.assertEqual(list(self.dbpm.devices.keys()), ['N:IBB1RH', 'N:IBB1RV'])
-
-
-
