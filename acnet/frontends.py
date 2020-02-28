@@ -123,7 +123,7 @@ class StatusDevice(Device):
 
     def set(self, value, adapter=None):
         if not self._device_set:
-            adapter = adapter or ACL(fallback=True)
+            adapter = adapter or default_adapter or ACL(fallback=True)
             self._device_set = StatusDeviceSet(self.name, members=[self], adapter=adapter)
         return self._device_set.set([value])
 
@@ -191,7 +191,8 @@ class DeviceSet:
             self.devices = {d.name: d for d in members}
             if not len(self.devices) == len(members):
                 un, uc = np.unique(list(self.devices.keys()), return_counts=True)
-                raise Exception(f'There are non-unique devices in the list: {un}{un[uc>1]}, {len(self.devices)}, {len(members)}')
+                raise Exception(
+                    f'There are non-unique devices in the list: {un}{un[uc > 1]}, {len(self.devices)}, {len(members)}')
             self.children = None
             self.parent = None
         self.adapter = adapter
@@ -371,8 +372,10 @@ class StatusDeviceSet(DeviceSet):
     """
 
     def __init__(self, name: str, members: list, adapter=None):
-        leaf = all([isinstance(ds, Device) for ds in members])
+        leaf = all([isinstance(m, StatusDevice) for m in members])
         if not leaf:
+            print([isinstance(m, StatusDevice) for m in members])
+            print(members, [type(m) for m in members])
             raise AttributeError('Status set can only contain devices - use DeviceSet for coalescing')
         super().__init__(name, members, adapter)
 
@@ -488,9 +491,6 @@ class ACL(Adapter):
     and quasi-polling mode that loops over single-shot commands.
     """
 
-    arrayurlstring = 'http://www-ad.fnal.gov/cgi-bin/acl.pl?acl=read/row/pendWait=0.5+devices="{}"+/num_elements={}'
-    urlstring = 'http://www-ad.fnal.gov/cgi-bin/acl.pl?acl=read/row/pendWait=0.5+devices="{}"'
-
     def __init__(self, fallback: bool = False):
         self.name = 'ACL'
         self.supported = ['oneshot', 'polling']
@@ -575,12 +575,20 @@ class ACL(Adapter):
                 raise
 
     def _generate_url(self, ds: DeviceSet, devstring: str):
+        acl_root = 'http://www-ad.fnal.gov/cgi-bin/acl.pl?acl='
         if isinstance(ds, BPMDeviceSet):
-            url = ACL.arrayurlstring.format(devstring, ds.array_length)
+            if ds.array_length:
+                url_string = 'read/row/pendWait=0.5+devices="{}"+/num_elements={}'
+                url = acl_root + url_string.format(devstring, ds.array_length)
+            else:
+                url_string = 'read/row/pendWait=0.5+devices="{}"+/all_elements'
+                url = acl_root + url_string.format(devstring)
         elif isinstance(ds, StatusDeviceSet):
-            url = ACL.arrayurlstring.format(devstring+'.STATUS')
+            url_string = 'read/row/pendWait=0.5+devices="{}"'
+            url = acl_root + url_string.format(devstring + '.STATUS')
         elif isinstance(ds, DeviceSet):
-            url = ACL.urlstring.format(devstring)
+            url_string = 'read/row/pendWait=0.5+devices="{}"'
+            url = acl_root + url_string.format(devstring)
         else:
             raise
         return url
@@ -609,13 +617,14 @@ class ACNETRelay(Adapter):
     Adapter based on Java commmand proxy. One of quickest, but can be error-prone. Requires async libraries.
     """
 
-    def __init__(self, address: str = "http://127.0.0.1:8080/", method=0):
+    def __init__(self, address: str = "http://127.0.0.1:8080/", method=1):
         self.name = 'ACNETRelay'
         self.supported = ['oneshot', 'polling']
         self.rate_limit = [-1, -1]
         self.can_set = True
         self.address = address
         self.method = method
+        self.comm_method = 1
         super().__init__()
 
         try:
@@ -630,7 +639,7 @@ class ACNETRelay(Adapter):
     def check_available(self, devices: dict, method=None):
         return len(devices) < 500
 
-    def readonce(self, ds: DeviceSet, settings=False) -> int:
+    def readonce(self, ds: DeviceSet, settings: bool = False) -> int:
         assert ds.leaf
         device_dict = ds.devices
         dev_names = [d.name for d in device_dict.values()]
@@ -639,25 +648,41 @@ class ACNETRelay(Adapter):
             adds = '.SETTING'
         else:
             adds = '.READING'
+
+        req_str_list = []
+        for device in ds.devices.values():
+            if isinstance(device, BPMDevice):
+                req_str_list.append(f'{device.name + adds}')
+            elif isinstance(device, StatusDevice):
+                req_str_list.append(f'{device.name}.STATUS')
+            elif isinstance(device, DoubleDevice):
+                req_str_list.append(f'{device.name + adds}')
+            else:
+                raise Exception
+        req_str = ';'.join(req_str_list)
+
         try:
             async def get(json_lists):
                 rs = [await c.post(self.address, json=p) for p in json_lists]
                 print(rs)
                 return rs
 
-            if self.method == 0:
+            if self.comm_method == 0:
                 params = [{'requestType': 'V1_DRF2_READ_MULTI_CACHED',
-                           'request': ';'.join([d+adds for d in dev_names])}]
-            elif self.method == 1:
+                           'request': req_str}]
+            elif self.comm_method == 1:
                 params = [{'requestType': 'V1_DRF2_READ_SINGLE',
-                           'request': ';'.join([d+adds for d in dev_names])}]
+                           'request': req_str}]
+            else:
+                print(self.comm_method)
+                raise Exception
 
-            print(params)
+            print(f'{self.name} : params {params}')
             responses = asyncio.run(get(params))
             t1 = datetime.datetime.utcnow().timestamp()
             data = {}
             for r in responses:
-                print(type(r), r.__dict__)
+                print(f'{self.name} : result {r._content}')
                 # if r['status_code'] == 200:
                 if r.status_code == 200:
                     data.update(self._process(ds, r.json()))
@@ -682,11 +707,14 @@ class ACNETRelay(Adapter):
                 # print(v)
                 v_decoded = base64.b64decode(v)
                 # print(v_decoded)
-                data[k] = np.frombuffer(v_decoded, dtype='>f8')[:ds.array_length]
+                data[k.split('.')[0]] = np.frombuffer(v_decoded, dtype='>f8')[:ds.array_length]
+        elif isinstance(ds, StatusDeviceSet):
+            for (k, v) in responses.items():
+                data[k.split('.')[0]] = v
         else:
             # Double values
             for (k, v) in responses.items():
-                data[k] = float(v)
+                data[k.split('.')[0]] = float(v)
         return data
 
     def set(self, ds: DeviceSet, values: list) -> int:
@@ -709,7 +737,7 @@ class ACNETRelay(Adapter):
                                    'requestValue': value})
                 elif isinstance(device, DoubleDevice):
                     params.append({'requestType': 'V1_DRF2_SET_SINGLE',
-                                   'request': device.name,
+                                   'request': device.name + '.SETTING',
                                    'requestValue': str(value)})
                 else:
                     raise Exception
@@ -718,17 +746,18 @@ class ACNETRelay(Adapter):
             t1 = datetime.datetime.utcnow().timestamp()
             ok_cnt = 0
             for r in responses:
-                print(f'{self.name} : result {type(r)} {r.__dict__}')
+                print(f'{self.name} : result {r._content}')
                 # if r['status_code'] == 200:
                 if r.status_code == 200:
                     js = r.json()
                     if "0 0" not in js['responseJson'][js['request']]:
                         print(f'Setting failure: {js}')
-                        #raise Exception
+                        # raise Exception
                         return -1
                     else:
                         ok_cnt += 1
                 else:
+                    raise Exception
                     return -1
             assert ok_cnt == len(ds.devices)
             return ok_cnt
