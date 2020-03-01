@@ -190,9 +190,9 @@ class DeviceSet:
             self.leaf = True
             self.devices = {d.name: d for d in members}
             if not len(self.devices) == len(members):
-                un, uc = np.unique(list(self.devices.keys()), return_counts=True)
+                un, uc = np.unique(list([d.name for d in members]), return_counts=True)
                 raise Exception(
-                    f'There are non-unique devices in the list: {un}{un[uc > 1]}, {len(self.devices)}, {len(members)}')
+                    f'There are non-unique devices in the list: {un}, {un[uc > 1]}, {uc}, {len(self.devices)}, {len(members)}')
             self.children = None
             self.parent = None
         self.adapter = adapter
@@ -550,27 +550,32 @@ class ACL(Adapter):
         else:
             c = self.aclient
             # Split tasks into sets
-            num_lists = min(len(ds.devices), 5)
+            num_lists = min(len(ds.devices), 10)
             dev_lists = [list(l) for l in np.array_split(dev_names, num_lists)]
             # print(dev_lists)
             urls = [self._generate_url(ds, ','.join(dl)) for dl in dev_lists]
-            print('Urls: ', urls)
+            #print('Urls: ', urls)
             try:
                 data = {}
 
                 async def get(urls_inner):
-                    rs = [await c.get(u) for u in urls_inner]
+                    tasks = [c.get(u) for u in urls_inner]
+                    rs = await asyncio.gather(*tasks)
                     return rs
 
                 responses = asyncio.run(get(urls))
                 t1 = datetime.datetime.utcnow().timestamp()
                 for r in responses:
                     data.update(self._process_string(ds, r.text))
-                assert len(data) == len(device_dict)
+                if len(data) != len(device_dict):
+                    print('Issue with acquisition - devices missing:')
+                    print([dn for dn in device_dict if dn not in data.keys()])
+                    raise Exception
                 for k, v in device_dict.items():
                     v.update(data[k], t1, self.name)
                 return len(data)
             except Exception as e:
+                print(f'Acquisition failed, urls: {urls}')
                 print(e, sys.exc_info())
                 raise
 
@@ -606,9 +611,18 @@ class ACL(Adapter):
         data = {}
         for line in filter(None, split_text):
             spl = line.strip().split()
-            # print(spl)
-            devname = spl[0].split('@')[0].split('[')[0]
-            data[devname] = np.array([float(v) for v in spl[2:-1]])
+            #print(spl)
+            devname = spl[0].split('@')[0].split('[')[0].replace('_',':')
+            if '[' in spl[0]:
+                # Array mode
+                try:
+                    _ = float(spl[-2])
+                    data[devname] = np.array([float(v) for v in spl[2:-1]])
+                except ValueError:
+                    # For weirdos that have stuff like 'db (low)'
+                    data[devname] = np.array([float(v) for v in spl[2:-2]])
+            else:
+                data[devname] = float(spl[2])
         return data
 
 

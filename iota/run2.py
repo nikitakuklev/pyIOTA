@@ -1,3 +1,5 @@
+import itertools
+
 class BPMS:
 
     @staticmethod
@@ -27,35 +29,59 @@ class BPMS:
     S = add_axis.__func__(LATTICE_NAMES, 'S')
     SA = to_acnet.__func__(S)
 
-    ALL = H+V+S
-    ALLA = HA+VA+SA
+    ALL = H + V + S
+    ALLA = HA + VA + SA
+
+
+class DIPOLES:
+    MAIN_BEND_I = ['N:IBEND']
+    MAIN_BEND_V = ['N:IBENDV']
+
+    FLUX_COMPENSATORS_I = [f'N:IBT{i}{s}I' for (i,s) in itertools.product(range(1, 5), ['R', 'L'])] #15
+    FLUX_COMPENSATORS_V = [f'N:IBT{i}{s}V' for (i,s) in itertools.product(range(1, 5), ['R', 'L'])] #15
+
+    ALL_I = MAIN_BEND_I + FLUX_COMPENSATORS_I
+    ALL_V = MAIN_BEND_V + FLUX_COMPENSATORS_V
 
 
 class CORRECTORS:
     __combfun = ['A1R', 'A2R', 'B1R', 'B2R', 'C1R', 'C2R', 'D1R', 'D2R', 'E1R', 'E2R',
                  'E2L', 'E1L', 'D2L', 'D1L', 'C2L', 'C1L', 'B2L', 'B1L', 'A2L', 'A1L']
 
-    DIPOLE_SHIMS = ['N:IHM' + str(i) + 'LI' for i in range(1, 5)] + ['N:IHM' + str(i) + 'RI' for i in range(1, 5)]
+    DIPOLE_TRIMS_I = ['N:IHM' + str(i) + 'LI' for i in range(1, 5)] + ['N:IHM' + str(i) + 'RI' for i in range(1, 5)]
+    DIPOLE_TRIMS_V = ['N:IHM' + str(i) + 'LV' for i in range(1, 5)] + ['N:IHM' + str(i) + 'RV' for i in range(1, 5)]
+    DIPOLE_TRIMS_ALL = DIPOLE_TRIMS_I + DIPOLE_TRIMS_V # 4000
 
-    COMBINED_COILS = [i for sl in [['N:I1' + k + 'I', 'N:I2' + k + 'I', 'N:I3' + k + 'I', 'N:I4' + k + 'I'] for k in __combfun] for i in sl]
+    COMBINED_COILS_I = [i for sl in
+                        [['N:I1' + k + 'I', 'N:I2' + k + 'I', 'N:I3' + k + 'I', 'N:I4' + k + 'I'] for k in __combfun] for
+                        i in sl]
+    COMBINED_COILS_V = [i for sl in
+                      [['N:I1' + k + 'V', 'N:I2' + k + 'V', 'N:I3' + k + 'V', 'N:I4' + k + 'V'] for k in __combfun] for
+                      i in sl]
+    COMBINED_COILS_ALL = COMBINED_COILS_I + COMBINED_COILS_V #4000
 
     COMBINED_VIRTUAL = [i for sl in [['N:IV' + k + 'I', 'N:IH' + k + 'I'] for k in __combfun] for i in sl]
 
-    OTHER_CORRECTORS = ['N:IBMPLI', 'N:IBMPRI', 'N:IBEND', 'N:ILAM', 'N:IHLAMI']
+    OTHER_CORRECTORS_I = ['N:IBMPLI', 'N:IBMPRI'] #4000
+    OTHER_CORRECTORS_V = ['N:IBMPLV', 'N:IBMPRV'] #4000
 
-    COMBINED_COILS_AND_DIPOLE_SHIMS = COMBINED_COILS + DIPOLE_SHIMS
+    LAMBERTSON_I = ['N:ILAM'] #15
+    LAMBERTSON_V = ['N:ILAMV'] #15
 
-    COMBINED_VIRTUAL_AND_DIPOLE_SHIMS = COMBINED_VIRTUAL + DIPOLE_SHIMS
+    LAMBERTSON_HCORR_I = ['N:IHLAMI'] #4000
+    LAMBERTSON_HCORR_V = ['N:IHLAMV'] #4000
 
-    COMBINED_COILS_AND_DIPOLE_SHIMS_AND_OTHER = COMBINED_COILS_AND_DIPOLE_SHIMS + OTHER_CORRECTORS
+    COMBINED_COILS_AND_DIPOLE_SHIMS_I = COMBINED_COILS_I + DIPOLE_TRIMS_I
+    COMBINED_COILS_AND_DIPOLE_SHIMS_AND_OTHER_I = COMBINED_COILS_AND_DIPOLE_SHIMS_I + OTHER_CORRECTORS_I
 
-    COMBINED_VIRTUAL_AND_DIPOLE_SHIMS_AND_OTHER = COMBINED_VIRTUAL_AND_DIPOLE_SHIMS + OTHER_CORRECTORS
+    COMBINED_VIRTUAL_AND_DIPOLE_SHIMS_I = COMBINED_VIRTUAL + DIPOLE_TRIMS_I
+    COMBINED_VIRTUAL_AND_DIPOLE_SHIMS_AND_OTHER_I = COMBINED_VIRTUAL_AND_DIPOLE_SHIMS_I + OTHER_CORRECTORS_I
 
-    ALL_COILS = COMBINED_COILS_AND_DIPOLE_SHIMS_AND_OTHER
-    ALL_VIRTUAL = COMBINED_VIRTUAL_AND_DIPOLE_SHIMS_AND_OTHER
+    ALL_COILS = COMBINED_COILS_AND_DIPOLE_SHIMS_AND_OTHER_I
+    ALL_VIRTUAL = COMBINED_VIRTUAL_AND_DIPOLE_SHIMS_AND_OTHER_I
 
-    ALL = list(set(COMBINED_COILS_AND_DIPOLE_SHIMS_AND_OTHER +
-                   COMBINED_VIRTUAL_AND_DIPOLE_SHIMS_AND_OTHER))
+    ALL = list(set(COMBINED_COILS_AND_DIPOLE_SHIMS_AND_OTHER_I +
+                   COMBINED_VIRTUAL_AND_DIPOLE_SHIMS_AND_OTHER_I))
 
 
 class QUADS:
@@ -96,18 +122,18 @@ class OCTUPOLES:
 
 class DNMAGNET:
     ALL_CURRENTS = ['N:INL{:02d}I'.format(i) for i in range(1, 19)]
-    ALL_VOLTAGES = ['N:INL{:02d}I'.format(i) for i in range(1, 19)]
+    ALL_VOLTAGES = ['N:INL{:02d}V'.format(i) for i in range(1, 19)]
     ALL = ALL_CURRENTS + ALL_VOLTAGES
 
 
 class OTHER:
-    RF = ['N:IRFLLG', 'N:IRFMOD', 'N:IRFEAT', 'N:IRFEPC']
-    KICKERS = ['N:IKPSV', 'N:IKPSH', 'N:IKPSVX', 'N:IKPSVD', 'N:IKPSH']
+    RF = ['N:IRFLLF', 'N:IRFLLA', 'N:IRFMOD', 'N:IRFEAT', 'N:IRFEPC']
+    KICKERS = ['N:IKPSV', 'N:IKPSH', 'N:IKPSVX', 'N:IKPSVD']
 
 
 class CONTROLS:
-    TRIGGER_A5 = 'N:EA5TRG' #$A5 timing event on reset
-    TRIGGER_A6 = 'N:EA6TRG' #$A6 timing event on reset
+    TRIGGER_A5 = 'N:EA5TRG'  # $A5 timing event on reset
+    TRIGGER_A6 = 'N:EA6TRG'  # $A6 timing event on reset
     VKICKER = 'N:IKPSV'
     HKICKER = 'N:IKPSH'
     CHIP_PLC = 'N:IDG'
@@ -116,8 +142,8 @@ class CONTROLS:
     BPM_CONFIG_DEVICE = 'N:IBPSTATD'
 
 
-
-
+MASTER_STATE_CURRENTS = CORRECTORS.ALL + QUADS.ALL_CURRENTS + SKEWQUADS.ALL_CURRENTS + SEXTUPOLES.ALL_CURRENTS + \
+                        OCTUPOLES.ALL_CURRENTS + DNMAGNET.ALL_CURRENTS + OTHER.RF + OTHER.KICKERS
 
 MASTER_STATE = CORRECTORS.ALL + QUADS.ALL + SKEWQUADS.ALL + SEXTUPOLES.ALL + OCTUPOLES.ALL + DNMAGNET.ALL + \
                OTHER.RF + OTHER.KICKERS
