@@ -28,7 +28,7 @@ class Device:
         self.last_update: Optional[float] = None
         self.value = None
         self.debug: bool = True
-        self._device_set: Optional[DeviceSet] = None;
+        self._device_set: Optional[DeviceSet] = None
 
     def get_history(self) -> list:
         return list(self.history)
@@ -554,7 +554,7 @@ class ACL(Adapter):
             dev_lists = [list(l) for l in np.array_split(dev_names, num_lists)]
             # print(dev_lists)
             urls = [self._generate_url(ds, ','.join(dl)) for dl in dev_lists]
-            #print('Urls: ', urls)
+            # print('Urls: ', urls)
             try:
                 data = {}
 
@@ -611,8 +611,8 @@ class ACL(Adapter):
         data = {}
         for line in filter(None, split_text):
             spl = line.strip().split()
-            #print(spl)
-            devname = spl[0].split('@')[0].split('[')[0].replace('_',':')
+            # print(spl)
+            devname = spl[0].split('@')[0].split('[')[0].replace('_', ':')
             if '[' in spl[0]:
                 # Array mode
                 try:
@@ -648,7 +648,8 @@ class ACNETRelay(Adapter):
         except ImportError:
             print('Relay functionality requires certain libraries')
             raise
-        self.aclient = httpx.AsyncClient(timeout=10.0)
+        self.aclient = httpx.AsyncClient(timeout=20.0)
+        self.client = httpx.Client(timeout=20.0)
 
     def check_available(self, devices: dict, method=None):
         return len(devices) < 500
@@ -663,40 +664,57 @@ class ACNETRelay(Adapter):
         else:
             adds = '.READING'
 
-        req_str_list = []
-        for device in ds.devices.values():
-            if isinstance(device, BPMDevice):
-                req_str_list.append(f'{device.name + adds}')
-            elif isinstance(device, StatusDevice):
-                req_str_list.append(f'{device.name}.STATUS')
-            elif isinstance(device, DoubleDevice):
-                req_str_list.append(f'{device.name + adds}')
-            else:
-                raise Exception
-        req_str = ';'.join(req_str_list)
-
-        try:
-            async def get(json_lists):
-                rs = [await c.post(self.address, json=p) for p in json_lists]
-                print(rs)
-                return rs
+        num_lists = min(len(ds.devices), 10)
+        if isinstance(ds, BPMDeviceSet):
+            num_lists = len(ds.devices)
+        dev_lists = [list(l) for l in np.array_split(dev_names, num_lists)]
+        params = []
+        for dl in dev_lists:
+            req_str_list = []
+            for dname in dl:
+                device = ds.devices[dname]
+                if isinstance(device, BPMDevice):
+                    req_str_list.append(f'{device.name}{adds}' + '[]@I')
+                elif isinstance(device, StatusDevice):
+                    req_str_list.append(f'{device.name}.STATUS')
+                elif isinstance(device, DoubleDevice):
+                    req_str_list.append(f'{device.name + adds}')
+                else:
+                    raise Exception
+            req_str = ';'.join(req_str_list)
 
             if self.comm_method == 0:
-                params = [{'requestType': 'V1_DRF2_READ_MULTI_CACHED',
-                           'request': req_str}]
+                params.append({'requestType': 'V1_DRF2_READ_MULTI_CACHED',
+                           'request': req_str})
             elif self.comm_method == 1:
-                params = [{'requestType': 'V1_DRF2_READ_SINGLE',
-                           'request': req_str}]
+                params.append({'requestType': 'V1_DRF2_READ_SINGLE',
+                           'request': req_str})
             else:
                 print(self.comm_method)
                 raise Exception
+        #print(f'{self.name} : params {params}')
 
-            print(f'{self.name} : params {params}')
+        try:
+            # async def get(json_lists):
+            #     rs = [await c.post(self.address, json=p) for p in json_lists]
+            #     print(rs)
+            #     return rs
+            # responses = asyncio.run(get(params))
+            # def get(json_lists):
+            #     rs = [self.client.post(self.address, json=p) for p in json_lists]
+            #     #print(rs)
+            #     return rs
+            async def get(json_lists):
+                tasks = [c.post(self.address, json=p) for p in json_lists]
+                rs = await asyncio.gather(*tasks)
+                return rs
+
             responses = asyncio.run(get(params))
             t1 = datetime.datetime.utcnow().timestamp()
             data = {}
             for r in responses:
-                print(f'{self.name} : result {r._content}')
+                if not isinstance(ds, BPMDeviceSet):
+                    print(f'{self.name} : result {r._content}')
                 # if r['status_code'] == 200:
                 if r.status_code == 200:
                     data.update(self._process(ds, r.json()))
@@ -711,7 +729,7 @@ class ACNETRelay(Adapter):
             raise
 
     def _process(self, ds: DeviceSet, r):
-        print(r)
+        #print(r)
         responses = r['responseJson']
         # print(responses)
         data = {}

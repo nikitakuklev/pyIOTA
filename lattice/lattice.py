@@ -30,6 +30,7 @@ class Lattice:
     def load_optics(self, lattice_file):
         iota = pymadx.Data.Tfs(lattice_file)
         bpms = iota.GetElementsOfType('MONITOR')
+        print(f'Found {len(bpms)} BPMS: {bpms}')
 
         bpm_s_temp = {bpm['NAME'].replace('BPM', 'B'): bpm['S'] for bpm in bpms}
         bpm_s = {'IBA1C': bpm_s_temp['IBA1']}
