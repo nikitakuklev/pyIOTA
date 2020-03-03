@@ -674,7 +674,10 @@ class ACNETRelay(Adapter):
             for dname in dl:
                 device = ds.devices[dname]
                 if isinstance(device, BPMDevice):
-                    req_str_list.append(f'{device.name}{adds}' + '[]@I')
+                    if ds.array_length:
+                        req_str_list.append(f'{device.name}{adds}' + f'[:{ds.array_length}]@I')
+                    else:
+                        req_str_list.append(f'{device.name}{adds}' + '[]@I')
                 elif isinstance(device, StatusDevice):
                     req_str_list.append(f'{device.name}.STATUS')
                 elif isinstance(device, DoubleDevice):
@@ -692,7 +695,7 @@ class ACNETRelay(Adapter):
             else:
                 print(self.comm_method)
                 raise Exception
-        #print(f'{self.name} : params {params}')
+        print(f'{self.name} : params {params}')
 
         try:
             # async def get(json_lists):
