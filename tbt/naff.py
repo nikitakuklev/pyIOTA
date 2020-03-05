@@ -80,8 +80,6 @@ class NAFF:
             turns = int(order * a)
         return turns
 
-
-
     def calc_correlation_amplitude(self, data: np.ndarray, freq: float, turns=None, order=6, method=11,
                                    only_amplitude=False):
         """

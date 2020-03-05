@@ -1,3 +1,5 @@
+import pyIOTA
+
 from .frontends import DeviceSet, StatusDevice, DoubleDevice
 import time
 import pyIOTA.iota as iota
@@ -7,6 +9,86 @@ import numpy as np
 def trigger_bpms_orbit_mode(debug: bool = False):
     if debug: print('>>Resetting orbit trigger')
     StatusDevice(iota.CONTROLS.BPM_ORB_TRIGGER).reset()
+
+
+def inject(bpms: bool = False, debug: bool = False):
+    a6cnt = DoubleDevice(iota.CONTROLS.TRIGGER_A6)
+
+    if debug: print('>>Setting up Chip PLC')
+    plc = StatusDevice(iota.CONTROLS.CHIP_PLC)
+    plc.read()
+    if not plc.on:
+        raise Exception("Chip PLC is not on???")
+    if not plc.remote:
+        plc.set("Trig:Inj")
+
+    if debug: print('>>Checking $A6')
+    a6 = StatusDevice(iota.CONTROLS.TRIGGER_A6)
+    a6.read()
+    if not a6.on:
+        a6.set_on()
+
+    if debug: print('>>Turning off HKICKER aux devices')
+    hres = StatusDevice(iota.CONTROLS.HKICKER_RESCHARGE)
+    hres.set_off()
+    htrig = StatusDevice(iota.CONTROLS.HKICKER_TRIG)
+    htrig.set_off()
+
+    if debug: print('>>Turning on VKICKER aux devices')
+    vres = StatusDevice(iota.CONTROLS.VKICKER_RESCHARGE)
+    vres.read()
+    if not vres.on:
+        vres.set_on()
+    vtrig = StatusDevice(iota.CONTROLS.VKICKER_TRIG)
+    vtrig.read()
+    if not vtrig.on:
+        vtrig.set_on()
+
+    if debug: print('>>Enabling vertical kicker')
+    vkicker_status = StatusDevice(iota.CONTROLS.VKICKER)
+    vkicker_status.read()
+    if not vkicker_status.on:
+        vkicker_status.set_on()
+    if not vkicker_status.ready:
+        vkicker_status.reset()
+
+    vertical_kv = 4.15
+    if debug: print('>>Setting vertical kicker')
+    vkicker = DoubleDevice(iota.CONTROLS.VKICKER)
+    vkicker.read()
+    if np.abs(vkicker.value - vertical_kv) > 0.01:
+        vkicker.set(vertical_kv)
+        time.sleep(0.1)
+        for i in range(100):
+            delta = np.abs(vkicker.read() - vertical_kv)
+            if delta > 0.15:
+                if i < 10:
+                    time.sleep(0.1)
+                    continue
+                else:
+                    raise Exception(f'>>Failed to set kicker - final delta: {delta}')
+            else:
+                if debug: print(f'>>Kicker setting ok - delta {delta}')
+                break
+
+    shutter = StatusDevice(iota.CONTROLS.FAST_LASER_SHUTTER)
+    shutter.read()
+    if not shutter.on:
+        print('FYI - SHUTTER CLOSED ARGGGG!!!!')
+    if not shutter.ready:
+        print('MPS FAULT!')
+        raise Exception
+
+    if debug: print('>>Awaiting A8')
+    acl = pyIOTA.acnet.frontends.ACL(fallback=True)
+    acl._raw_command("wait/nml/event/timeout=2 A8")
+
+    if debug: print('>>Firing')
+    inj = DoubleDevice(iota.CONTROLS.FAST_LASER_INJECTOR)
+    if bpms:
+        StatusDevice(iota.CONTROLS.BPM_INJ_TRIGGER).reset()
+    a6.reset()
+    inj.set(1)
 
 
 def kick(vertical_kv: float = 0.0, horizontal_kv: float = 0.0,
@@ -47,6 +129,16 @@ def kick(vertical_kv: float = 0.0, horizontal_kv: float = 0.0,
         a5.set_on()
 
     if vertical_kv > 0.0:
+        if debug: print('>>Turning on VKICKER aux devices')
+        vres = StatusDevice(iota.CONTROLS.VKICKER_RESCHARGE)
+        vres.read()
+        if not vres.on:
+            vres.set_on()
+        vtrig = StatusDevice(iota.CONTROLS.VKICKER_TRIG)
+        vtrig.read()
+        if not vtrig.on:
+            vtrig.set_on()
+
         if debug: print('>>Setting vertical kicker')
         vkicker = DoubleDevice(iota.CONTROLS.VKICKER)
         vkicker.read()
@@ -64,8 +156,24 @@ def kick(vertical_kv: float = 0.0, horizontal_kv: float = 0.0,
                 else:
                     if debug: print(f'>>Kicker setting ok - delta {delta}')
                     break
+    else:
+        if debug: print('>>Turning off VKICKER aux devices')
+        vres = StatusDevice(iota.CONTROLS.VKICKER_RESCHARGE)
+        vres.set_off()
+        vtrig = StatusDevice(iota.CONTROLS.VKICKER_TRIG)
+        vtrig.set_off()
 
     if horizontal_kv > 0.0:
+        if debug: print('>>Turning on HKICKER aux devices')
+        hres = StatusDevice(iota.CONTROLS.HKICKER_RESCHARGE)
+        hres.read()
+        if not hres.on:
+            hres.set_on()
+        htrig = StatusDevice(iota.CONTROLS.HKICKER_TRIG)
+        htrig.read()
+        if not htrig.on:
+            htrig.set_on()
+
         if debug: print('>>Setting horizontal kicker')
         hkicker = DoubleDevice(iota.CONTROLS.HKICKER)
         hkicker.read()
@@ -83,6 +191,12 @@ def kick(vertical_kv: float = 0.0, horizontal_kv: float = 0.0,
                 else:
                     if debug: print(f'>>Kicker setting ok - delta {delta}')
                     break
+    else:
+        if debug: print('>>Turning off HKICKER aux devices')
+        hres = StatusDevice(iota.CONTROLS.HKICKER_RESCHARGE)
+        hres.set_off()
+        htrig = StatusDevice(iota.CONTROLS.HKICKER_TRIG)
+        htrig.set_off()
 
     a5cnt = DoubleDevice(iota.CONTROLS.TRIGGER_A5)
     a5_initial_val = a5cnt.read()
@@ -105,131 +219,131 @@ def kick(vertical_kv: float = 0.0, horizontal_kv: float = 0.0,
     raise Exception('$A5 never received - something went wrong!')
 
 
-def kick_vertical(vertical_kv: float = 0.0, restore: bool = False, debug: bool = False):
-    assert 1.0 > vertical_kv >= 0.0
-
-    if debug: print('>>Setting up Chip PLC')
-    plc = StatusDevice(iota.CONTROLS.CHIP_PLC)
-    plc.read()
-    if not plc.on:
-        raise Exception("Chip PLC is not on???")
-    if plc.remote:
-        plc.set("Trig:Circ")
-
-    if debug: print('>>Enabling vertical kicker')
-    vkicker_status = StatusDevice(iota.CONTROLS.VKICKER)
-    vkicker_status.read()
-    if not vkicker_status.on:
-        vkicker_status.set_on()
-    if not vkicker_status.ready:
-        vkicker_status.reset()
-
-    if debug: print('>>Checking $A5')
-    a5 = StatusDevice(iota.CONTROLS.TRIGGER_A5)
-    a5.read()
-    if not a5.on:
-        a5.set_on()
-
-    if debug: print('>>Setting vertical kicker')
-    vkicker = DoubleDevice(iota.CONTROLS.VKICKER)
-    vkicker.read()
-    if np.abs(vkicker.value - vertical_kv) > 0.01:
-        vkicker.set(vertical_kv)
-        time.sleep(0.1)
-        for i in range(100):
-            delta = np.abs(vkicker.read() - vertical_kv)
-            if delta > 0.05:
-                if i < 10:
-                    time.sleep(0.1)
-                    continue
-                else:
-                    raise Exception(f'>>Failed to set kicker - final delta: {delta}')
-            else:
-                if debug: print(f'>>Kicker setting ok - delta {delta}')
-                break
-
-    a5cnt = DoubleDevice(iota.CONTROLS.TRIGGER_A5)
-    a5_initial_val = a5cnt.read()
-    if debug: print(f'Initial $A5 cnt: {a5_initial_val}')
-
-    if debug: print('>>Firing')
-    StatusDevice(iota.CONTROLS.BPM_INJ_TRIGGER).reset()
-    a5.reset()
-    #bpmplc.set('ARMOrbit', adapter=relay)
-    # Await actual fire event
-    t0 = time.time()
-    for i in range(20):
-        a5_new_val = a5cnt.read()
-        if a5_new_val > a5_initial_val:
-            print(f'>>$A5 received (new: {a5_new_val}) - kick complete')
-            return
-        else:
-            print(f'>>Awaiting $A5 {i}/{20} ({time.time() - t0:.3f}s)')
-            time.sleep(0.1)
-
-    raise Exception('$A5 never received - something went wrong!')
-
-
-def kick_horizontal(horizontal_kv: float = 0.0, restore: bool = False, debug: bool = False):
-    assert 3.0 > horizontal_kv >= 0.0
-
-    if debug: print('>>Setting up Chip PLC')
-    plc = StatusDevice(iota.CONTROLS.CHIP_PLC)
-    plc.read()
-    if not plc.on:
-        raise Exception("Chip PLC is not on???")
-    if plc.remote:
-        plc.set("Trig:Circ")
-
-    if debug: print('>>Enabling vertical kicker')
-    vkicker_status = StatusDevice(iota.CONTROLS.HKICKER)
-    vkicker_status.read()
-    if not vkicker_status.on:
-        vkicker_status.set_on()
-    if not vkicker_status.ready:
-        vkicker_status.reset()
-
-    if debug: print('>>Checking $A5')
-    a5 = StatusDevice(iota.CONTROLS.TRIGGER_A5)
-    a5.read()
-    if not a5.on:
-        a5.set_on()
-
-    if debug: print('>>Setting vertical kicker')
-    vkicker = DoubleDevice(iota.CONTROLS.HKICKER)
-    vkicker.read()
-    if np.abs(vkicker.value - horizontal_kv) > 0.09:
-        vkicker.set(horizontal_kv)
-        time.sleep(0.1)
-        for i in range(100):
-            delta = np.abs(vkicker.read() - horizontal_kv)
-            if delta > 0.05:
-                if i < 10:
-                    time.sleep(0.1)
-                    continue
-                else:
-                    raise Exception(f'>>Failed to set kicker - final delta: {delta}')
-            else:
-                if debug: print(f'>>Kicker setting ok - delta {delta}')
-                break
-
-    a5cnt = DoubleDevice(iota.CONTROLS.TRIGGER_A5)
-    a5_initial_val = a5cnt.read()
-    if debug: print(f'Initial $A5 cnt: {a5_initial_val}')
-
-    if debug: print('>>Firing')
-    StatusDevice(iota.CONTROLS.BPM_INJ_TRIGGER).reset()
-    a5.reset()
-    #bpmplc.set('ARMOrbit', adapter=relay)
-    # Await actual fire event
-    t0 = time.time()
-    for i in range(20):
-        a5_new_val = a5cnt.read()
-        if a5_new_val > a5_initial_val:
-            print(f'>>$A5 received (new: {a5_new_val}) - kick complete')
-            return
-        else:
-            print(f'>>Awaiting $A5 {i}/{20} ({time.time() - t0:.3f}s)')
-            time.sleep(0.1)
-
-    raise Exception('$A5 never received - something went wrong!')
+# def kick_vertical(vertical_kv: float = 0.0, restore: bool = False, debug: bool = False):
+#     assert 1.0 > vertical_kv >= 0.0
+#
+#     if debug: print('>>Setting up Chip PLC')
+#     plc = StatusDevice(iota.CONTROLS.CHIP_PLC)
+#     plc.read()
+#     if not plc.on:
+#         raise Exception("Chip PLC is not on???")
+#     if plc.remote:
+#         plc.set("Trig:Circ")
+#
+#     if debug: print('>>Enabling vertical kicker')
+#     vkicker_status = StatusDevice(iota.CONTROLS.VKICKER)
+#     vkicker_status.read()
+#     if not vkicker_status.on:
+#         vkicker_status.set_on()
+#     if not vkicker_status.ready:
+#         vkicker_status.reset()
+#
+#     if debug: print('>>Checking $A5')
+#     a5 = StatusDevice(iota.CONTROLS.TRIGGER_A5)
+#     a5.read()
+#     if not a5.on:
+#         a5.set_on()
+#
+#     if debug: print('>>Setting vertical kicker')
+#     vkicker = DoubleDevice(iota.CONTROLS.VKICKER)
+#     vkicker.read()
+#     if np.abs(vkicker.value - vertical_kv) > 0.01:
+#         vkicker.set(vertical_kv)
+#         time.sleep(0.1)
+#         for i in range(100):
+#             delta = np.abs(vkicker.read() - vertical_kv)
+#             if delta > 0.05:
+#                 if i < 10:
+#                     time.sleep(0.1)
+#                     continue
+#                 else:
+#                     raise Exception(f'>>Failed to set kicker - final delta: {delta}')
+#             else:
+#                 if debug: print(f'>>Kicker setting ok - delta {delta}')
+#                 break
+#
+#     a5cnt = DoubleDevice(iota.CONTROLS.TRIGGER_A5)
+#     a5_initial_val = a5cnt.read()
+#     if debug: print(f'Initial $A5 cnt: {a5_initial_val}')
+#
+#     if debug: print('>>Firing')
+#     StatusDevice(iota.CONTROLS.BPM_INJ_TRIGGER).reset()
+#     a5.reset()
+#     #bpmplc.set('ARMOrbit', adapter=relay)
+#     # Await actual fire event
+#     t0 = time.time()
+#     for i in range(20):
+#         a5_new_val = a5cnt.read()
+#         if a5_new_val > a5_initial_val:
+#             print(f'>>$A5 received (new: {a5_new_val}) - kick complete')
+#             return
+#         else:
+#             print(f'>>Awaiting $A5 {i}/{20} ({time.time() - t0:.3f}s)')
+#             time.sleep(0.1)
+#
+#     raise Exception('$A5 never received - something went wrong!')
+#
+#
+# def kick_horizontal(horizontal_kv: float = 0.0, restore: bool = False, debug: bool = False):
+#     assert 3.0 > horizontal_kv >= 0.0
+#
+#     if debug: print('>>Setting up Chip PLC')
+#     plc = StatusDevice(iota.CONTROLS.CHIP_PLC)
+#     plc.read()
+#     if not plc.on:
+#         raise Exception("Chip PLC is not on???")
+#     if plc.remote:
+#         plc.set("Trig:Circ")
+#
+#     if debug: print('>>Enabling vertical kicker')
+#     vkicker_status = StatusDevice(iota.CONTROLS.HKICKER)
+#     vkicker_status.read()
+#     if not vkicker_status.on:
+#         vkicker_status.set_on()
+#     if not vkicker_status.ready:
+#         vkicker_status.reset()
+#
+#     if debug: print('>>Checking $A5')
+#     a5 = StatusDevice(iota.CONTROLS.TRIGGER_A5)
+#     a5.read()
+#     if not a5.on:
+#         a5.set_on()
+#
+#     if debug: print('>>Setting vertical kicker')
+#     vkicker = DoubleDevice(iota.CONTROLS.HKICKER)
+#     vkicker.read()
+#     if np.abs(vkicker.value - horizontal_kv) > 0.09:
+#         vkicker.set(horizontal_kv)
+#         time.sleep(0.1)
+#         for i in range(100):
+#             delta = np.abs(vkicker.read() - horizontal_kv)
+#             if delta > 0.05:
+#                 if i < 10:
+#                     time.sleep(0.1)
+#                     continue
+#                 else:
+#                     raise Exception(f'>>Failed to set kicker - final delta: {delta}')
+#             else:
+#                 if debug: print(f'>>Kicker setting ok - delta {delta}')
+#                 break
+#
+#     a5cnt = DoubleDevice(iota.CONTROLS.TRIGGER_A5)
+#     a5_initial_val = a5cnt.read()
+#     if debug: print(f'Initial $A5 cnt: {a5_initial_val}')
+#
+#     if debug: print('>>Firing')
+#     StatusDevice(iota.CONTROLS.BPM_INJ_TRIGGER).reset()
+#     a5.reset()
+#     #bpmplc.set('ARMOrbit', adapter=relay)
+#     # Await actual fire event
+#     t0 = time.time()
+#     for i in range(20):
+#         a5_new_val = a5cnt.read()
+#         if a5_new_val > a5_initial_val:
+#             print(f'>>$A5 received (new: {a5_new_val}) - kick complete')
+#             return
+#         else:
+#             print(f'>>Awaiting $A5 {i}/{20} ({time.time() - t0:.3f}s)')
+#             time.sleep(0.1)
+#
+#     raise Exception('$A5 never received - something went wrong!')

@@ -27,7 +27,7 @@ class Device:
         self.value_tuple: Optional[Tuple] = None
         self.last_update: Optional[float] = None
         self.value = None
-        self.debug: bool = True
+        self.debug: bool = False
         self._device_set: Optional[DeviceSet] = None
 
     def get_history(self) -> list:
@@ -62,7 +62,7 @@ class DoubleDevice(Device):
             raise
         super().update(data, timestamp, source)
 
-    def read(self, adapter=None):
+    def read(self, adapter=None, verbose: bool = False):
         if not self._device_set:
             adapter = adapter or default_adapter or ACL(fallback=True)
             DoubleDeviceSet(self.name, members=[self], adapter=adapter).readonce()
@@ -113,10 +113,10 @@ class StatusDevice(Device):
             raise Exception("No measurement available")
         return self.ready
 
-    def read(self, adapter=None):
+    def read(self, adapter=None, verbose: bool = False):
         if not self._device_set:
             adapter = adapter or default_adapter or ACL(fallback=True)
-            StatusDeviceSet(self.name, members=[self], adapter=adapter).readonce()
+            StatusDeviceSet(self.name, members=[self], adapter=adapter).readonce(verbose)
         else:
             self._device_set.readonce()
         return self.value_string
@@ -144,7 +144,7 @@ class BPMDevice(Device):
         """
         super().__init__(name, drf2, history)
 
-    def read(self, adapter=None):
+    def read(self, adapter=None, verbose: bool = False):
         if not self._device_set:
             adapter = adapter or default_adapter or ACL(fallback=True)
             BPMDeviceSet(self.name, members=[self], adapter=adapter).readonce()
@@ -279,7 +279,7 @@ class DeviceSet:
             raise ValueError("Tree traversing writes are not supported")
         return cnt
 
-    def readonce(self, settings=False) -> int:
+    def readonce(self, settings: bool = False, verbose: bool = False) -> int:
         if not self.check_acquisition_supported(method='oneshot'):
             raise Exception(f'Acquisition not supported - have {self.adapter.supported}')
         if not self.check_acquisition_available(method='oneshot'):
@@ -287,7 +287,7 @@ class DeviceSet:
         if not self.devices:
             raise AttributeError("Cannot start acquisition on an empty set")
         if self.leaf:
-            cnt = self.adapter.readonce(self, settings=settings)
+            cnt = self.adapter.readonce(self, settings=settings, verbose=verbose)
         else:
             cnt = 0
             for c in self.children:
@@ -332,12 +332,12 @@ class DeviceSet:
 
 class DoubleDeviceSet(DeviceSet):
     def __init__(self, name: str, members: list, adapter=None):
-        leaf = all([isinstance(ds, Device) for ds in members])
+        leaf = all([isinstance(ds, DoubleDevice) for ds in members])
         if not leaf:
             raise AttributeError('Can only contain devices - use DeviceSet for coalescing')
         super().__init__(name, members, adapter)
 
-    def add(self, device: Device):
+    def add(self, device: DoubleDevice):
         if isinstance(device, DoubleDevice):
             super().add(device)
         else:
@@ -429,7 +429,7 @@ class FakeAdapter(Adapter):
         self.state = {'status': 'OFF', 'double': 0.0, 'ready': 'TRIPPED'}
         super().__init__()
 
-    def readonce(self, ds: DeviceSet, settings=False) -> int:
+    def readonce(self, ds: DeviceSet, settings: bool = False, verbose: bool = False) -> int:
         assert ds.leaf
         data = {}
         for k, d in ds.devices.items():
@@ -503,11 +503,15 @@ class ACL(Adapter):
         except ImportError:
             print('HTTP functionality requires httpx library')
             raise
+        tm = httpx.Timeout(timeout=20, connect_timeout=5)
+        pool = httpx.PoolLimits(soft_limit=25, hard_limit=25)
+        # self.aclient = httpx.AsyncClient()
+        # self.client = httpx.Client()
         if fallback:
-            self.client = httpx.Client(timeout=10.0)
+            self.client = httpx.Client(timeout=tm, pool_limits=pool)
         else:
             # define async client in separate variable to not forget
-            self.aclient = httpx.AsyncClient(timeout=10.0)
+            self.aclient = httpx.AsyncClient(timeout=tm)
         super().__init__()
 
     def __del__(self):
@@ -525,7 +529,17 @@ class ACL(Adapter):
             print(e)
             # raise
 
-    def readonce(self, ds: DeviceSet, settings=False) -> int:
+    def _raw_command(self, cmd):
+        """
+        Hacky raw command!!!
+        :param cmd:
+        :return:
+        """
+        acl = f'http://www-ad.fnal.gov/cgi-bin/acl.pl?acl={cmd}'
+        resp = self.client.get(acl)
+        return resp.text
+
+    def readonce(self, ds: DeviceSet, settings: bool = False, verbose: bool = False) -> int:
         assert ds.leaf
         device_dict = ds.devices
         if settings:
@@ -622,6 +636,9 @@ class ACL(Adapter):
                     # For weirdos that have stuff like 'db (low)'
                     data[devname] = np.array([float(v) for v in spl[2:-2]])
             else:
+                if len(spl) < 3:
+                    print(spl)
+                    raise Exception
                 data[devname] = float(spl[2])
         return data
 
@@ -631,7 +648,7 @@ class ACNETRelay(Adapter):
     Adapter based on Java commmand proxy. One of quickest, but can be error-prone. Requires async libraries.
     """
 
-    def __init__(self, address: str = "http://127.0.0.1:8080/", method=1):
+    def __init__(self, address: str = "http://127.0.0.1:8080/", method=1, verbose: bool = False):
         self.name = 'ACNETRelay'
         self.supported = ['oneshot', 'polling']
         self.rate_limit = [-1, -1]
@@ -639,6 +656,7 @@ class ACNETRelay(Adapter):
         self.address = address
         self.method = method
         self.comm_method = 1
+        self.verbose = verbose
         super().__init__()
 
         try:
@@ -648,31 +666,32 @@ class ACNETRelay(Adapter):
         except ImportError:
             print('Relay functionality requires certain libraries')
             raise
-        self.aclient = httpx.AsyncClient(timeout=20.0)
-        self.client = httpx.Client(timeout=20.0)
+        tm = httpx.Timeout(timeout=20, connect_timeout=2)
+        pool = httpx.PoolLimits(soft_limit=5, hard_limit=5)
+        # self.aclient = httpx.AsyncClient()
+        self.aclient = httpx.AsyncClient(timeout=tm)
+        # self.client = httpx.Client()
+        self.client = httpx.Client(timeout=tm, pool_limits=pool)
 
     def check_available(self, devices: dict, method=None):
         return len(devices) < 500
 
-    def readonce(self, ds: DeviceSet, settings: bool = False) -> int:
-        assert ds.leaf
-        device_dict = ds.devices
-        dev_names = [d.name for d in device_dict.values()]
-        c = self.aclient
-        if settings:
-            adds = '.SETTING'
-        else:
-            adds = '.READING'
+    def readonce(self, ds: DeviceSet, settings: bool = False, verbose: bool = False) -> int:
+        if verbose or self.verbose:
+            verbose = True
 
-        num_lists = min(len(ds.devices), 10)
+        assert ds.leaf
+        c = self.aclient
+        adds = '.SETTING' if settings else '.READING'
         if isinstance(ds, BPMDeviceSet):
             num_lists = len(ds.devices)
-        dev_lists = [list(l) for l in np.array_split(dev_names, num_lists)]
+        else:
+            num_lists = min(len(ds.devices), 10)
+        device_lists = [list(ll) for ll in np.array_split(list(ds.devices.values()), num_lists)]
         params = []
-        for dl in dev_lists:
+        for dl in device_lists:
             req_str_list = []
-            for dname in dl:
-                device = ds.devices[dname]
+            for device in dl:
                 if isinstance(device, BPMDevice):
                     if ds.array_length:
                         req_str_list.append(f'{device.name}{adds}' + f'[:{ds.array_length}]@I')
@@ -681,58 +700,57 @@ class ACNETRelay(Adapter):
                 elif isinstance(device, StatusDevice):
                     req_str_list.append(f'{device.name}.STATUS')
                 elif isinstance(device, DoubleDevice):
-                    req_str_list.append(f'{device.name + adds}')
+                    req_str_list.append(f'{device.name + adds}@I')
                 else:
                     raise Exception
             req_str = ';'.join(req_str_list)
 
             if self.comm_method == 0:
                 params.append({'requestType': 'V1_DRF2_READ_MULTI_CACHED',
-                           'request': req_str})
+                               'request': req_str})
             elif self.comm_method == 1:
                 params.append({'requestType': 'V1_DRF2_READ_SINGLE',
-                           'request': req_str})
+                               'request': req_str})
             else:
                 print(self.comm_method)
                 raise Exception
-        print(f'{self.name} : params {params}')
+        if verbose: print(f'{self.name} : params {params}')
 
         try:
             # async def get(json_lists):
-            #     rs = [await c.post(self.address, json=p) for p in json_lists]
-            #     print(rs)
-            #     return rs
-            # responses = asyncio.run(get(params))
+            #     results = [await c.post(self.address, json=p) for p in json_lists]
+            #     print(results)
+            #     return results
+            # results = asyncio.run(get(params))
             # def get(json_lists):
-            #     rs = [self.client.post(self.address, json=p) for p in json_lists]
-            #     #print(rs)
-            #     return rs
+            #     results = [self.client.post(self.address, json=p) for p in json_lists]
+            #     #print(results)
+            #     return results
             async def get(json_lists):
                 tasks = [c.post(self.address, json=p) for p in json_lists]
-                rs = await asyncio.gather(*tasks)
-                return rs
+                results = await asyncio.gather(*tasks)
+                return results
 
             responses = asyncio.run(get(params))
             t1 = datetime.datetime.utcnow().timestamp()
             data = {}
             for r in responses:
-                if not isinstance(ds, BPMDeviceSet):
-                    print(f'{self.name} : result {r._content}')
-                # if r['status_code'] == 200:
+                #if not isinstance(ds, BPMDeviceSet):
+                if verbose: print(f'{self.name} : result {r._content}')
                 if r.status_code == 200:
                     data.update(self._process(ds, r.json()))
                 else:
                     return -1
-            assert len(data) == len(device_dict)
-            for k, v in device_dict.items():
+            assert len(data) == len(ds.devices)
+            for k, v in ds.devices.items():
                 v.update(data[k], t1, self.name)
             return len(data)
         except Exception as e:
-            print(e, sys.exc_info())
+            print(f'{self.name} : EXCEPTION IN READONCE - {str(e)}')
+            #print(e, sys.exc_info())
             raise
 
     def _process(self, ds: DeviceSet, r):
-        #print(r)
         responses = r['responseJson']
         # print(responses)
         data = {}
@@ -744,6 +762,7 @@ class ACNETRelay(Adapter):
                 # print(v_decoded)
                 data[k.split('.')[0]] = np.frombuffer(v_decoded, dtype='>f8')[:ds.array_length]
         elif isinstance(ds, StatusDeviceSet):
+            # Status fields
             for (k, v) in responses.items():
                 data[k.split('.')[0]] = v
         else:
@@ -752,14 +771,17 @@ class ACNETRelay(Adapter):
                 data[k.split('.')[0]] = float(v)
         return data
 
-    def set(self, ds: DeviceSet, values: list) -> int:
+    def set(self, ds: DeviceSet, values: list, verbose: bool = False) -> int:
+        if verbose or self.verbose:
+            verbose = True
+
         assert ds.leaf
         assert len(values) == len(ds.devices) and np.ndim(values) == 1
         c = self.aclient
         try:
             async def __submit(json_lists):
                 rs = [await c.post(self.address, json=p) for p in json_lists]
-                print(f'{self.name} : result {rs}')
+                if verbose: print(f'{self.name} : result {rs}')
                 return rs
 
             params = []
@@ -776,12 +798,12 @@ class ACNETRelay(Adapter):
                                    'requestValue': str(value)})
                 else:
                     raise Exception
-            print(f'{self.name} : params {params}')
+            if verbose: print(f'{self.name} : params {params}')
             responses = asyncio.run(__submit(params))
             t1 = datetime.datetime.utcnow().timestamp()
             ok_cnt = 0
             for r in responses:
-                print(f'{self.name} : result {r._content}')
+                if verbose: print(f'{self.name} : result {r._content}')
                 # if r['status_code'] == 200:
                 if r.status_code == 200:
                     js = r.json()

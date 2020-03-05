@@ -27,6 +27,7 @@ def load_data_tbt(fpath: Path, verbose: bool = True, version: int = 1):
                                 'kickv': h5f['state'].attrs['kickv'],
                                 'kickh': h5f['state'].attrs['kickh'],
                                 'state': dict(h5f['state'].attrs),
+                                'ts': h5f.attrs['time_utcstamp'],
                                 **kick_arrays})
                 # df.loc[i] = [i, h5f['state'].attrs['kickv'], h5f['state'].attrs['kickh'], kick_arrays]
                 vlist = [v[0] for v in kick_arrays.values()]
