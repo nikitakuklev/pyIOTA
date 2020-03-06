@@ -84,7 +84,7 @@ class Task:
     @task(name='run_setup')
     def setup_run_setup(self, *args, p, beamline='iota', rootname='test',
                         acceptance=False, final=False, output=False, parameters=False, sigma=False,
-                        load_balance=False, silent=False):
+                        load_balance=False, silent=False, **kwargs):
         if silent:
             acceptance = final = output = parameters = sigma = False
         strings = [f'lattice = {self.lattice}',
@@ -111,7 +111,7 @@ class Task:
         return strings
 
     @task(name='run_control')
-    def setup_run_control(self, *args, n_passes=1, n_steps=1):
+    def setup_run_control(self, *args, n_passes=1, n_steps=1, **kwargs):
         assert not (np.isnan(n_passes) or np.isnan(n_steps))
         assert 1 <= n_passes <= 1e7 and 1 <= n_steps <= 1e6
         strings = [f'n_passes = {n_passes}',
@@ -176,7 +176,7 @@ class Task:
         return strings
 
     @task(name='track')
-    def action_track(self, *args, orbit='closed'):
+    def action_track(self, *args, orbit='closed', **kwargs):
         strings = ['soft_failure=0']
         if orbit == 'closed_center':
             strings.extend(
@@ -206,7 +206,7 @@ class Task:
         return strings
 
     @task(name='rf_setup')
-    def setup_rf(self, *args, harmonic=4, volts=0.0, create_file=False, each_step=False):
+    def setup_rf(self, *args, harmonic=4, volts=0.0, create_file=False, each_step=False, **kwargs):
         # iota.GetElementsOfType('RFCAVITY')[0]['VOLT'] * 1e6)
         strings = [f'harmonic = {harmonic}',
                    f'volts = {volts}']
@@ -216,6 +216,15 @@ class Task:
             strings.append('set_for_each_step = 1')
         return strings
 
+    @task(name='closed_orbit')
+    def setup_closed_orbit(self, *args, create_file=False, centroid_start=True, **kwargs):
+        strings = [f'closed_orbit_iterations = 10000',
+                   f'iteration_fraction = 0.5']
+        if create_file:
+            strings.append(f'output = {self.rf}/%s.clo')
+        if not centroid_start:
+            strings.append('start_from_centroid = 0')
+        return strings
     ###
 
     @task(name='load_parameters')

@@ -5,22 +5,22 @@ from types import SimpleNamespace
 
 
 class Writer:
-    def __init__(self, opt:dict):
+    def __init__(self, options: dict):
         try:
             sys.path.insert(1, Path.home().as_posix())
             import pymadx
         except ImportError:
             raise Exception('This class requires pymadx library!')
-        self.options = opt or {}
+        self.options = options or {}
         self.iota = None
 
-    def set_options(self, opt:dict) -> None:
+    def set_options(self, opt: dict) -> None:
         self.options = opt
 
     def _check_critical_options(self):
         assert self.iota
-        assert self.options['sr'] in [False,True]
-        assert self.options['isr'] in [False,True]
+        assert self.options['sr'] in [False, True]
+        assert self.options['isr'] in [False, True]
         for k in ['dip_kicks', 'quad_kicks', 'sext_kicks', 'oct_kicks']:
             assert isinstance(self.options[k], int) and 1 < self.options[k] < 128
 
@@ -72,10 +72,12 @@ class Writer:
         sl.append('!MAIN BENDS\n')
         for el in dipoles:
             idx = iota.IndexFromName(el['UNIQUENAME'])
-            de1 = iota[idx - 1]; de2 = iota[idx + 1]
+            de1 = iota[idx - 1]
+            de2 = iota[idx + 1]
 
             sl.append(f"{el['UNIQUENAME']}: CSBEND, l={el['L']:.10f}, angle={el['ANGLE']}, e1=0, e2=0, &\n")
-            sl.append(f"               h1={de1['H1']:+.10f}, h2={de2['H1']:+.10f}, hgap={de1['HGAP']}, fint={de1['FINT']}, &\n")
+            sl.append(
+                f"               h1={de1['H1']:+.10f}, h2={de2['H1']:+.10f}, hgap={de1['HGAP']}, fint={de1['FINT']}, &\n")
             sl.append(f"               EDGE_ORDER=1, EDGE1_EFFECTS=3, EDGE2_EFFECTS=3, &\n")
             # f.write('               edge_order=2, edge1_effects=2, edge2_effects=2, fse_correction=1, &\n') # Forum post says should work ok? but doesnt
             sl.append(f'                N_KICKS="dip_kicks", ISR="flag_isr", SYNCH_RAD="flag_synch"\n')
@@ -84,28 +86,34 @@ class Writer:
         sl.append('!MAIN QUADS\n')
         for el in [q for q in quads if q['UNIQUENAME'].startswith('Q')]:
             if el['UNIQUENAME'] in ['QC1R', 'QC2R', 'QC3R', 'QC1L', 'QC2L', 'QC3L']:
-                sl.append(f'{el["UNIQUENAME"]:<6}: KQUAD, l={el["L"]:.10f}, k1={el["K1L"] / el["L"]:+.10e}, N_KICKS="quad_kicks", ISR="flag_isr", SYNCH_RAD="flag_synch", tilt=0.0\n')
+                sl.append(
+                    f'{el["UNIQUENAME"]:<6}: KQUAD, l={el["L"]:.10f}, k1={el["K1L"] / el["L"]:+.10e}, N_KICKS="quad_kicks", ISR="flag_isr", SYNCH_RAD="flag_synch", tilt=0.0\n')
             else:
-                sl.append(f'{el["UNIQUENAME"]:<6}: KQUAD, l={el["L"]:.10f}, k1={el["K1L"] / el["L"]:+.10e}, N_KICKS="quad_kicks", ISR="flag_isr", SYNCH_RAD="flag_synch"\n')
+                sl.append(
+                    f'{el["UNIQUENAME"]:<6}: KQUAD, l={el["L"]:.10f}, k1={el["K1L"] / el["L"]:+.10e}, N_KICKS="quad_kicks", ISR="flag_isr", SYNCH_RAD="flag_synch"\n')
         sl.append('\n')
 
         sl.append('!COMBINED HV CORRECTORS+SKEW QUADS\n')
         for el in [q for q in quads if not q['UNIQUENAME'].startswith('Q')]:
             if el['UNIQUENAME'] in ['QC1R', 'QC2R', 'QC3R']:
-                sl.append(f'{el["UNIQUENAME"]:<6}: KQUAD, l={el["L"]:.10f}, k1={el["K1L"] / el["L"]:+.10e}, N_KICKS="quad_kicks", ISR="flag_isr", SYNCH_RAD="flag_synch"\n')
+                sl.append(
+                    f'{el["UNIQUENAME"]:<6}: KQUAD, l={el["L"]:.10f}, k1={el["K1L"] / el["L"]:+.10e}, N_KICKS="quad_kicks", ISR="flag_isr", SYNCH_RAD="flag_synch"\n')
             else:
-                sl.append(f'{el["UNIQUENAME"]:<6}: KQUAD, l={el["L"]:.10f}, k1={el["K1L"] / el["L"]:+.10e}, N_KICKS="quad_kicks", ISR="flag_isr", SYNCH_RAD="flag_synch"\n')
+                sl.append(
+                    f'{el["UNIQUENAME"]:<6}: KQUAD, l={el["L"]:.10f}, k1={el["K1L"] / el["L"]:+.10e}, N_KICKS="quad_kicks", ISR="flag_isr", SYNCH_RAD="flag_synch"\n')
         sl.append('\n')
 
         sl.append('!SEXTUPOLES\n')
         for el in sextupoles:
-            sl.append(f'{el["UNIQUENAME"]:<10}: KSEXT, l={el["L"]}, k2={el["K2L"] / el["L"]:.10e}, N_KICKS="sext_kicks", ISR="flag_isr", SYNCH_RAD="flag_synch"\n')
+            sl.append(
+                f'{el["UNIQUENAME"]:<10}: KSEXT, l={el["L"]}, k2={el["K2L"] / el["L"]:.10e}, N_KICKS="sext_kicks", ISR="flag_isr", SYNCH_RAD="flag_synch"\n')
         sl.append('\n')
 
         sl.append('! Nonlinear quasi-integrable insert - strengths set with param file later\n')
         for el in octupoles:
             # f.write('{:<10}: KOCT,l={},k3={},N_KICKS="oct_kicks"\n'.format(el['UNIQUENAME'], el['L'], el['K3L']/el['L']))
-            sl.append(f'{el["UNIQUENAME"]:<10}: KOCT, l={el["L"]}, k3={0:.10e}, N_KICKS="oct_kicks", ISR="flag_isr", SYNCH_RAD="flag_synch"\n')
+            sl.append(
+                f'{el["UNIQUENAME"]:<10}: KOCT, l={el["L"]}, k3={0:.10e}, N_KICKS="oct_kicks", ISR="flag_isr", SYNCH_RAD="flag_synch"\n')
         sl.append('\n')
 
         sl.append('!SOLENOIDS\n')

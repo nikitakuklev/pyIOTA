@@ -1,5 +1,7 @@
 import sys, os, shutil
 from pathlib import Path
+from typing import Optional
+
 import numpy as np
 import pandas as pd
 
@@ -13,6 +15,7 @@ class SDDS:
     """
     SDDSPython wrapper that provides nice dictionary-like interface, or a DataFrame view
     """
+
     def __init__(self, path, fast=False):
         if not os.path.exists(path):
             raise Exception(f'Path {path} is missing you fool!')
@@ -85,11 +88,20 @@ class SDDS:
         return pd.DataFrame(data=d)
 
 
-def read_parameters_to_df(knob, columns=None, p=0, enforce_unique_index=True):
+def read_parameters_to_df(knob: Path, columns: list = None, p: int = 0, enforce_unique_index: bool = True):
+    """
+    Helper method to read elegant parameter file to a dataframe.
+    :param knob:
+    :param columns:
+    :param p:
+    :param enforce_unique_index:
+    :return:
+    """
+    assert knob.exists() and knob.is_file()
     if columns is None:
         columns = ['ElementName', 'ElementType', 'ElementParameter', 'ParameterValue']
-    sd2 = SDDS(knob)
-    data = {k:sd2.c(k)[p,:] for k in columns}
+    sd2 = SDDS(str(knob))
+    data = {k: sd2.c(k)[p, :] for k in columns}
     df = pd.DataFrame(data=data, index=[data['ElementName'], data['ElementType'], data['ElementParameter']])
     if enforce_unique_index:
         df = df[df.ElementType != 'MARK']
@@ -98,9 +110,13 @@ def read_parameters_to_df(knob, columns=None, p=0, enforce_unique_index=True):
     return df.sort_index()
 
 
-def interpolate_parameters(reference_df, value, max_df, max_val, min_df=None, min_val=None, el_name=None, el_type=None, el_parameter=None):
+def interpolate_parameters(reference_df: pd.DataFrame, value: float, max_df: pd.DataFrame, max_val: float,
+                           min_df: Optional[pd.DataFrame] = None, min_val: Optional[float] = None,
+                           el_name: Optional[str] = None, el_type: Optional[str] = None,
+                           el_parameter: Optional[str] = None):
     """
-    Interpolates from a reference parameter set to a knob set, proportional to the desired value. If no min state given, assumed to be the negative of max knob.
+    Interpolates from reference parameters to another parameter set, proportional to the desired value.
+    If no min state given, assumed to be the negative of max knob.
     """
     df = reference_df
     if el_name:
@@ -112,32 +128,32 @@ def interpolate_parameters(reference_df, value, max_df, max_val, min_df=None, mi
     assert len(df) > 0
     assert max_val > 0
     df = df.copy()
-    #print('Initial:',df.iloc[0].values)
+    # print('Initial:',df.iloc[0].values)
     if value == 0:
         return df
     elif value < 0:
         if min_df is None:
             endpoint = max_df
-            ratio = value/max_val
+            ratio = value / max_val
         else:
             assert min_val < 0
             endpoint = min_df
-            ratio = value/min_val
-        #print(minfile)
+            ratio = value / min_val
+        # print(minfile)
     else:
         endpoint = max_df
-        ratio = value/max_val
-    #if not df.index.equals(_filter_df(endpoint, el_name, el_type, el_parameter).index):
+        ratio = value / max_val
+    # if not df.index.equals(_filter_df(endpoint, el_name, el_type, el_parameter).index):
     if not np.all(df.index.isin(endpoint.index)):
         print(df.index)
         print(endpoint.index)
         raise Exception('Parameter file index mismatch - aborting!')
     assert df.index.is_unique
-    delta = ratio*(endpoint.loc[:,'ParameterValue']-df.loc[:,'ParameterValue'])
-    df.loc[:,'ParameterValue'] = df.loc[:,'ParameterValue'] + delta
-    #print(ratio)
-    #print(dfend.iloc[0], dfref.iloc[0])
-    #print('Final:',df.iloc[0].values)
+    delta = ratio * (endpoint.loc[:, 'ParameterValue'] - df.loc[:, 'ParameterValue'])
+    df.loc[:, 'ParameterValue'] = df.loc[:, 'ParameterValue'] + delta
+    # print(ratio)
+    # print(dfend.iloc[0], dfref.iloc[0])
+    # print('Final:',df.iloc[0].values)
     return df
 
 
@@ -150,31 +166,41 @@ def _filter_df(df, el_name, el_type, el_parameter):
         df = df.loc[(df.ElementParameter == el_parameter)]
     return df
 
+
 # pyIOTA.elegant.io.interpolate_parameters(df_baseline, 0.1, quad_knobs['nux'][0][0], 0.1).loc['QA2R','KQUAD','K1']
 # pyIOTA.elegant.io.interpolate_parameters(df_baseline, -0.1, quad_knobs['nux'][0][0], 0.1).loc['QA2R','KQUAD','K1']
 # pyIOTA.elegant.io.interpolate_parameters(df_baseline, -0.1, quad_knobs['nux'][0][0], 0.1, quad_knobs['nux'][0][0], -0.1).loc['QA2R','KQUAD','K1']
 # pyIOTA.elegant.io.interpolate_parameters(df_baseline, 0, quad_knobs['nux'][0][0], 0.1).loc['QA2R','KQUAD','K1']
 # pyIOTA.elegant.io.interpolate_parameters(quad_knobs['nux'][0][0], 0, quad_knobs['nux'][0][0], 0.1).loc['QA2R','KQUAD','K1']
 
-def write_df_to_parameter_file(knob, df):
-    df = df.loc[:,['ElementName','ElementParameter','ParameterValue']]
-    #print(df)
+
+def write_df_to_parameter_file(fpath: Path, df: pd.DataFrame):
+    """
+    Helper method - write dataframe to knob file (ASCII encoding).
+    :param fpath:
+    :param df:
+    """
+    assert not fpath.is_dir()
+    if fpath.exists():
+        print(f'Warning - knob {fpath} already exists, overwriting')
+    df = df.loc[:, ['ElementName', 'ElementParameter', 'ParameterValue']]
+    # print(df)
     x = sdds.SDDS(10)
-    x.setDescription("params", knob)
+    x.setDescription("params", fpath)
     names = ['ElementName', 'ElementParameter', 'ParameterValue']
     types = [x.SDDS_STRING, x.SDDS_STRING, x.SDDS_DOUBLE]
-    for i,n in enumerate(names):
+    for i, n in enumerate(names):
         x.defineSimpleColumn(names[i], types[i])
-    columnData = [[[]],[[]],[[]]]
+    columnData = [[[]], [[]], [[]]]
     for row in df.itertuples():
-        #print(row)
-        for i,r in enumerate(row):
+        # print(row)
+        for i, r in enumerate(row):
             if i > 0:
-                columnData[i-1][0].append(r)
-    for i,n in enumerate(names):
-         x.setColumnValueLists(names[i], columnData[i])
-    #print(columnData)
-    x.save(knob)
+                columnData[i - 1][0].append(r)
+    for i, n in enumerate(names):
+        x.setColumnValueLists(names[i], columnData[i])
+    # print(columnData)
+    x.save(str(fpath))
     del x
 
 
@@ -196,6 +222,7 @@ def prepare_folders(work_folder, data_folder, dirs_to_wipe, dirs_to_create, wipe
             return n_deleted
         else:
             return -1
+
     for path in dirs_to_wipe:
         n = wipe_directory(path)
         print(f'Wiping {path:<60s} deleted {n} objects')
