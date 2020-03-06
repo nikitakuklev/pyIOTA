@@ -206,10 +206,10 @@ class Task:
         return strings
 
     @task(name='rf_setup')
-    def setup_rf(self, *args, harmonic=4, volts=0.0, create_file=False, each_step=False, **kwargs):
+    def setup_rf(self, *args, harmonic=4, total_voltage=0.0, create_file=False, each_step=False, **kwargs):
         # iota.GetElementsOfType('RFCAVITY')[0]['VOLT'] * 1e6)
         strings = [f'harmonic = {harmonic}',
-                   f'volts = {volts}']
+                   f'total_voltage = {total_voltage}']
         if create_file:
             strings.append(f'filename = {self.rf}/%s.rf')
         if each_step:

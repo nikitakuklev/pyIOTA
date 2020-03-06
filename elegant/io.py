@@ -174,9 +174,10 @@ def _filter_df(df, el_name, el_type, el_parameter):
 # pyIOTA.elegant.io.interpolate_parameters(quad_knobs['nux'][0][0], 0, quad_knobs['nux'][0][0], 0.1).loc['QA2R','KQUAD','K1']
 
 
-def write_df_to_parameter_file(fpath: Path, df: pd.DataFrame):
+def write_df_to_parameter_file(fpath: Path, df: pd.DataFrame, parameters: dict = None):
     """
     Helper method - write dataframe to knob file (ASCII encoding).
+    :param parameters:
     :param fpath:
     :param df:
     """
@@ -186,9 +187,17 @@ def write_df_to_parameter_file(fpath: Path, df: pd.DataFrame):
     df = df.loc[:, ['ElementName', 'ElementParameter', 'ParameterValue']]
     # print(df)
     x = sdds.SDDS(10)
-    x.setDescription("params", fpath)
+    x.setDescription("params", str(fpath))
     names = ['ElementName', 'ElementParameter', 'ParameterValue']
     types = [x.SDDS_STRING, x.SDDS_STRING, x.SDDS_DOUBLE]
+    if parameters:
+        for (k, v) in parameters.items():
+            if isinstance(v, int):
+                v = float(v)
+            if not isinstance(v, float):
+                raise Exception("Only numeric parameters supported - add strings/etc. manually plz")
+            x.defineSimpleParameter(k, x.SDDS_DOUBLE)
+            x.setParameterValueList(k, [v])
     for i, n in enumerate(names):
         x.defineSimpleColumn(names[i], types[i])
     columnData = [[[]], [[]], [[]]]

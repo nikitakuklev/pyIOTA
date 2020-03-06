@@ -6,11 +6,6 @@ from types import SimpleNamespace
 
 class Writer:
     def __init__(self, options: dict):
-        try:
-            sys.path.insert(1, Path.home().as_posix())
-            import pymadx
-        except ImportError:
-            raise Exception('This class requires pymadx library!')
         self.options = options or {}
         self.iota = None
 
@@ -23,8 +18,15 @@ class Writer:
         assert self.options['isr'] in [False, True]
         for k in ['dip_kicks', 'quad_kicks', 'sext_kicks', 'oct_kicks']:
             assert isinstance(self.options[k], int) and 1 < self.options[k] < 128
+        if 'aperture_scale' not in self.options:
+            self.options['aperture_scale'] = 1
 
     def import_from_madx(self, path):
+        try:
+            sys.path.insert(1, Path.home().as_posix())
+            import pymadx
+        except ImportError:
+            raise Exception('This class requires pymadx library!')
         self.iota = pymadx.Data.Tfs(path)
 
     def generate_lattice(self):
@@ -46,6 +48,7 @@ class Writer:
         vkickers = iota.GetElementsOfType('VKICKER')
         cavities = iota.GetElementsOfType('RFCAVITY')
         monitors = iota.GetElementsOfType('MONITOR')
+        nllenses = iota.GetElementsOfType('NLLENS')
         header = iota.header
 
         # Preamble
@@ -121,6 +124,11 @@ class Writer:
             sl.append(f'{el["UNIQUENAME"]:<10}: EDRIFT, l={el["L"]}\n')
         sl.append('\n')
 
+        sl.append('!NL MAGNET\n')
+        for el in nllenses:
+            sl.append('{:<10}: EDRIFT, l={}\n'.format(el['UNIQUENAME'], el['L']))
+        sl.append('\n')
+
         sl.append('!VKICKERS\n')
         for el in vkickers:
             # f.write('{:<10}: EVKICK,l={},kick={}\n'.format(el['UNIQUENAME'], el['L'], 0))
@@ -172,7 +180,12 @@ class Writer:
         # f.write('MA1: MAXAMP, X_MAX=0.050, Y_MAX=0.050, ELLIPTICAL=1 \n')
         sl.append('MA1: MAXAMP, X_MAX=0.0381, Y_MAX=0.0381, ELLIPTICAL=1 \n')  # 1.5x aperture
         # f.write('APER: ECOL, X_MAX=0.008, Y_MAX=0.008 \n')
-        sl.append('APER: ECOL, X_MAX=0.005925, Y_MAX=0.00789 \n')  # 1.5x actual NL aperture
+        #sl.append('APER: ECOL, X_MAX=0.005925, Y_MAX=0.00789 \n')  # 1.5x actual NL aperture
+        if opt.aperture_scale != 1:
+            print(f'Lattice aperture scaled by {opt.aperture_scale}')
+            sl.append(f'APER: ECOL, X_MAX={3.9446881e-3 * opt.aperture_scale}, Y_MAX={5.25958413e-3 * opt.aperture_scale} \n')
+        else:
+            sl.append('APER: ECOL, X_MAX=3.9446881e-3, Y_MAX=5.25958413e-3 \n')  # 1x actual NL aperture
         # f.write('W1: WATCH, MODE="coordinate", INTERVAL=1, FILENAME="%s_w1.track"')
         sl.append('\n')
 
@@ -196,7 +209,7 @@ class Writer:
                     # print(s)
         wrapstr = 'iota: LINE=(CHRG, MAL, RC, MA1, APER, {})\n'.format(', '.join(seq2))
         sl.append(textwrap.fill(wrapstr, break_long_words=False, break_on_hyphens=False).replace('\n', ' &\n'))
-        sl.append('\n')
+        sl.append('\n\n')
         sl.append('!Short version has no monitors or markers, from elegant forum might make parallel version faster\n')
         seq = list(iota.sequence)
         dipedge_names = [el['UNIQUENAME'] for el in iota.GetElementsOfType('DIPEDGE')] + \
