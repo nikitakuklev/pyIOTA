@@ -1,9 +1,14 @@
-import pyIOTA
+import uuid
+from pathlib import Path
 
-from .frontends import DeviceSet, StatusDevice, DoubleDevice
-import time
+import pyIOTA
+from .frontends import DeviceSet, StatusDevice, DoubleDevice, DoubleDeviceSet, BPMDevice, BPMDeviceSet, ACNETRelay, ACL
+import time, datetime
 import pyIOTA.iota as iota
+from pyIOTA.sixdsim.io import Knob
+import pyIOTA.acnet.utils as acutils
 import numpy as np
+import pandas as pd
 
 
 def trigger_bpms_orbit_mode(debug: bool = False):
@@ -11,7 +16,134 @@ def trigger_bpms_orbit_mode(debug: bool = False):
     StatusDevice(iota.CONTROLS.BPM_ORB_TRIGGER).reset()
 
 
-def inject(bpms: bool = False, debug: bool = False):
+def get_bpm_data(bpm_ds=None, mode='tbt', kickv=0.0, kickh=0.0,
+                 read_beam_current=True, read_state=True, read_aux=True, state_ds=None,
+                 check_sequence_id=True, last_sequence_id=None, save=False, fpath=None, save_repeats=False):
+    state = {}
+    if read_state:
+        if state_ds is None:
+            knobs_to_save = iota.run2.MASTER_STATE_CURRENTS  # all iota magnets + RF + kickers
+            state_ds = DoubleDeviceSet(name='state', members=[DoubleDevice(d) for d in knobs_to_save])
+        nstate = state_ds.readonce(settings=True)
+        state.update({d.name: d.value for d in state_ds.devices.values()})
+    else:
+        nstate = 0
+    state['kickv'] = kickv
+    state['kickh'] = kickh
+
+    if read_beam_current:
+        state[iota.run2.OTHER.BEAM_CURRENT_AVERAGE] = DoubleDevice(iota.run2.OTHER.BEAM_CURRENT_AVERAGE).read()
+
+    if read_aux:
+        aux = iota.run2.OTHER.AUX_DEVICES  # all iota magnets + RF + kickers
+        state_ds = DoubleDeviceSet(name='state', members=[DoubleDevice(d) for d in aux])
+        nstate2 = state_ds.readonce()
+        state.update({d.name: d.value for d in state_ds.devices.values()})
+        nstate += nstate2
+
+    if bpm_ds is None:
+        bpms = [BPMDevice(b) for b in iota.BPMS.ALLA]
+        bpm_ds = BPMDeviceSet(name='bpms', members=bpms, adapter=ACNETRelay(method=1), enforce_array_length=None)
+    nbpm = bpm_ds.readonce(verbose=False)
+    if mode == 'tbt':
+        bpm_ds.array_length = None
+        data = {d.name: d.value for d in bpm_ds.devices.values()}
+    else:
+        bpm_ds.array_length = 2048
+        data = {d.name: d.value for d in bpm_ds.devices.values()}
+
+    state['aq_timestamp'] = datetime.datetime.utcnow().timestamp()
+    state['run_uuid'] = uuid.uuid4()
+
+    repeat_data = False
+    if check_sequence_id:
+        for i, (k, v) in enumerate(data.items()):
+            val_last_ret = int(v[0])
+            if last_sequence_id is None:
+                break
+            else:
+                if int(v[0]) == last_sequence_id:
+                    print('Sequence number did not change! Skipping!')
+                    repeat_data = True
+                    break
+
+        for i, (k, v) in enumerate(data.items()):
+            if i == 0:
+                val_seq = int(v[0])
+            else:
+                if val_seq != int(v[0]):
+                    print(f'Sequence number is not uniform - {val_seq} vs {int(v[0])} on BPM {k}(#{i})')
+                    # raise Exception
+                    break
+    else:
+        val_seq = -1
+        val_last_ret = -1
+
+    datadict = [{'idx': 0.0, 'kickv': kickv, 'kickh': kickh, 'state': state, **data}]
+    df = pd.DataFrame(data=datadict)
+
+    if (save_repeats or not repeat_data) and save:
+        savedate = datetime.datetime.now().strftime("%Y_%m_%d")
+        fpath = Path(fpath) / f'{savedate}'
+        acutils.save_data_tbt(fpath, df)
+        saved_ok = True
+    else:
+        saved_ok = False
+
+    return data, state, val_last_ret, saved_ok
+
+
+def transition(final_state: Knob, steps: int = 5, verbose: bool = True, extra_final_setting=True):
+    """
+    Transition sequencing - moves towards knob state in uniform, smaller steps.
+    :param extra_final_setting:
+    :param final_state:
+    :param steps:
+    :param verbose:
+    :return:
+    """
+    if not final_state.absolute:
+        if verbose: print(f'Add relative knob ({final_state}) in ({steps}) steps')
+        initial_state = final_state.copy()
+        initial_state.read_current_state()
+        if verbose: print(f'Current state read OK')
+        delta_knob = final_state / steps
+        for step in range(1, steps + 1):
+            if verbose: print(f'{step}/{steps} ', end='')
+            intermediate_state = initial_state + delta_knob * step
+            intermediate_state.set(verbose=verbose)
+        if extra_final_setting:
+            (initial_state+final_state).set(verbose=verbose)
+        if verbose: print(f'Done')
+    else:
+        if verbose: print(f'Transitioning to ({final_state}) in ({steps}) steps')
+        initial_state = final_state.copy()
+        initial_state.read_current_state()
+        if verbose: print(f'Current state read OK')
+        delta_knob = (final_state - initial_state) / steps
+        for step in range(1, steps + 1):
+            if verbose: print(f'{step}/{steps} ', end='')
+            intermediate_state = initial_state + delta_knob * step
+            intermediate_state.set(verbose=verbose)
+        if extra_final_setting:
+            final_state.set(verbose=verbose)
+        if verbose: print(f'Done')
+
+
+def inject_until_current(arm_bpms: bool = False, debug: bool = False, current: float = 1.0, limit: int = 10):
+    ibeama = DoubleDevice(iota.run2.OTHER.BEAM_CURRENT_AVERAGE)
+    for i in range(limit):
+        inject(arm_bpms=arm_bpms, debug=debug)
+        time.sleep(1.0)
+        i = ibeama.read()
+        if i < current:
+            print(f'Injection loop - got {i}mA - goal met')
+            break
+        else:
+            print(f'Injection loop - got {i}mA - retrying')
+
+
+def inject(arm_bpms: bool = False, debug: bool = False):
     a6cnt = DoubleDevice(iota.CONTROLS.TRIGGER_A6)
 
     if debug: print('>>Setting up Chip PLC')
@@ -77,7 +209,7 @@ def inject(bpms: bool = False, debug: bool = False):
         print('FYI - SHUTTER CLOSED ARGGGG!!!!')
     if not shutter.ready:
         print('MPS FAULT!')
-        raise Exception
+        raise Exception("MPS FAULT - ABORTING INJECTION")
 
     if debug: print('>>Awaiting A8')
     acl = pyIOTA.acnet.frontends.ACL(fallback=True)
@@ -85,7 +217,7 @@ def inject(bpms: bool = False, debug: bool = False):
 
     if debug: print('>>Firing')
     inj = DoubleDevice(iota.CONTROLS.FAST_LASER_INJECTOR)
-    if bpms:
+    if arm_bpms:
         StatusDevice(iota.CONTROLS.BPM_INJ_TRIGGER).reset()
     a6.reset()
     inj.set(1)
@@ -217,7 +349,6 @@ def kick(vertical_kv: float = 0.0, horizontal_kv: float = 0.0,
             time.sleep(0.1)
 
     raise Exception('$A5 never received - something went wrong!')
-
 
 # def kick_vertical(vertical_kv: float = 0.0, restore: bool = False, debug: bool = False):
 #     assert 1.0 > vertical_kv >= 0.0

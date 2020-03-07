@@ -1,5 +1,6 @@
 import itertools
 
+
 class BPMS:
 
     @staticmethod
@@ -131,6 +132,8 @@ class OTHER:
     KICKERS = ['N:IKPSV', 'N:IKPSH', 'N:IKPSVX', 'N:IKPSVD']
     BEAM_CURRENT = 'N:IBEAM'
     BEAM_CURRENT_AVERAGE = 'N:IBEAMA'
+    WCM_PARAMS = ['N:IWCMBF','N:IWCMBR','N:IWCMI','N:IWCMBP','N:IRFEPA','N:IRFEPP']
+    AUX_DEVICES = [BEAM_CURRENT] + [BEAM_CURRENT_AVERAGE] + WCM_PARAMS
 
 
 class CONTROLS:

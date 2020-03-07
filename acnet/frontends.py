@@ -4,7 +4,6 @@ import collections
 import sys
 import datetime
 import time
-import json
 from typing import Optional, Tuple
 
 import numpy as np
@@ -175,6 +174,7 @@ class DeviceSet:
     """
 
     def __init__(self, name: str, members: list, adapter=None, method="oneshot"):
+        adapter = adapter or default_adapter or ACL(fallback=True)
         node = all([isinstance(ds, DeviceSet) for ds in members])
         leaf = all([isinstance(ds, Device) for ds in members])
         assert node or leaf
@@ -266,15 +266,17 @@ class DeviceSet:
         else:
             return all([c.check_acquisition_supported(method) for c in self.children])
 
-    def set(self, values) -> int:
+    def set(self, values: list, verbose: bool = False) -> int:
         if not self.adapter.check_setting_supported():
             raise Exception(f'Setting is not support for adapter {self.adapter.__class__}')
         if not self.check_acquisition_available(method='oneshot'):
             return 0
         if not self.devices:
             raise AttributeError("Cannot start acquisition on an empty set")
+        if len(values) != len(self.devices):
+            raise AttributeError("Value list length does not match number of devices in set")
         if self.leaf:
-            cnt = self.adapter.set(self, values)
+            cnt = self.adapter.set(self, values, verbose)
         else:
             raise ValueError("Tree traversing writes are not supported")
         return cnt
@@ -511,6 +513,8 @@ class ACL(Adapter):
             self.client = httpx.Client(timeout=tm, pool_limits=pool)
         else:
             # define async client in separate variable to not forget
+            import nest_asyncio
+            nest_asyncio.apply()
             self.aclient = httpx.AsyncClient(timeout=tm)
         super().__init__()
 
@@ -648,7 +652,7 @@ class ACNETRelay(Adapter):
     Adapter based on Java commmand proxy. One of quickest, but can be error-prone. Requires async libraries.
     """
 
-    def __init__(self, address: str = "http://127.0.0.1:8080/", method=1, verbose: bool = False):
+    def __init__(self, address: str = "http://127.0.0.1:8080/", method=1,set_multi=False, verbose: bool = False):
         self.name = 'ACNETRelay'
         self.supported = ['oneshot', 'polling']
         self.rate_limit = [-1, -1]
@@ -656,6 +660,7 @@ class ACNETRelay(Adapter):
         self.address = address
         self.method = method
         self.comm_method = 1
+        self.set_method_multi = set_multi
         self.verbose = verbose
         super().__init__()
 
@@ -735,7 +740,7 @@ class ACNETRelay(Adapter):
             t1 = datetime.datetime.utcnow().timestamp()
             data = {}
             for r in responses:
-                #if not isinstance(ds, BPMDeviceSet):
+                # if not isinstance(ds, BPMDeviceSet):
                 if verbose: print(f'{self.name} : result {r._content}')
                 if r.status_code == 200:
                     data.update(self._process(ds, r.json()))
@@ -747,7 +752,7 @@ class ACNETRelay(Adapter):
             return len(data)
         except Exception as e:
             print(f'{self.name} : EXCEPTION IN READONCE - {str(e)}')
-            #print(e, sys.exc_info())
+            # print(e, sys.exc_info())
             raise
 
     def _process(self, ds: DeviceSet, r):
@@ -771,53 +776,139 @@ class ACNETRelay(Adapter):
                 data[k.split('.')[0]] = float(v)
         return data
 
+    def _process_settings(self, ds: DeviceSet, r):
+        responses = r['responseJson']
+        # print(responses)
+        data = {}
+        if isinstance(ds, BPMDeviceSet):
+            # Working in array base 64 mode
+            for (k, v) in responses.items():
+                # print(v)
+                v_decoded = base64.b64decode(v)
+                # print(v_decoded)
+                data[k.split('.')[0]] = np.frombuffer(v_decoded, dtype='>f8')[:ds.array_length]
+        elif isinstance(ds, StatusDeviceSet):
+            # Status fields
+            for (k, v) in responses.items():
+                data[k.split('.')[0]] = v
+        else:
+            # Double values
+            for (k, v) in responses.items():
+                data[k.split('.')[0]] = v
+        return data
+
     def set(self, ds: DeviceSet, values: list, verbose: bool = False) -> int:
         if verbose or self.verbose:
+            print(f'{self.name} : SETTING : {verbose} : {self.verbose}')
             verbose = True
 
         assert ds.leaf
         assert len(values) == len(ds.devices) and np.ndim(values) == 1
         c = self.aclient
         try:
-            async def __submit(json_lists):
-                rs = [await c.post(self.address, json=p) for p in json_lists]
-                if verbose: print(f'{self.name} : result {rs}')
-                return rs
+            if self.set_method_multi:
 
-            params = []
-            for device, value in zip(ds.devices.values(), values):
-                if isinstance(device, BPMDevice):
-                    raise Exception(f'Not allowed to set BPM device {device.name}')
-                elif isinstance(device, StatusDevice):
-                    params.append({'requestType': 'V1_DRF2_SET_SINGLE',
-                                   'request': device.name + '.CONTROL',
-                                   'requestValue': value})
-                elif isinstance(device, DoubleDevice):
-                    params.append({'requestType': 'V1_DRF2_SET_SINGLE',
-                                   'request': device.name + '.SETTING',
-                                   'requestValue': str(value)})
-                else:
-                    raise Exception
-            if verbose: print(f'{self.name} : params {params}')
-            responses = asyncio.run(__submit(params))
-            t1 = datetime.datetime.utcnow().timestamp()
-            ok_cnt = 0
-            for r in responses:
-                if verbose: print(f'{self.name} : result {r._content}')
-                # if r['status_code'] == 200:
-                if r.status_code == 200:
-                    js = r.json()
-                    if "0 0" not in js['responseJson'][js['request']]:
-                        print(f'Setting failure: {js}')
-                        # raise Exception
-                        return -1
+                async def __submit(json_lists):
+                    rs = [await c.post(self.address, json=p) for p in json_lists]
+                    if verbose: print(f'{self.name} : result {rs}')
+                    return rs
+
+                params = []
+                num_lists = min(len(ds.devices), 5)
+                device_lists = [list(ll) for ll in np.array_split(list(ds.devices.values()), num_lists)]
+                val_lists = [list(ll) for ll in np.array_split(values, num_lists)]
+                for dl, vl in zip(device_lists, val_lists):
+                    if isinstance(ds, StatusDeviceSet):
+                        params.append({'requestType': 'V1_DRF2_SET_MULTI',
+                                       'request': ";".join([device.name + '.CONTROL' for device in dl]),
+                                       'requestValue': ";".join(vl)})
+                    elif isinstance(ds, DoubleDeviceSet):
+                        params.append({'requestType': 'V1_DRF2_SET_MULTI',
+                                       'request': ";".join([device.name + '.SETTING' for device in dl]),
+                                       'requestValue': ";".join([str(v) for v in vl])})
+                    elif isinstance(ds, BPMDeviceSet):
+                        raise Exception(f'Not allowed to set BPM sets {ds.name}')
                     else:
+                        raise Exception
+                if verbose: print(f'{self.name} : params {params}')
+                responses = asyncio.run(__submit(params))
+                t1 = datetime.datetime.utcnow().timestamp()
+                ok_cnt = 0
+                data = {}
+                for r in responses:
+                    if verbose: print(f'{self.name} : result {r._content}')
+                    if r.status_code == 200:
+                        data.update(self._process_settings(ds, r.json()))
+                    else:
+                        raise Exception
+                for (k, v) in data.items():
+                    if "0 0" in v or "72 1" in v:
                         ok_cnt += 1
-                else:
+                        continue
+                    try:
+                        if isinstance(self, DoubleDeviceSet):
+                            float(v)
+                            ok_cnt += 1
+                        else:
+                            if 'Error' not in v:
+                                ok_cnt += 1
+                            else:
+                                raise Exception
+                    except Exception as e:
+                        print(f'Setting failure: {v}')
+                        # raise Exception
+                if ok_cnt != len(ds.devices):
+                    print(f'Only {ok_cnt}/{len(ds.devices)} settings succeeded!')
                     raise Exception
-                    return -1
-            assert ok_cnt == len(ds.devices)
-            return ok_cnt
+                return ok_cnt
+            else:
+                async def __submit(json_lists):
+                    rs = [await c.post(self.address, json=p) for p in json_lists]
+                    if verbose: print(f'{self.name} : result {rs}')
+                    return rs
+
+                params = []
+                for device, value in zip(ds.devices.values(), values):
+                    if isinstance(device, BPMDevice):
+                        raise Exception(f'Not allowed to set BPM device {device.name}')
+                    elif isinstance(device, StatusDevice):
+                        params.append({'requestType': 'V1_DRF2_SET_SINGLE',
+                                       'request': device.name + '.CONTROL',
+                                       'requestValue': value})
+                    elif isinstance(device, DoubleDevice):
+                        params.append({'requestType': 'V1_DRF2_SET_SINGLE',
+                                       'request': device.name + '.SETTING',
+                                       'requestValue': str(value)})
+                    else:
+                        raise Exception
+                if verbose: print(f'{self.name} : params {params}')
+                responses = asyncio.run(__submit(params))
+                t1 = datetime.datetime.utcnow().timestamp()
+                ok_cnt = 0
+                for r in responses:
+                    if verbose: print(f'{self.name} : result {r._content}')
+                    # if r['status_code'] == 200:
+                    if r.status_code == 200:
+                        js = r.json()
+                        if "0 0" not in js['responseJson'][js['request']]:
+                            try:
+                                if isinstance(self, DoubleDevice):
+                                    float(js['responseJson'][js['request']])
+                                    ok_cnt += 1
+                                else:
+                                    ok_cnt += 1
+                                    pass
+                            except Exception as e:
+                                print(f'Setting failure: {js}')
+                                # raise Exception
+                                return -1
+                        else:
+                            ok_cnt += 1
+                    else:
+                        raise Exception
+                        return -1
+                assert ok_cnt == len(ds.devices)
+                return ok_cnt
         except Exception as e:
             print(e, sys.exc_info())
             raise

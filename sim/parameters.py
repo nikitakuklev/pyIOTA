@@ -16,9 +16,10 @@ class Parser:
 class Generator:
     """
     Generates sets of simulation parameters by permuting given set of value lists, and generates
-    strings suitable for use in file names. Names can be parsed back with Parser class. Can be use as UUID.
+    strings suitable for use in file names. Names can be parsed back with Parser class. Can be used as UUID.
     """
-    def __init__(self, parameter_spec=None):
+
+    def __init__(self, parameter_spec: dict = None):
         self.parameters = parameter_spec or {}
         self.name_links = {}
 
@@ -38,27 +39,28 @@ class Generator:
         """
         assert not self.name_links
         if not override: assert parameter not in self.parameters
-        assert isinstance(parameter, str) or (isinstance(parameter,tuple) and all((isinstance(ps,str) for ps in parameter)))
+        assert isinstance(parameter, str) or (
+                    isinstance(parameter, tuple) and all((isinstance(ps, str) for ps in parameter)))
         if isinstance(values, (collections.Sequence, np.ndarray)) and not isinstance(values, str):
             values = list(values)
         else:
             values = [values]
         self.parameters[parameter] = values
 
-    def add_parameters(self, parameter_spec:dict) -> None:
+    def add_parameters(self, parameter_spec: dict) -> None:
         """
         Add parameters from dictionary.
         :param parameter_spec:
         :return:
         """
-        assert isinstance(parameter_spec,dict)
+        assert isinstance(parameter_spec, dict)
         assert not self.name_links
-        [self.add_parameter(k,v) for (k,v) in parameter_spec.items()]
+        [self.add_parameter(k, v) for (k, v) in parameter_spec.items()]
 
-    def set_parameters(self, parameter_spec:dict) -> None:
+    def set_parameters(self, parameter_spec: dict) -> None:
         self.parameters = parameter_spec
 
-    def add_label_link(self, link_name:str, links:list) -> None:
+    def add_label_link(self, link_name: str, links: list) -> None:
         assert link_name not in self.name_links
         assert isinstance(links, list)
         assert all([l in self._flatten_parameters() for l in links])
@@ -83,24 +85,24 @@ class Generator:
         df_data = {}
         p_idx = 0
         for p in self.parameters:
-            if isinstance(p,str):
+            if isinstance(p, str):
                 df_data[p] = np.array([v[p_idx] for v in permutations])
                 p_idx += 1
-                #print(p, df_data[p][0])
-            elif isinstance(p,tuple):
+                # print(p, df_data[p][0])
+            elif isinstance(p, tuple):
                 for sub_p in p:
                     df_data[sub_p] = np.array([v[p_idx] for v in permutations])
-                    #print(sub_p, df_data[sub_p][0])
+                    # print(sub_p, df_data[sub_p][0])
                 p_idx += 1
 
         df = pd.DataFrame(data=df_data)
         if generate_labels:
             self.name_links['label'] = df.columns
-            label_strings = {k:[] for k in self.name_links.keys()}
+            label_strings = {k: [] for k in self.name_links.keys()}
             for r in df.itertuples(index=False):
                 for (label, links) in self.name_links.items():
                     s = ['_']
-                    for (k, v) in zip(r._fields,r):
+                    for (k, v) in zip(r._fields, r):
                         if k in links:
                             if isinstance(v, str):
                                 s.append(f'{k}_{v}_')
@@ -115,6 +117,6 @@ class Generator:
                     if len(s) > 200:
                         raise ValueError(f'Label too long: {s}')
                     label_strings[label].append(s)
-            for (k,v) in label_strings.items():
+            for (k, v) in label_strings.items():
                 df[k] = v
         return df
