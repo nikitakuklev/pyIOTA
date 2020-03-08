@@ -63,6 +63,7 @@ def save_data_tbt(fpath: Path, df: pd.DataFrame, name_format: str = "iota_kicks_
 
             stategr = f.create_group('state')
             for (k, v) in df_dict['state'].items():
+                #print(k,v)
                 stategr.attrs[k] = v
 
             f.attrs['time_utcstamp'] = datetime.datetime.utcnow().timestamp();

@@ -7,7 +7,7 @@ import scipy.signal
 from scipy.optimize import minimize
 
 
-@jit(nopython=True, fastmath=True, nogil=True)
+# @jit(nopython=True, fastmath=True, nogil=True)
 def _get_integral_v11(ztabs, twin, i_line, coeffs, FR, turns, order):
     """Numba-optimized trapezoidal integrator"""
     # ZTF = np.zeros(len(ztabs), np.complex128)
@@ -30,9 +30,10 @@ class NAFF:
         self.window_type = window_type
         self.window_power = window_power
 
-    def fft_hanning(self, data: np.ndarray, power: int = None, search_peaks: bool = False):
+    def fft_hanning(self, data: np.ndarray, power: int = None, just_do_fft:bool=False, search_peaks: bool = False):
         """
         Preliminary guess of peak frequency based on FTT with hanning window
+        :param just_do_fft:
         :param data:
         :param power:
         :param search_peaks: whether to use scipy peak finding or just return highest bin
@@ -49,6 +50,44 @@ class NAFF:
         data_centered = data - np.mean(data)
         fft_power = np.abs(np.fft.rfft(data_centered * window)) ** 2
         fft_freq = np.fft.rfftfreq(n_turns)
+
+        if just_do_fft:
+            return fft_freq, fft_power
+
+        if search_peaks:
+            peak_idx, peak_props = sc.signal.find_peaks(fft_power)
+            peak_tunes = fft_freq[peak_idx]
+            if len(peak_idx) > 0:
+                top_tune = peak_tunes[np.argmax(fft_power[peak_idx])]
+            else:
+                top_tune = None
+            return top_tune, fft_freq, fft_power, peak_idx
+        else:
+            return np.fft.rfftfreq(n_turns)[np.argmax(fft_power)]
+
+    def fft_hanning(self, data: np.ndarray, power: int = None, just_do_fft:bool=False, search_peaks: bool = False):
+        """
+        Preliminary guess of peak frequency based on FTT with hanning window
+        :param just_do_fft:
+        :param data:
+        :param power:
+        :param search_peaks: whether to use scipy peak finding or just return highest bin
+        :return:
+        """
+        power = power or self.window_power
+        n_turns = len(data)
+        if (n_turns, power) not in self.hann_cache:
+            window = np.hanning(n_turns) ** power
+            self.hann_cache[(n_turns, power)] = window
+        else:
+            window = self.hann_cache[(n_turns, power)]
+
+        data_centered = data - np.mean(data)
+        fft_power = np.abs(np.fft.rfft(data_centered * window)) ** 2
+        fft_freq = np.fft.rfftfreq(n_turns)
+
+        if just_do_fft:
+            return fft_freq, fft_power
 
         if search_peaks:
             peak_idx, peak_props = sc.signal.find_peaks(fft_power)
@@ -137,8 +176,8 @@ class NAFF:
         for f in frequencies:
             if method == 11:
                 integral.append(_get_integral_v11(data, TWIN, i_line,
-                                                   self.coeffs_cache[integrator_order - 1],
-                                                   f, turns_naff, integrator_order))
+                                                  self.coeffs_cache[integrator_order - 1],
+                                                  f, turns_naff, integrator_order))
 
             # elif method == 3:
             #     integral.append(getIntegralv3(data, TWIN, f, turns_naff, order))
@@ -191,4 +230,3 @@ class NAFF:
             return [[0, tune, 0, 0, 0]]
         else:
             return tune
-

@@ -90,11 +90,14 @@ class Generator:
                 p_idx += 1
                 # print(p, df_data[p][0])
             elif isinstance(p, tuple):
-                for sub_p in p:
-                    df_data[sub_p] = np.array([v[p_idx] for v in permutations])
+                for j, sub_p in enumerate(p):
+                    if isinstance(permutations[0][p_idx], tuple):
+                        df_data[sub_p] = np.array([v[p_idx][j] for v in permutations])
+                    else:
+                        df_data[sub_p] = np.array([v[p_idx] for v in permutations])
                     # print(sub_p, df_data[sub_p][0])
                 p_idx += 1
-
+        #print(df_data)
         df = pd.DataFrame(data=df_data)
         if generate_labels:
             self.name_links['label'] = df.columns

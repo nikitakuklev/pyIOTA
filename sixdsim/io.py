@@ -1,7 +1,11 @@
+import time
 from pathlib import Path
 import random
+import numpy as np
 
+import pyIOTA
 from pyIOTA.acnet.frontends import DoubleDevice, DoubleDeviceSet
+import pyIOTA.iota.run2
 
 
 def parse_knobs(fpath: Path, verbose: bool = True):
@@ -27,14 +31,18 @@ def parse_knobs(fpath: Path, verbose: bool = True):
                 s2str = spl[2].strip()
                 vals = s2str[1:] if len(s2str) > 1 else ''
                 # print(spl, vals)
-                while not lines[line_num].strip().endswith('}'):
-                    vals += lines[line_num]
-                    line_num += 1
-                    if line_num == len(lines):
-                        raise Exception('Unclosed bracket found in knob file')
-                if lines[line_num].strip() != '}':
-                    vals += lines[line_num].strip()[:-1]
+                if vals.endswith('}'):
+                    vals = vals[:-1]
+                else:
+                    while not lines[line_num].strip().endswith('}'):
+                        vals += lines[line_num]
+                        line_num += 1
+                        if line_num == len(lines):
+                            raise Exception('Unclosed bracket found in knob file')
+                    if lines[line_num].strip() != '}':
+                        vals += lines[line_num].strip()[:-1]
                 knob_str_list = vals.strip().replace('\n', '').split(',')
+                # print(knob_str_list)
                 for k in knob_str_list:
                     ks = k.strip().strip('(').strip(')')
                     kspl = ks.split('|')
@@ -63,6 +71,13 @@ class Knob(AbstractKnob):
         self.absolute = True
         super().__init__(name)
 
+    def make_absolute(self):
+        assert not self.absolute
+        ds = DoubleDeviceSet(name=self.name, members=[DoubleDevice(d.acnet_var) for d in self.vars.values()])
+        ds.readonce()
+        for k,v in ds.devices:
+            pass
+
     def get_dict(self, as_devices=False):
         if as_devices:
             return {v.acnet_var: v.value for v in self.vars.values()}
@@ -88,17 +103,56 @@ class Knob(AbstractKnob):
         for k, v in ds.devices.items():
             tempdict[k].value = v.value
 
+    def prune(self, tol: float = 1e-4, verbose: bool = False):
+        if verbose or self.verbose:
+            verbose = True
+        if verbose:
+            pruned = {k.var: k.value for k in self.vars.values() if np.abs(k.value) <= tol}
+            print(f'{len(pruned)} pruned:', pruned)
+        self.vars = {k.var: k for k in self.vars.values() if np.abs(k.value) > tol}
+        return self.vars
+
     def set(self, verbose: bool = False):
         if verbose or self.verbose:
             verbose = True
         if not self.absolute:
             raise Exception('Attempt to set relative knob')
         if verbose: print(f'Setting knob {self.name}')
-        dlist = [(DoubleDevice(d.acnet_var), d.value) for d in self.vars.values()]
-        random.shuffle(dlist)
-        ds = DoubleDeviceSet(name=self.name,
-                             members=[d[0] for d in dlist])
-        ds.set([d[1] for d in dlist], verbose=verbose)
+        skews = [(DoubleDevice(d.acnet_var), d.value) for d in self.vars.values() if d.acnet_var in
+                 pyIOTA.iota.run2.SKEWQUADS.ALL_CURRENTS]
+        corrV = [(DoubleDevice(d.acnet_var), d.value) for d in self.vars.values() if d.acnet_var in
+                 pyIOTA.iota.run2.CORRECTORS.VIRTUAL_V]
+        corrH = [(DoubleDevice(d.acnet_var), d.value) for d in self.vars.values() if d.acnet_var in
+                 pyIOTA.iota.run2.CORRECTORS.VIRTUAL_H]
+        other = [(DoubleDevice(d.acnet_var), d.value) for d in self.vars.values() if d.acnet_var not in
+                 pyIOTA.iota.run2.SKEWQUADS.ALL_CURRENTS and d.acnet_var not in pyIOTA.iota.run2.CORRECTORS.COMBINED_VIRTUAL]
+        # random.shuffle(dlist3)
+
+        if len(other) >= 2:
+            other1, other2 = other[:len(other) // 2], other[len(other) // 2:]
+            assert len(other1) + len(other2) == len(other)
+        else:
+            other1 = other
+            other2 = []
+        print()
+        print(skews, corrV, corrH, other1, other2, sep='\n')
+
+        if len(skews) != 0:
+            ds = DoubleDeviceSet(name=self.name, members=[d[0] for d in skews])
+            ds.set([d[1] for d in skews], verbose=verbose)
+        if len(other1) != 0:
+            ds = DoubleDeviceSet(name=self.name, members=[d[0] for d in other1])
+            ds.set([d[1] for d in other1], verbose=verbose)
+        if len(corrV) != 0:
+            ds = DoubleDeviceSet(name=self.name, members=[d[0] for d in corrV])
+            ds.set([d[1] for d in corrV], verbose=verbose)
+        if len(other2) != 0:
+            ds = DoubleDeviceSet(name=self.name, members=[d[0] for d in other2])
+            ds.set([d[1] for d in other2], verbose=verbose)
+        time.sleep(0.3)
+        if len(corrH) != 0:
+            ds = DoubleDeviceSet(name=self.name, members=[d[0] for d in corrH])
+            ds.set([d[1] for d in corrH], verbose=verbose)
 
     def __sub__(self, other):
         assert isinstance(other, Knob)
@@ -156,6 +210,9 @@ class Knob(AbstractKnob):
 
     def __str__(self):
         return f'Knob {self.name} at {hex(id(self))}: {len(self.vars)} devices, absolute:{self.absolute}'
+
+    def __repr__(self):
+        return self.__str__()
 
 
 class KnobVariable:

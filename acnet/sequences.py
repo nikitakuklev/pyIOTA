@@ -2,7 +2,8 @@ import uuid
 from pathlib import Path
 
 import pyIOTA
-from .frontends import DeviceSet, StatusDevice, DoubleDevice, DoubleDeviceSet, BPMDevice, BPMDeviceSet, ACNETRelay, ACL
+from .frontends import DeviceSet, StatusDevice, DoubleDevice, DoubleDeviceSet, BPMDevice, BPMDeviceSet, ACNETRelay, ACL, \
+    StatusDeviceSet
 import time, datetime
 import pyIOTA.iota as iota
 from pyIOTA.sixdsim.io import Knob
@@ -16,30 +17,37 @@ def trigger_bpms_orbit_mode(debug: bool = False):
     StatusDevice(iota.CONTROLS.BPM_ORB_TRIGGER).reset()
 
 
-def get_bpm_data(bpm_ds=None, mode='tbt', kickv=0.0, kickh=0.0,
-                 read_beam_current=True, read_state=True, read_aux=True, state_ds=None,
+def get_bpm_data(bpm_ds=None, mode='tbt', kickv=np.nan, kickh=np.nan,
+                 read_beam_current=True, read_state=True, read_aux=True, state_ds=None, status_ds=None,
                  check_sequence_id=True, last_sequence_id=None, save=False, fpath=None, save_repeats=False):
     state = {}
     if read_state:
         if state_ds is None:
             knobs_to_save = iota.run2.MASTER_STATE_CURRENTS  # all iota magnets + RF + kickers
             state_ds = DoubleDeviceSet(name='state', members=[DoubleDevice(d) for d in knobs_to_save])
-        nstate = state_ds.readonce(settings=True)
-        state.update({d.name: d.value for d in state_ds.devices.values()})
+        nstate = state_ds.readonce(settings=True, verbose=False)
+        state.update({d.name + '.SETTING': d.value for d in state_ds.devices.values()})
     else:
         nstate = 0
     state['kickv'] = kickv
     state['kickh'] = kickh
 
     if read_beam_current:
-        state[iota.run2.OTHER.BEAM_CURRENT_AVERAGE] = DoubleDevice(iota.run2.OTHER.BEAM_CURRENT_AVERAGE).read()
+        state[iota.run2.OTHER.BEAM_CURRENT_AVERAGE + '.READING'] = DoubleDevice(
+            iota.run2.OTHER.BEAM_CURRENT_AVERAGE).read()
 
     if read_aux:
-        aux = iota.run2.OTHER.AUX_DEVICES  # all iota magnets + RF + kickers
+        aux = iota.run2.OTHER.AUX_DEVICES
         state_ds = DoubleDeviceSet(name='state', members=[DoubleDevice(d) for d in aux])
-        nstate2 = state_ds.readonce()
-        state.update({d.name: d.value for d in state_ds.devices.values()})
+        nstate2 = state_ds.readonce(verbose=False)
+        state.update({d.name + '.READING': d.value for d in state_ds.devices.values()})
         nstate += nstate2
+
+        statuses = iota.run2.MASTER_STATUS_DEVICES
+        status_ds = StatusDeviceSet(name='status', members=[StatusDevice(d) for d in statuses])
+        nstate3 = status_ds.readonce(verbose=False)
+        state.update({d.name + '.STATUS': d.value for d in status_ds.devices.values()})
+        nstate += nstate3
 
     if bpm_ds is None:
         bpms = [BPMDevice(b) for b in iota.BPMS.ALLA]
@@ -53,10 +61,12 @@ def get_bpm_data(bpm_ds=None, mode='tbt', kickv=0.0, kickh=0.0,
         data = {d.name: d.value for d in bpm_ds.devices.values()}
 
     state['aq_timestamp'] = datetime.datetime.utcnow().timestamp()
-    state['run_uuid'] = uuid.uuid4()
+    state['run_uuid'] = str(uuid.uuid4())
 
     repeat_data = False
     if check_sequence_id:
+        if len(data) == 0:
+            val_last_ret = np.nan
         for i, (k, v) in enumerate(data.items()):
             val_last_ret = int(v[0])
             if last_sequence_id is None:
@@ -112,21 +122,47 @@ def transition(final_state: Knob, steps: int = 5, verbose: bool = True, extra_fi
             if verbose: print(f'{step}/{steps} ', end='')
             intermediate_state = initial_state + delta_knob * step
             intermediate_state.set(verbose=verbose)
+            time.sleep(0.1)
         if extra_final_setting:
-            (initial_state+final_state).set(verbose=verbose)
+            time.sleep(0.5)
+            (initial_state + final_state).set(verbose=verbose)
         if verbose: print(f'Done')
     else:
         if verbose: print(f'Transitioning to ({final_state}) in ({steps}) steps')
         initial_state = final_state.copy()
         initial_state.read_current_state()
-        if verbose: print(f'Current state read OK')
+        if verbose: print(f'\nCurrent state read OK')
         delta_knob = (final_state - initial_state) / steps
+        to_change = delta_knob.prune(tol=1e-4)
+        if verbose: print(f'\nTo change', to_change)
+        if len(to_change) == 0:
+            if verbose: print(f'No changes necessary!')
+            return
+        initial_state_pruned = initial_state.copy()
+        initial_state_pruned.vars = {k: v for k, v in initial_state_pruned.vars.items() if k in to_change}
+
         for step in range(1, steps + 1):
             if verbose: print(f'{step}/{steps} ', end='')
-            intermediate_state = initial_state + delta_knob * step
+            intermediate_state = initial_state_pruned + delta_knob * step
             intermediate_state.set(verbose=verbose)
+            time.sleep(0.1)
+
         if extra_final_setting:
-            final_state.set(verbose=verbose)
+            time.sleep(0.5)
+            extra_state = final_state.copy()
+            extra_state.read_current_state()
+            if verbose: print('\nExtra state:\n', [(k.var, k.value) for k in extra_state.vars.values()])
+            extra_delta = final_state - extra_state
+            to_change_extra = extra_delta.prune(tol=1e-4)
+            if verbose: print(f'\nTo change', to_change)
+            if len(to_change_extra) == 0:
+                if verbose: print(f'No changes necessary!')
+                return
+            if verbose: print('\nExtra delta:\n', [(k.var, k.value) for k in extra_delta.vars.values()])
+            extra_state_pruned = final_state.copy()
+            extra_state_pruned.vars = {k: v for k, v in extra_state_pruned.vars.items() if k in to_change_extra}
+            extra_state_pruned.set(verbose=verbose)
+
         if verbose: print(f'Done')
 
 

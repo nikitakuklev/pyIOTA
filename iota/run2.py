@@ -61,6 +61,8 @@ class CORRECTORS:
                       i in sl]
     COMBINED_COILS_ALL = COMBINED_COILS_I + COMBINED_COILS_V #4000
 
+    VIRTUAL_H = [i for sl in [['N:IH' + k + 'I'] for k in __combfun] for i in sl]
+    VIRTUAL_V = [i for sl in [['N:IV' + k + 'I'] for k in __combfun] for i in sl]
     COMBINED_VIRTUAL = [i for sl in [['N:IV' + k + 'I', 'N:IH' + k + 'I'] for k in __combfun] for i in sl]
 
     OTHER_CORRECTORS_I = ['N:IBMPLI', 'N:IBMPRI'] #4000
@@ -140,6 +142,7 @@ class CONTROLS:
     TRIGGER_A5 = 'N:EA5TRG'  # $A5 timing event on reset
     TRIGGER_A6 = 'N:EA6TRG'  # $A6 timing event on reset
     VKICKER = 'N:IKPSV'
+    VKICKER_USER_KNOB = 'N:IKPSVX'
     HKICKER = 'N:IKPSH'
     CHIP_PLC = 'N:IDG'
     BPM_INJ_TRIGGER = 'N:IBINJ'
@@ -155,6 +158,9 @@ class CONTROLS:
     VKICKER_RESCHARGE = 'N:IKPSVR'
     VKICKER_TRIG = 'N:IKPSVT'
     VKICKER_ONOFF_DEVICES = [VKICKER_RESCHARGE, VKICKER_TRIG]
+
+
+MASTER_STATUS_DEVICES = CONTROLS.VKICKER_ONOFF_DEVICES + CONTROLS.HKICKER_ONOFF_DEVICES + [CONTROLS.HKICKER] + [CONTROLS.VKICKER]
 
 
 MASTER_STATE_CURRENTS = DIPOLES.ALL_I + CORRECTORS.ALL + QUADS.ALL_CURRENTS + SKEWQUADS.ALL_CURRENTS + SEXTUPOLES.ALL_CURRENTS + \

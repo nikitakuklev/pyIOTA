@@ -92,6 +92,7 @@ class StatusDevice(Device):
         v = data
         if self.debug:
             print(f'Status device {self.name} update {data}')
+        self.value = v
         assert ('ON' in v) != ('OFF' in v)
         self.on = 'ON' in v
         assert ('READY' in v) != ('TRIPPED' in v)
@@ -652,7 +653,7 @@ class ACNETRelay(Adapter):
     Adapter based on Java commmand proxy. One of quickest, but can be error-prone. Requires async libraries.
     """
 
-    def __init__(self, address: str = "http://127.0.0.1:8080/", method=1,set_multi=False, verbose: bool = False):
+    def __init__(self, address: str = "http://127.0.0.1:8080/", method=1, set_multi=False, verbose: bool = False):
         self.name = 'ACNETRelay'
         self.supported = ['oneshot', 'polling']
         self.rate_limit = [-1, -1]
@@ -814,7 +815,7 @@ class ACNETRelay(Adapter):
                     return rs
 
                 params = []
-                num_lists = min(len(ds.devices), 5)
+                num_lists = min(len(ds.devices), 5) if len(ds.devices) > 20 else 1
                 device_lists = [list(ll) for ll in np.array_split(list(ds.devices.values()), num_lists)]
                 val_lists = [list(ll) for ll in np.array_split(values, num_lists)]
                 for dl, vl in zip(device_lists, val_lists):
