@@ -5,7 +5,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from pyIOTA.lattice.elements import LatticeContainer
-from ocelot import Sextupole
+from ocelot import Sextupole, Hcor, Vcor
 
 
 class Writer:
@@ -236,6 +236,7 @@ class Writer:
         lat = lattice_box.lattice
         opt = SimpleNamespace(**self.options)
         sl = []
+        elements = []
 
         #dipoles = iota.GetElementsOfType('SBEND')
         dipoles = lattice_box.get_elements('SBend')
@@ -254,7 +255,7 @@ class Writer:
         #cavities = iota.GetElementsOfType('RFCAVITY')
         cavities = lattice_box.get_elements("Cavity")
         #monitors = iota.GetElementsOfType('MONITOR')
-        monitors = lattice_box.get_elements("Cavity")
+        monitors = lattice_box.get_elements("Monitor")
         #nllenses = iota.GetElementsOfType('NLLENS')
         nllenses = lattice_box.get_elements("DNMagnet")
         header = iota.header
@@ -282,6 +283,7 @@ class Writer:
 
         sl.append('!MAIN BENDS\n')
         for el in dipoles:
+            if self._check_if_already_defined(el, elements):continue
             sl.append(f"{el.id}: CSBEND, l={el.l:.10f}, angle={el.angle}, e1=0, e2=0, &\n")
             sl.append(f" h1={el.h_pole1:+.10f}, h2={el.h_pole1:+.10f}, hgap={el.gap}, fint={el.fint}")
             sl.append(f" EDGE_ORDER=1, EDGE1_EFFECTS=3, EDGE2_EFFECTS=3, &\n")
@@ -289,25 +291,40 @@ class Writer:
         sl.append('\n')
 
         sl.append('!MAIN QUADS\n')
-        for el in [q for q in quads if q.id.startswith('Q') or q.id.startswith('q')]:
+        main_quads = [q for q in quads if q.id.startswith('Q') or q.id.startswith('q')]
+        for el in main_quads:
+            if self._check_if_already_defined(el, elements):continue
             sl.append(f'{el.id:<6}: KQUAD, l={el.l:.10f}, k1={el.k1:+.10e}, '
                       f'N_KICKS="quad_kicks", ISR="flag_isr", SYNCH_RAD="flag_synch"\n')
         sl.append('\n')
 
         sl.append('!COMBINED HV CORRECTORS+SKEW QUADS\n')
-        for el in [q for q in quads if not q.id.startswith('Q')]:
-            sl.append(f'{el.id:<6}: KQUAD, l={el.l:.10f}, k1={el.k1:+.10e}, '                
-                      f'N_KICKS="quad_kicks", ISR="flag_isr", SYNCH_RAD="flag_synch"\n')
+        for el in [q for q in quads if q not in main_quads]:
+            if self._check_if_already_defined(el, elements): continue
+            add_hcor = 0
+            add_vcor = 0
+            for c in iota.lattice_box.correctors:
+                if c.ref_el is el:
+                    if isinstance(c, Hcor):
+                        add_hcor = 1
+                    elif isinstance(c, Vcor):
+                        add_vcor = 1
+                    else:
+                        continue
+            sl.append(f'{el.id:<6}: KQUAD, l={el.l:.10f}, k1={el.k1:+.10e}, HSTEERING={add_hcor}, VSTEERING={add_vcor}'                
+                      f'N_KICKS="quad_kicks", ISR="flag_isr", SYNCH_RAD="flag_synch, tilt={el.tilt}"\n')
         sl.append('\n')
 
         sl.append('!SEXTUPOLES\n')
         for el in sextupoles:
+            if self._check_if_already_defined(el, elements): continue
             sl.append(f'{el.id:<10}: KSEXT, l={el.l}, k2={el.k2:+.10e},'
                       f'N_KICKS="sext_kicks", ISR="flag_isr", SYNCH_RAD="flag_synch"\n')
         sl.append('\n')
 
         sl.append('! Nonlinear quasi-integrable insert - strengths set with param file later\n')
         for el in octupoles:
+            if self._check_if_already_defined(el, elements): continue
             sl.append(
                 f'{el.id:<10}: KOCT, l={el.l}, k3={0:.10e},'
                 f' N_KICKS="oct_kicks", ISR="flag_isr", SYNCH_RAD="flag_synch"\n')
@@ -315,11 +332,13 @@ class Writer:
 
         sl.append('!SOLENOIDS\n')
         for el in solenoids:
+            if self._check_if_already_defined(el, elements): continue
             sl.append(f'{el.id:<10}: EDRIFT, l={el.l}\n')
         sl.append('\n')
 
         sl.append('!NL MAGNET\n')
         for el in nllenses:
+            if self._check_if_already_defined(el, elements): continue
             sl.append(f'{el.id:<10}: EDRIFT, l={el.l}\n')
         sl.append('\n')
 
@@ -331,16 +350,19 @@ class Writer:
 
         sl.append('! Voltages set in task file\n')
         for el in cavities:
+            if self._check_if_already_defined(el, elements): continue
             sl.append(f'{el.id:<10}: RFCA, l={el.l}, volt=0.0, change_t=1\n')
         sl.append('\n')
 
         sl.append('!MONITORS\n')
         for el in monitors:
-            sl.append(f'{el.id:<10}: MONI, l={el.l}\n')
+            if self._check_if_already_defined(el, elements): continue
+            sl.append(f'{el.id:<10}: MONI, l={el.l}, CO_FITPOINT=1\n')
         sl.append('\n')
 
         sl.append('!DRIFTS\n')
         for el in drifts:
+            if self._check_if_already_defined(el, elements): continue
             sl.append(f'{el.id:<10}: EDRIFT, l={el.l}\n')
         sl.append('\n')
 
@@ -420,3 +442,10 @@ class Writer:
                 f.write(''.join(sl))
 
         return ''.join(sl)
+
+    def _check_if_already_defined(self, el, elements: list):
+        if el.id in elements:
+            return True
+        else:
+            elements.append(el)
+            return False

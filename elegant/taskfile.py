@@ -10,6 +10,8 @@ import datetime
 import hashlib
 
 import numpy as np
+from lattice.elements import LatticeContainer
+from ocelot import Hcor, Vcor
 
 
 def task(name=None):
@@ -272,18 +274,20 @@ class Optimizer:
         self.strings = []
 
     def add_term(self, term: str, weight=1.0):
-        strings = ['&optimization_term term = "{}", weight = {}, verbose = 1 &end'.format(term, weight)]
-        return strings
+        strings = '&optimization_term term = "{}", weight = {}, verbose = 1 &end'.format(term, weight)
+        #return strings
+        self.strings.append(strings)
 
     def add_variable(self, name: str, item: str, step_size: int = 1):
-        strings = ['&optimization_variable name = {}, item = {}, step_size = 1 &end'.format(name, item, step_size)]
-        return strings
+        strings = '&optimization_variable name = {}, item = {}, step_size = 1 &end'.format(name, item, step_size)
+        self.strings.append(strings)
 
     def add_comment(self, comment):
-        return [comment]
+        self.strings.append(comment)
 
     def sene(self, var1: str, var2: str, eps: float = 1e-4):
-        return "{} {} {} sene".format(var1, var2, eps)
+        strings = "{} {} {} sene".format(var1, var2, eps)
+        self.strings.append(strings)
 
 
 class IOTAOptimizer(Optimizer):
@@ -303,15 +307,15 @@ class IOTAOptimizer(Optimizer):
         self.add_term(f"NLR2#1.nux NLR1#1.nux - abs 5 {dxo:+0.3f} + 0.00001 sene")
         self.add_term(f"NLR2#1.nuy NLR1#1.nuy - abs 5 {dyo:+0.3f} + 0.00001 sene")
 
-    def enforce_zero_dispersion(self):
+    def enforce_zero_dispersion(self, tol: float = 1e-2):
         self.add_comment('!Dispersion')
-        self.add_term("NLR2#1.etax 0 0.0001 sene")
-        self.add_term("NLR2#1.etay 0 0.0001 sene")
-        self.add_term("NLR1#1.etax 0 0.0001 sene")
-        self.add_term("NLR1#1.etay 0 0.0001 sene")
+        self.add_term(f"NLR2#1.etax 0 {tol} sene")
+        self.add_term(f"NLR2#1.etay 0 {tol} sene")
+        self.add_term(f"NLR1#1.etax 0 {tol} sene")
+        self.add_term(f"NLR1#1.etay 0 {tol} sene")
 
-        self.add_term("IOR#1.etax 0 0.0001 sene")
-        self.add_term("IOR#1.etay 0 0.0001 sene")
+        self.add_term(f"IOR#1.etax 0 {tol} sene")
+        self.add_term(f"IOR#1.etay 0 {tol} sene")
 
     def enforce_insert_symmetry(self):
         self.add_comment('!Symmetry')
@@ -325,6 +329,33 @@ class IOTAOptimizer(Optimizer):
         self.add_term("NLL1#1.betax NLR2#1.betax - 0 0.001 sene")
         self.add_term("NLL1#1.betay NLR2#1.betay - 0 0.001 sene")
 
+    def add_corrector_variables(self, lattice_box: LatticeContainer):
+        for c in lattice_box.correctors:
+            if isinstance(c, Vcor):
+                item = 'VKICK'
+            elif isinstance(c, Hcor):
+                item = 'HKICK'
+            else:
+                continue
+            self.add_variable(name=c.ref_el.id, item=item, step_size=1)
+            print(f'Added corrector variable {c.ref_el.id}-{item}')
+
+    def add_corrector_constraints(self, lattice_box: LatticeContainer, max_currents, tol=1e-2):
+        for c in lattice_box.correctors:
+            if isinstance(c, Vcor):
+                item = 'VKICK'
+            elif isinstance(c, Hcor):
+                item = 'HKICK'
+            else:
+                continue
+            self.add_term(f"{c.ref_el.id}#0.{item} {max_currents} {tol} sene")
+            print(f'Added corrector constraints {c.ref_el.id}-{item}|max {max_currents}|tol {max_currents}')
+
+    def add_orbit_goals(self, goals, tol=1e-5):
+        for m,(x,y) in goals:
+            self.sene(f'{m.id}#0.xco', x, tol)
+            self.sene(f'{m.id}#0.yco', y, tol)
+
     def set_betas(self, shiftx=False, shifty=False):
         self.add_comment('!Betastar')
         if shiftx:
@@ -337,8 +368,7 @@ class IOTAOptimizer(Optimizer):
         else:
             self.add_term("IOR#1.alphay 0 0.00001 sene")
 
-    #def set_orbit_fitpoints(self, Lattice):
-
+    # def set_orbit_fitpoints(self, Lattice):
 
     def quad_links(self):
         return """
