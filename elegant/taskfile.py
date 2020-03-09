@@ -37,7 +37,7 @@ def task(name=None):
             assert fullargspec.varargs == 'args'
             extra_kwargs = {k: v for k, v in kwargs.items() if k not in fullargspec.kwonlyargs} if \
                 (kwargs and fullargspec.kwonlyargs) else (kwargs or {})
-            #print('Extra kwargs', extra_kwargs)
+            # print('Extra kwargs', extra_kwargs)
             lines = func(self, *args, **kwargs)
             lines = ['&' + name] + [' ' + ln + ',' for ln in lines] + \
                     [f' {k} = {v},' for k, v in extra_kwargs.items()] + ['&end\n']
@@ -197,7 +197,8 @@ class Task:
         return strings
 
     @task(name='chromaticity')
-    def setup_chromaticity(self, *args, families: list = [], dnux_dp: float = np.nan, dnuy_dp: float = np.nan, **kwargs):
+    def setup_chromaticity(self, *args, families: list = [], dnux_dp: float = np.nan, dnuy_dp: float = np.nan,
+                           **kwargs):
         assert not (np.isnan(dnux_dp) or np.isnan(dnuy_dp))
         assert -20 < dnux_dp < 20 and -20 < dnuy_dp < 20
         strings = [f'sextupoles = "{families}"',
@@ -225,6 +226,7 @@ class Task:
         if not centroid_start:
             strings.append('start_from_centroid = 0')
         return strings
+
     ###
 
     @task(name='load_parameters')
@@ -253,3 +255,131 @@ class Task:
         strings.append(f'type = {loc_type}') if loc_type else strings.append(f'type = "*"')
         strings.append(f'name = {loc_name}') if loc_name else strings.append(f'name = "*"')
         return strings
+
+    @task(name='optimize')
+    def optimizer_run(self, *args, **kwargs):
+        strings = ['summarize_setup = 1']
+        return strings
+
+
+class Optimizer:
+    """
+    Elegant optimization problem generator. Includes shorthand commands for common tune and orbit knob derivation.
+    """
+
+    def __init__(self, name: str = 'optimizer'):
+        self.name = name
+        self.strings = []
+
+    def add_term(self, term: str, weight=1.0):
+        strings = ['&optimization_term term = "{}", weight = {}, verbose = 1 &end'.format(term, weight)]
+        return strings
+
+    def add_variable(self, name: str, item: str, step_size: int = 1):
+        strings = ['&optimization_variable name = {}, item = {}, step_size = 1 &end'.format(name, item, step_size)]
+        return strings
+
+    def add_comment(self, comment):
+        return [comment]
+
+    def sene(self, var1: str, var2: str, eps: float = 1e-4):
+        return "{} {} {} sene".format(var1, var2, eps)
+
+
+class IOTAOptimizer(Optimizer):
+    """
+    Elegant optimizer with additional meta-directives that enforce IOTA-specific constraints for integrable optics
+    """
+
+    def set_integrable_phase_advances(self, phases):
+        self.add_comment('!Phases')
+        (dxi, dxo, dyi, dyo) = phases
+        # nux = xi+xo; dnux=5.3-nux; dxo=5.0-xo
+        # nuy = yi+yo; dnuy=5.3-nuy; dyo=5.0-yo
+        # total
+        self.add_term(f"nux 5.3 {dxi + dxo:+0.3f} + 0.00001 sene")
+        self.add_term(f"nuy 5.3 {dyi + dyo:+0.3f} + 0.00001 sene")
+        # outside
+        self.add_term(f"NLR2#1.nux NLR1#1.nux - abs 5 {dxo:+0.3f} + 0.00001 sene")
+        self.add_term(f"NLR2#1.nuy NLR1#1.nuy - abs 5 {dyo:+0.3f} + 0.00001 sene")
+
+    def enforce_zero_dispersion(self):
+        self.add_comment('!Dispersion')
+        self.add_term("NLR2#1.etax 0 0.0001 sene")
+        self.add_term("NLR2#1.etay 0 0.0001 sene")
+        self.add_term("NLR1#1.etax 0 0.0001 sene")
+        self.add_term("NLR1#1.etay 0 0.0001 sene")
+
+        self.add_term("IOR#1.etax 0 0.0001 sene")
+        self.add_term("IOR#1.etay 0 0.0001 sene")
+
+    def enforce_insert_symmetry(self):
+        self.add_comment('!Symmetry')
+        self.add_term("NLR2#1.betax NLR1#1.betax - 0 0.001 sene")
+        self.add_term("NLR2#1.betay NLR1#1.betay - 0 0.001 sene")
+        self.add_term("NLL2#1.betax NLL1#1.betax - 0 0.001 sene")
+        self.add_term("NLL2#1.betay NLL1#1.betay - 0 0.001 sene")
+
+    def enforce_LR_symmetry(self):
+        self.add_comment('!LR Symmetry')
+        self.add_term("NLL1#1.betax NLR2#1.betax - 0 0.001 sene")
+        self.add_term("NLL1#1.betay NLR2#1.betay - 0 0.001 sene")
+
+    def set_betas(self, shiftx=False, shifty=False):
+        self.add_comment('!Betastar')
+        if shiftx:
+            self.add_term("MN01_2#1.alphax 0 0.00001 sene")
+        else:
+            self.add_term("IOR#1.alphax 0 0.00001 sene")
+
+        if shifty:
+            self.add_term("MN01_2#1.alphay 0 0.00001 sene")
+        else:
+            self.add_term("IOR#1.alphay 0 0.00001 sene")
+
+    #def set_orbit_fitpoints(self, Lattice):
+
+
+    def quad_links(self):
+        return """
+        &link_elements target = QA1L, source=QA1R, item=K1, equation=K1 &end
+        &link_elements target = QA2L, source=QA2R, item=K1, equation=K1 &end
+        &link_elements target = QA3L, source=QA3R, item=K1, equation=K1 &end
+        &link_elements target = QA4L, source=QA4R, item=K1, equation=K1 &end
+        &link_elements target = QB1L, source=QB1R, item=K1, equation=K1 &end
+        &link_elements target = QB2L, source=QB2R, item=K1, equation=K1 &end
+        &link_elements target = QB3L, source=QB3R, item=K1, equation=K1 &end
+        &link_elements target = QB4L, source=QB4R, item=K1, equation=K1 &end
+        &link_elements target = QB5L, source=QB5R, item=K1, equation=K1 &end
+        &link_elements target = QB6L, source=QB6R, item=K1, equation=K1 &end
+        &link_elements target = QC1L, source=QC1R, item=K1, equation=K1 &end
+        &link_elements target = QC2L, source=QC2R, item=K1, equation=K1 &end
+        &link_elements target = QC3L, source=QC3R, item=K1, equation=K1 &end
+        &link_elements target = QD1L, source=QD1R, item=K1, equation=K1 &end
+        &link_elements target = QD2L, source=QD2R, item=K1, equation=K1 &end
+        &link_elements target = QD3L, source=QD3R, item=K1, equation=K1 &end
+        &link_elements target = QD4L, source=QD4R, item=K1, equation=K1 &end
+        &link_elements target = QE1L, source=QE1R, item=K1, equation=K1 &end
+        &link_elements target = QE2L, source=QE2R, item=K1, equation=K1 &end
+        
+        &optimization_variable name = QA1R, item = K1, step_size = 1 &end
+        &optimization_variable name = QA2R, item = K1, step_size = 1 &end 
+        &optimization_variable name = QA3R, item = K1, step_size = 1 &end
+        &optimization_variable name = QA4R, item = K1, step_size = 1 &end
+        &optimization_variable name = QB1R, item = K1, step_size = 1 &end
+        &optimization_variable name = QB2R, item = K1, step_size = 1 &end 
+        &optimization_variable name = QB3R, item = K1, step_size = 1 &end
+        &optimization_variable name = QB4R, item = K1, step_size = 1 &end
+        &optimization_variable name = QB5R, item = K1, step_size = 1 &end 
+        &optimization_variable name = QB6R, item = K1, step_size = 1 &end
+        &optimization_variable name = QC1R, item = K1, step_size = 1 &end
+        &optimization_variable name = QC2R, item = K1, step_size = 1 &end 
+        &optimization_variable name = QC3R, item = K1, step_size = 1 &end
+        &optimization_variable name = QD1R, item = K1, step_size = 1 &end
+        &optimization_variable name = QD2R, item = K1, step_size = 1 &end 
+        &optimization_variable name = QD3R, item = K1, step_size = 1 &end
+        &optimization_variable name = QD4R, item = K1, step_size = 1 &end
+        &optimization_variable name = QE1R, item = K1, step_size = 1 &end
+        &optimization_variable name = QE2R, item = K1, step_size = 1 &end 
+        &optimization_variable name = QE3, item = K1, step_size = 1 &end
+        """

@@ -4,8 +4,289 @@ import random
 import numpy as np
 
 import pyIOTA
+from ocelot import Monitor, Vcor, Hcor, Solenoid, SBend, Cavity, Edge, Quadrupole, Drift, Element, Sextupole, Multipole
 from pyIOTA.acnet.frontends import DoubleDevice, DoubleDeviceSet
 import pyIOTA.iota.run2
+
+
+def __replace_vars(assign: str, variables: dict):
+    """
+    Replaces all possible variables with their stored values
+    :param assign:
+    :param variables:
+    :return:
+    """
+    for k, v in variables.items():
+        assign = assign.replace(k, '(' + v + ')', 1)
+    return assign
+
+
+def __resolve_vars(assign: str, variables: dict, recursion_limit: int = 100):
+    """
+    Recursively resolved variables until none are left
+    :param assign:
+    :param variables:
+    :return:
+    """
+    i = 0
+    #print(f'Resolve start: {assign}')
+    while '$' in assign:
+        assign = __replace_vars(assign, variables)
+        #print(f'Resolve iteration {i}: {assign}')
+        i += 1
+        if i > recursion_limit:
+            raise Exception(f'Unable to resolve line {assign} fully against definitions {variables}')
+    return assign
+
+
+def __parse_id_line(line: str, output_dict: dict, resolve_against: dict, verbose: bool = False):
+    if not line.startswith('ID:'):
+        return
+    line = line[4:].strip()
+    if verbose: print(f'Analyzing line: {line}')
+    splits = line.split()
+    name, element = splits[0], splits[1]
+    pars_dict = {}
+    if len(splits) > 2:
+        pars = splits[2:]
+        if not len(pars) % 2 == 0:
+            raise Exception(f'Number of parameters {pars} is not even (i.e. paired)')
+        if verbose: print(f'Parsing parameters ({pars})')
+        for (k, v) in zip(pars[::2], pars[1::2]):
+            if verbose: print(f'Property ({k}) is ({v})')
+            try:
+                vr = eval(__resolve_vars(v, resolve_against))
+            except Exception as e:
+                #if verbose: print(f'Failed to evaluate, using as string ({k})-({v}) : {e})')
+                vr = v
+            if verbose: print(f'Property ({k}) resolves to ({vr})')
+            pars_dict[k] = vr
+    if verbose: print(f'Element ({name}) resolved to ({element})({pars_dict})')
+    output_dict[name] = (element, pars_dict)
+
+
+def parse_lattice(fpath: Path, verbose: bool = False):
+    # returned objects
+    lattice_list = []
+    correctors_ocelot = []
+    monitors_ocelot = []
+    # internal vars
+    keywords = {'INFO:': 1, 'ELEMENTS:': 2, 'CORRECTORS:': 3, 'MONITORS:': 4, 'LATTICE:': 5, 'END': 6}
+    variables = {'$PI': str(np.pi)}
+    lattice_vars = {}
+    elements = {}
+    correctors = {}
+    monitors = {}
+    lattice_str = ''
+    # Other parameters
+    pc = None
+    N = None
+
+    with open(str(fpath), 'r') as f:
+        lines = f.readlines()
+        for line in lines:
+            line = line.strip()
+            if line.startswith('//') or line == '':
+                continue
+
+            if line in keywords:
+                if verbose: print('MODE:', line)
+                mode = keywords[line]
+                if mode == keywords['END']:
+                    if verbose: print('DONE')
+                    break
+                else:
+                    continue
+
+            if mode == keywords['INFO:']:
+                if '$' not in line or '=' not in line:
+                    if line[:2] == 'pc':
+                        pc = float(line.split(':')[1])
+                        continue
+                    elif line[:2] == 'Np':
+                        N = float(line.split(':')[1])
+                        continue
+                    else:
+                        continue
+                else:
+                    var, assign = line.split('=')
+                    var = var.strip()
+                    assign = assign.strip()
+                    # print('Analyzing line: {}'.format(line))
+                    assign = __resolve_vars(assign, variables)
+                    variables[var] = assign
+                    # print('Variable ({}) resolved to ({})'.format(var, assign))
+                    # print(variables)
+                    value = eval(assign)
+                    if verbose: print(f'Variable ({var}) evaluated to ({value})')
+                    lattice_vars[var.strip('$')] = value
+                    continue
+            elif mode == keywords['ELEMENTS:']:
+                __parse_id_line(line, elements, variables, verbose)
+                continue
+            elif mode == keywords['CORRECTORS:']:
+                __parse_id_line(line, correctors, variables, verbose)
+                continue
+            elif mode == keywords['MONITORS:']:
+                __parse_id_line(line, monitors, variables, verbose)
+                continue
+            elif mode == keywords['LATTICE:']:
+                lattice_str += line + ' '
+                continue
+    lattice = lattice_str.split()
+
+    # Sanity checks
+    if pc is None:  # or N is None:
+        raise Exception(f'Key parameters are not defined! pc:{pc} N:{N}')
+    for el in lattice:
+        if el not in elements:
+            raise Exception(f'Element {el} not in elements list!!!')
+    for el, (eltype, props) in correctors.items():
+        relative_to = props.get('El', None)
+        if relative_to is None or relative_to not in elements:
+            raise Exception(f'Relative position of {el} does not have referenced element {relative_to}')
+    for el, (eltype, props) in monitors.items():
+        assert eltype == 'BPM'
+        relative_to = props.get('El', None)
+        if relative_to is None or relative_to not in elements:
+            raise Exception(f'Relative position of {el} does not have referenced element {relative_to}')
+    assert len(set(elements)) == len(elements)
+    assert len(set(correctors)) == len(correctors)
+    assert len(set(monitors)) == len(monitors)
+    # Lattice is ok, now create OCELOT lattice
+    # types = [eltype for el, (eltype, props) in elements.items()]
+    # print(set(types))
+    mapping = {'Dipole': SBend, 'Acc': Cavity, 'Sol': Solenoid, 'DipEdge': Edge,
+               'Mult': Multipole, 'Quad': Quadrupole, 'SQuad': Quadrupole,
+               'Gap': Drift, 'BPM': Monitor, 'YCorrector': Vcor, 'XCorrector': Hcor,
+               'ElementShiftCorrector': None,
+               'OrbitShiftCorrector': None,
+               'RFCorrector': 'RF'}
+    field_to_gradient_factor = (pc / 1000 / 0.299792458) / 10.0  # kG*m
+    def gradient_scale(g): return g/field_to_gradient_factor
+    def length_scale(l): return l/100.0
+    shared_parameter_map = {'L': ('l', length_scale)} # apply function to these variables
+
+    for item in lattice:
+        (el_type, props) = elements[item]
+        if el_type not in mapping:
+            raise Exception(f'Type {el_type} not in translation map')
+        type_mapped = mapping[el_type]
+        if type_mapped is None:
+            continue
+        shared_kwargs = {}
+        for k, v in shared_parameter_map.items():
+            result = props.get(k, None)
+            if result is not None:
+                shared_kwargs[v[0]] = v[1](result)
+        shared_kwargs['eid'] = item
+        if type_mapped == Drift:
+            oel = Drift(**shared_kwargs)
+        elif type_mapped == SBend:
+            oel = SBend(angle=props['L'] / ((pc / 0.299792458) / props['Hy']),
+                        k1=props['G'] / field_to_gradient_factor,
+                        **shared_kwargs)
+        elif type_mapped == Edge:
+            oel = Edge(gap=props['poleGap']/100,  # full gap, not half
+                       fint=props['fringeK'],
+                       **shared_kwargs)
+        elif type_mapped == Quadrupole:
+            if el_type == 'SQuad':
+                oel = Quadrupole(k1=props['G'] / field_to_gradient_factor,
+                                 tilt=np.pi / 4,
+                                 **shared_kwargs)
+            else:
+                oel = Quadrupole(k1=props['G'] / field_to_gradient_factor,
+                                 **shared_kwargs)
+        elif type_mapped == Multipole:
+            if 'M2N' in props and len(props) <= 2:
+                # Sextupole (length and M2N props)
+                oel = Sextupole(k2=float(props['M2N']) / field_to_gradient_factor, **shared_kwargs)
+            else:
+                raise Exception(f"Multipole that is not a sextupole detected ({item}|{el_type}|{type_mapped}|{props})")
+        elif type_mapped == Solenoid:
+            oel = Drift(**shared_kwargs)
+        elif type_mapped == Cavity:
+            oel = Cavity(v=props['U'],
+                         freq=props['F'],
+                         **shared_kwargs)
+        else:
+            raise Exception(f'Empty ocelot object produced converting ({item}|{el_type}|{type_mapped}|{props})')
+        lattice_list.append(oel)
+
+    # Dipole edge combination
+    lattice_ocelot = lattice_list.copy()
+    assert len(lattice) == len(lattice_list)
+    edge_count = 0
+    for i, (k, v) in enumerate(zip(lattice, lattice_list)):
+        if isinstance(v, Edge):
+            edge_count += 1
+        if isinstance(v, SBend):
+            e1 = lattice_list[i - 1]
+            e2 = lattice_list[i + 1]
+            if not isinstance(e1, Edge) or not isinstance(e2, Edge):
+                raise Exception(f'Found sector bend {k} without edge elements - this is not allowed')
+            assert e1.gap == e2.gap
+            assert e1.fint == e2.fint
+            v.fint = e1.fint
+            v.gap = e1.gap
+            lattice_ocelot.remove(e1)
+            lattice_ocelot.remove(e2)
+            if verbose: print(f'Integrated edges for dipole {k}')
+            edge_count -= 2
+    assert edge_count == 0
+
+    for item, (el_type, props) in correctors.items():
+        shared_kwargs = {}
+        if el_type not in mapping:
+            raise Exception(f'Type {el_type} not in translation map')
+        type_mapped = mapping[el_type]
+        shared_kwargs['eid'] = item
+        if type_mapped is None:
+            continue
+        if 'L' in props and props['L'] != 0.0:
+            raise Exception(f"Corrector {item} with non-zero length detected")
+        refs = [el for el in lattice_ocelot if el.id == props['El']]
+        if len(refs) > 1:
+            raise Exception(f"Corrector {item} is has too many reference elements {props['El']}")
+        if len(refs) == 0:
+            raise Exception(f"Corrector {item} is missing reference element {props['El']}")
+        if type_mapped == 'RF':
+            continue
+        elif type_mapped == Vcor:
+            oel = Vcor(**shared_kwargs)
+        elif type_mapped == Hcor:
+            oel = Hcor(**shared_kwargs)
+        else:
+            raise Exception(f'Empty ocelot object produced converting ({item}|{el_type}|{type_mapped}|{props})')
+        oel.ref_el = refs[0]
+        correctors_ocelot.append(oel)
+
+    for item, (el_type, props) in monitors.items():
+        shared_kwargs = {}
+        if el_type not in mapping:
+            raise Exception(f'Type {el_type} not in translation map')
+        type_mapped = mapping[el_type]
+        shared_kwargs['eid'] = item
+        if type_mapped is None:
+            continue
+        if 'L' in props and props['L'] != 0.0:
+            raise Exception("Monitor with non-zero length detected!")
+        refs = [el for el in lattice_ocelot if el.id == props['El']]
+        if len(refs) > 1:
+            raise Exception(f"Monitor {item} is has too many reference elements {props['El']}")
+        if len(refs) == 0:
+            raise Exception(f"Monitor {item} is missing reference element {props['El']}")
+        if 'Shift' not in props:
+            raise Exception(f"Monitor {item} has bad shift")
+        oel = Monitor(**shared_kwargs)
+        oel.ref_el = refs[0]
+        oel.shift = props['Shift'] / 100.0
+        monitors_ocelot.append(oel)
+
+    print(f'Parsed OK - {len(lattice_ocelot)} objects, '
+          f'{len(correctors_ocelot)} correctors, {len(monitors_ocelot)} monitors')
+    return lattice_ocelot, correctors_ocelot, monitors_ocelot
 
 
 def parse_knobs(fpath: Path, verbose: bool = True):
@@ -75,7 +356,7 @@ class Knob(AbstractKnob):
         assert not self.absolute
         ds = DoubleDeviceSet(name=self.name, members=[DoubleDevice(d.acnet_var) for d in self.vars.values()])
         ds.readonce()
-        for k,v in ds.devices:
+        for k, v in ds.devices:
             pass
 
     def get_dict(self, as_devices=False):
