@@ -309,15 +309,15 @@ class Writer:
                         add_vcor = 1
                     else:
                         continue
-            sl.append(f'{el.id:<6}: KQUAD, l={el.l:.10f}, k1={el.k1:+.10e}, HSTEERING={add_hcor}, VSTEERING={add_vcor}'
-                      f'N_KICKS="quad_kicks", ISR="flag_isr", SYNCH_RAD="flag_synch", tilt={el.tilt}\n')
+            sl.append(f'{el.id:<6}: KQUAD, l={el.l:.10f}, k1={el.k1:+.10e}, HSTEERING={add_hcor}, VSTEERING={add_vcor},'
+                      f' N_KICKS="quad_kicks", ISR="flag_isr", SYNCH_RAD="flag_synch", tilt={el.tilt}\n')
         sl.append('\n')
 
         sl.append('!SEXTUPOLES\n')
         for el in sextupoles:
             if self._check_if_already_defined(el, elements): continue
             sl.append(f'{el.id:<10}: KSEXT, l={el.l}, k2={el.k2:+.10e},'
-                      f'N_KICKS="sext_kicks", ISR="flag_isr", SYNCH_RAD="flag_synch"\n')
+                      f' N_KICKS="sext_kicks", ISR="flag_isr", SYNCH_RAD="flag_synch"\n')
         sl.append('\n')
 
         sl.append('!Nonlinear quasi-integrable insert - strengths set with param file later\n')
@@ -393,10 +393,12 @@ class Writer:
         # f.write('APER: ECOL, X_MAX=0.008, Y_MAX=0.008 \n')
         # sl.append('APER: ECOL, X_MAX=0.005925, Y_MAX=0.00789 \n')  # 1.5x actual NL aperture
         if opt.aperture_scale != 1:
-            print(f'Lattice aperture scaled by {opt.aperture_scale}')
+            print(f'Lattice aperture scaled by ({opt.aperture_scale})')
+            sl.append(f'! Limiting aperture scaled by ({opt.aperture_scale}) from actual\n')
             sl.append(
                 f'APER: ECOL, X_MAX={3.9446881e-3 * opt.aperture_scale}, Y_MAX={5.25958413e-3 * opt.aperture_scale} \n')
         else:
+            sl.append(f'! Limiting aperture is not scaled (i.e. is actual)\n')
             sl.append('APER: ECOL, X_MAX=3.9446881e-3, Y_MAX=5.25958413e-3 \n')  # 1x actual NL aperture
         # f.write('W1: WATCH, MODE="coordinate", INTERVAL=1, FILENAME="%s_w1.track"')
         sl.append('\n')
