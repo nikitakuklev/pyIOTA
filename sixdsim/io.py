@@ -29,10 +29,10 @@ def __resolve_vars(assign: str, variables: dict, recursion_limit: int = 100):
     :return:
     """
     i = 0
-    #print(f'Resolve start: {assign}')
+    # print(f'Resolve start: {assign}')
     while '$' in assign:
         assign = __replace_vars(assign, variables)
-        #print(f'Resolve iteration {i}: {assign}')
+        # print(f'Resolve iteration {i}: {assign}')
         i += 1
         if i > recursion_limit:
             raise Exception(f'Unable to resolve line {assign} fully against definitions {variables}')
@@ -57,7 +57,7 @@ def __parse_id_line(line: str, output_dict: dict, resolve_against: dict, verbose
             try:
                 vr = eval(__resolve_vars(v, resolve_against))
             except Exception as e:
-                #if verbose: print(f'Failed to evaluate, using as string ({k})-({v}) : {e})')
+                # if verbose: print(f'Failed to evaluate, using as string ({k})-({v}) : {e})')
                 vr = v
             if verbose: print(f'Property ({k}) resolves to ({vr})')
             pars_dict[k] = vr
@@ -163,9 +163,14 @@ def parse_lattice(fpath: Path, verbose: bool = False):
                'OrbitShiftCorrector': None,
                'RFCorrector': 'RF'}
     field_to_gradient_factor = (pc / 1000 / 0.299792458) / 10.0  # kG*m
-    def gradient_scale(g): return g/field_to_gradient_factor
-    def length_scale(l): return l/100.0
-    shared_parameter_map = {'L': ('l', length_scale)} # apply function to these variables
+
+    def gradient_scale(g):
+        return g / field_to_gradient_factor
+
+    def length_scale(l):
+        return l / 100.0
+
+    shared_parameter_map = {'L': ('l', length_scale)}  # apply function to these variables
 
     for item in lattice:
         (el_type, props) = elements[item]
@@ -179,7 +184,7 @@ def parse_lattice(fpath: Path, verbose: bool = False):
             result = props.get(k, None)
             if result is not None:
                 shared_kwargs[v[0]] = v[1](result)
-        shared_kwargs['eid'] = item
+        shared_kwargs['eid'] = item.upper()
         if type_mapped == Drift:
             oel = Drift(**shared_kwargs)
         elif type_mapped == SBend:
@@ -187,7 +192,7 @@ def parse_lattice(fpath: Path, verbose: bool = False):
                         k1=props['G'] / field_to_gradient_factor,
                         **shared_kwargs)
         elif type_mapped == Edge:
-            oel = Edge(gap=props['poleGap']/100,  # full gap, not half
+            oel = Edge(gap=props['poleGap'] / 100,  # full gap, not half
                        fint=props['fringeK'],
                        **shared_kwargs)
         elif type_mapped == Quadrupole:
@@ -241,12 +246,12 @@ def parse_lattice(fpath: Path, verbose: bool = False):
         if el_type not in mapping:
             raise Exception(f'Type {el_type} not in translation map')
         type_mapped = mapping[el_type]
-        shared_kwargs['eid'] = item
+        shared_kwargs['eid'] = item.upper()
         if type_mapped is None:
             continue
         if 'L' in props and props['L'] != 0.0:
             raise Exception(f"Corrector {item} with non-zero length detected")
-        refs = [el for el in lattice_ocelot if el.id == props['El']]
+        refs = [el for el in lattice_ocelot if el.id == props['El'].upper()]
         if len(refs) > 1:
             raise Exception(f"Corrector {item} is has too many reference elements {props['El']}")
         if len(refs) == 0:
@@ -259,6 +264,7 @@ def parse_lattice(fpath: Path, verbose: bool = False):
             oel = Hcor(**shared_kwargs)
         else:
             raise Exception(f'Empty ocelot object produced converting ({item}|{el_type}|{type_mapped}|{props})')
+        oel.end_turn = props['endTurn'] if 'endTurn' in props else None
         oel.ref_el = refs[0]
         correctors_ocelot.append(oel)
 
@@ -267,12 +273,12 @@ def parse_lattice(fpath: Path, verbose: bool = False):
         if el_type not in mapping:
             raise Exception(f'Type {el_type} not in translation map')
         type_mapped = mapping[el_type]
-        shared_kwargs['eid'] = item
+        shared_kwargs['eid'] = item.upper()
         if type_mapped is None:
             continue
         if 'L' in props and props['L'] != 0.0:
             raise Exception("Monitor with non-zero length detected!")
-        refs = [el for el in lattice_ocelot if el.id == props['El']]
+        refs = [el for el in lattice_ocelot if el.id == props['El'].upper()]
         if len(refs) > 1:
             raise Exception(f"Monitor {item} is has too many reference elements {props['El']}")
         if len(refs) == 0:
@@ -286,7 +292,9 @@ def parse_lattice(fpath: Path, verbose: bool = False):
 
     print(f'Parsed OK - {len(lattice_ocelot)} objects, '
           f'{len(correctors_ocelot)} correctors, {len(monitors_ocelot)} monitors')
-    return lattice_ocelot, correctors_ocelot, monitors_ocelot
+
+    info_dict = {'source_file': str(fpath), 'source': '6dsim', 'pc': pc, 'N': N}
+    return lattice_ocelot, correctors_ocelot, monitors_ocelot, info_dict
 
 
 def parse_knobs(fpath: Path, verbose: bool = True):
