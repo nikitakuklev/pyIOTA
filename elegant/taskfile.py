@@ -10,7 +10,7 @@ import datetime
 import hashlib
 
 import numpy as np
-from lattice.elements import LatticeContainer
+from pyIOTA.lattice.elements import LatticeContainer
 from ocelot import Hcor, Vcor
 
 
@@ -263,6 +263,20 @@ class Task:
         strings = ['summarize_setup = 1']
         return strings
 
+    @task(name="optimization_setup")
+    def optimizer_setup(self, *args, n_evaluations=1500, n_passes=2, n_restarts=1, target=1e-10, term_log='%s.terms', sparsing_factor=100, **kwargs):
+        strings = [f' n_evaluations = {n_evaluations},',
+                   f' n_passes = {n_passes},',
+                   f' n_restarts = {n_restarts},',
+                   f' tolerance = 1e-16,',
+                   f' target =  {target},',
+                   f' soft_failure = 0,',
+                   f' log_file = /dev/tty,',
+                   f' term_log_file = {self.rf}/{term_log},',
+                   f' output_sparsing_factor = {sparsing_factor},',
+                   f' verbose = 1,',]
+        return strings
+
 
 class Optimizer:
     """
@@ -288,6 +302,13 @@ class Optimizer:
     def sene(self, var1: str, var2: str, eps: float = 1e-4):
         strings = "{} {} {} sene".format(var1, var2, eps)
         self.strings.append(strings)
+
+    def dump(self):
+        print(f'Dumping {len(self.strings)} lines of optimizer setup')
+        print('\n'.join(self.strings))
+
+    def compile(self):
+        return '\n'.join(self.strings)
 
 
 class IOTAOptimizer(Optimizer):
