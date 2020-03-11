@@ -423,9 +423,10 @@ class IOTAOptimizer(Optimizer):
         print(f'Added {len(quads)} variables of parameter {parameter} for main quads')
 
     def add_corrector_constraints(self, box: LatticeContainer = None, max_kicks: list = None, min_kicks: list = None,
-                                  tol: float = 1e-3):
+                                  tol: float = 1e-3, kicks_dict: dict = None):
         """
         Adds strength constraints on correctors - typically this is dictated by current limits
+        :param kicks_dict:
         :param box:
         :param max_kicks: List of maximum positive kicks. Must either match corrector count or be a singleton
         :param min_kicks: List of maximum negative kicks. Must either match corrector count or be a singleton.
@@ -434,72 +435,59 @@ class IOTAOptimizer(Optimizer):
         :return:
         """
         box = box or self.box
-        if not max_kicks: raise Exception('Maximum kicks must be specified')
-        max_kicks = np.array(max_kicks)
-        if len(max_kicks) == 1:
-            max_kicks = np.repeat(max_kicks, len(box.correctors))
-        if not min_kicks:
-            min_kicks = -1 * np.array(max_kicks)
-        elif len(min_kicks) == 1:
-            min_kicks = np.array(min_kicks)
-            min_kicks = np.repeat(min_kicks, len(box.correctors))
+        if kicks_dict:
+            for c, (vmin,vmax) in kicks_dict.values():
+                if isinstance(c, str):
+                    obj_list = [el for el in box.correctors if c in el.id]
+                    if len(obj_list) == 1:
+                        c = obj_list[0]
+                    else:
+                        raise Exception(f'Found matches ({obj_list}) for search string ({c}) - require exactly 1 match')
+                if isinstance(c, Vcor):
+                    item = 'VKICK'
+                elif isinstance(c, Hcor):
+                    item = 'HKICK'
+                else:
+                    continue
+                if isinstance(c.ref_el, SBend):
+                    if item != 'HKICK':
+                        raise Exception(
+                            f'Corrector ({c.id}) can only be horizontal, since its in a dipole ({c.ref_el.id})!')
+                    item = 'FSE_DIPOLE'
+                self.add_term(f"{c.ref_el.id}.{item} {vmax} {tol} segt")
+                self.add_term(f"{c.ref_el.id}.{item} {vmin} {tol} selt")
+                print(f'Added constraint {c.ref_el.id}-{item}:({vmax}|{vmin})@{tol}')
         else:
-            min_kicks = np.array(min_kicks)
-        assert len(min_kicks) == len(max_kicks)
-
-        for i, c in enumerate(box.correctors):
-            if isinstance(c, Vcor):
-                item = 'VKICK'
-            elif isinstance(c, Hcor):
-                item = 'HKICK'
+            if not max_kicks: raise Exception('Maximum kicks must be specified')
+            max_kicks = np.array(max_kicks)
+            if len(max_kicks) == 1:
+                max_kicks = np.repeat(max_kicks, len(box.correctors))
+            if not min_kicks:
+                min_kicks = -1 * np.array(max_kicks)
+            elif len(min_kicks) == 1:
+                min_kicks = np.array(min_kicks)
+                min_kicks = np.repeat(min_kicks, len(box.correctors))
             else:
-                continue
-            if isinstance(c.ref_el, SBend):
-                if item != 'HKICK':
-                    raise Exception(
-                        f'Corrector ({c.id}) can only be horizontal, since its in a dipole ({c.ref_el.id})!')
-                item = 'FSE_DIPOLE'
-            self.add_term(f"{c.ref_el.id}.{item} {max_kicks[i]} {tol} segt")
-            self.add_term(f"{c.ref_el.id}.{item} {min_kicks[i]} {tol} selt")
-            print(f'Added constraint {c.ref_el.id}-{item}:({max_kicks[i]}|{min_kicks[i]})@{tol}')
+                min_kicks = np.array(min_kicks)
+            assert len(min_kicks) == len(max_kicks)
 
-    def add_corrector_constraints_by_name(self, box: LatticeContainer = None, kicks_dict:dict = None,
-                                  tol: float = 1e-3):
-        """
-        Adds strength constraints on correctors - typically this is dictated by current limits
-        :param box:
-        :param tol:
-        :return:
-        """
-        box = box or self.box
-        if not kicks_dict: raise Exception('Maximum kicks must be specified')
-        max_kicks = np.array(max_kicks)
-        if len(max_kicks) == 1:
-            max_kicks = np.repeat(max_kicks, len(box.correctors))
-        if not min_kicks:
-            min_kicks = -1 * np.array(max_kicks)
-        elif len(min_kicks) == 1:
-            min_kicks = np.array(min_kicks)
-            min_kicks = np.repeat(min_kicks, len(box.correctors))
-        else:
-            min_kicks = np.array(min_kicks)
-        assert len(min_kicks) == len(max_kicks)
+            for i, c in enumerate(box.correctors):
+                if isinstance(c, Vcor):
+                    item = 'VKICK'
+                elif isinstance(c, Hcor):
+                    item = 'HKICK'
+                else:
+                    continue
+                if isinstance(c.ref_el, SBend):
+                    if item != 'HKICK':
+                        raise Exception(
+                            f'Corrector ({c.id}) can only be horizontal, since its in a dipole ({c.ref_el.id})!')
+                    item = 'FSE_DIPOLE'
+                self.add_term(f"{c.ref_el.id}.{item} {max_kicks[i]} {tol} segt")
+                self.add_term(f"{c.ref_el.id}.{item} {min_kicks[i]} {tol} selt")
+                print(f'Added constraint {c.ref_el.id}-{item}:({max_kicks[i]}|{min_kicks[i]})@{tol}')
 
-        for i, c in enumerate(box.correctors):
-            if isinstance(c, Vcor):
-                item = 'VKICK'
-            elif isinstance(c, Hcor):
-                item = 'HKICK'
-            else:
-                continue
-            if isinstance(c.ref_el, SBend):
-                if item != 'HKICK':
-                    raise Exception(
-                        f'Corrector ({c.id}) can only be horizontal, since its in a dipole ({c.ref_el.id})!')
-                item = 'FSE_DIPOLE'
-            self.add_term(f"{c.ref_el.id}.{item} {max_kicks[i]} {tol} segt")
-            self.add_term(f"{c.ref_el.id}.{item} {min_kicks[i]} {tol} selt")
-            print(f'Added constraint {c.ref_el.id}-{item}:({max_kicks[i]}|{min_kicks[i]})@{tol}')
+
 
     def add_orbit_constraints(self, box: LatticeContainer = None, goals: Union[list, dict] = None, tol: float = 1e-4,
                               zero_other_monitors: bool = True):

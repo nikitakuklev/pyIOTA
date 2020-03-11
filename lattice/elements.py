@@ -1,6 +1,6 @@
 from typing import Union
 
-from ocelot import Element, Sextupole, MagneticLattice, Octupole, twiss, Drift, Monitor
+from ocelot import Element, Sextupole, MagneticLattice, Octupole, Drift, Monitor, Marker
 import numpy as np
 
 
@@ -38,6 +38,25 @@ class LatticeContainer:
             raise Exception('Cannot place thick correctors without removing skew quads!')
         raise Exception('Thick correctors on top of other elements cannot be integrated, however they are added upon'
                         'export when possible (i.e. KQUAD has VKICK/HKICK set in elegant export)')
+
+    def insert_markers(self, spacing: float = 3.0):
+        seq = self.lattice.sequence
+        seq_new = [Marker(eid=f'MARKER_START')]
+        l = l_last = 0.0
+        for i, el in enumerate(seq):
+            l += el.l
+            if l > l_last + spacing:
+                seq_new.append(Marker(eid=f'MARKER_{i}'))
+                print(f'Inserted monitor at ({l:.3f}), ({l - l_last:.3f}) from last one')
+                l_last = l
+            seq_new.append(el)
+        print(f'Done - inserted ({len(seq_new)-len(seq):.3f}) monitors')
+        self.lattice.sequence = seq_new
+
+    def remove_markers(self):
+        len_old = len(self.lattice.sequence)
+        self.lattice.sequence = [s for s in self.lattice.sequence if not isinstance(s, Marker)]
+        print(f'Removed ({len_old - len(self.lattice.sequence)}) elements')
 
     def insert_monitors(self, monitors: list = None, verbose: bool = False):
         """
