@@ -47,10 +47,11 @@ class LatticeContainer:
             l += el.l
             if (isinstance(el, Edge) and isinstance(seq[i-1], SBend)) or isinstance(el, SBend):
                 # do not want to disturb edge links
+                seq_new.append(el)
                 continue
             if l > l_last + spacing:
                 seq_new.append(Marker(eid=f'MARKER_{i}'))
-                print(f'Inserted monitor at ({l:.2f}), ({l - l_last:.2f}) from last one')
+                print(f'Inserted monitor at ({l:.2f}) before ({el.id}) and after ({seq[i-1].id}), ({l - l_last:.2f}) from last one')
                 l_last = l
             seq_new.append(el)
         print(f'Done - inserted ({len(seq_new) - len(seq)}) markers')
@@ -69,9 +70,24 @@ class LatticeContainer:
             l += el.l
 
     def remove_markers(self):
+        """
+        Remove all markers from sequence.
+        :return:
+        """
         len_old = len(self.lattice.sequence)
         self.lattice.sequence = [s for s in self.lattice.sequence if not isinstance(s, Marker)]
         print(f'Removed ({len_old - len(self.lattice.sequence)}) markers')
+
+    def remove_monitors(self):
+        """
+        Remove all monitors from sequence. Note that this WILL BREAK THINGS, since monitors are referenced to drifts
+        before insertion splitting. Will be resolved...eventually.
+        :return:
+        """
+        len_old = len(self.lattice.sequence)
+        print([s.id for s in self.lattice.sequence if isinstance(s, Monitor)])
+        self.lattice.sequence = [s for s in self.lattice.sequence if not isinstance(s, Monitor)]
+        print(f'Removed ({len_old - len(self.lattice.sequence)}) monitors')
 
     def insert_monitors(self, monitors: list = None, verbose: bool = False):
         """

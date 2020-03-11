@@ -306,7 +306,7 @@ class Optimizer:
     def add_comment(self, comment: str):
         self.strings.append(comment)
 
-    def sene(self, var1: Union[str,float,int], var2: Union[str,float,int], eps: float = 1e-4):
+    def sene(self, var1: Union[str, float, int], var2: Union[str, float, int], eps: float = 1e-4):
         strings = "{} {} {} sene".format(var1, var2, eps)
         # self.strings.append(strings)
         return strings
@@ -444,7 +444,7 @@ class IOTAOptimizer(Optimizer):
         """
         box = box or self.box
         if kicks_dict:
-            for c, (vmin, vmax) in kicks_dict.values():
+            for c, (vmin, vmax) in kicks_dict.items():
                 if isinstance(c, str):
                     obj_list = [el for el in box.correctors if c in el.id]
                     if len(obj_list) == 1:
@@ -534,7 +534,7 @@ class IOTAOptimizer(Optimizer):
                     f'default to reference orbit)')
             else:
                 print(f'Added {len(goals)} orbit constraints ({len(monitors_other)} monitors untouched)')
-
+            return np.array([[m.s, x, y] for m, (x, y) in goals.items()]), np.array([[m.s, 0, 0] for m in monitors_other])
         else:
             raise Exception(f'Unknown type of goals provided')
 
@@ -557,6 +557,7 @@ class IOTAOptimizer(Optimizer):
                     el.orbit_goal_y = 0
                 self.add_term(self.sene(f'{el.id}#1.xco', el.orbit_goal_x, tol))
                 self.add_term(self.sene(f'{el.id}#1.yco', el.orbit_goal_y, tol))
+        return np.array([[m.s, m.orbit_goal_x, m.orbit_goal_y] for m in box.get_elements(Monitor)+box.get_elements(Marker)]), None
 
     def set_NL_drift_optics(self, shiftx=False, shifty=False):
         self.add_comment('!Betastar')
