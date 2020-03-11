@@ -39,7 +39,7 @@ class LatticeContainer:
         raise Exception('Thick correctors on top of other elements cannot be integrated, however they are added upon'
                         'export when possible (i.e. KQUAD has VKICK/HKICK set in elegant export)')
 
-    def insert_markers(self, spacing: float = 3.0):
+    def insert_markers(self, spacing: float = 1.0):
         seq = self.lattice.sequence
         seq_new = [Marker(eid=f'MARKER_START')]
         l = l_last = 0.0
@@ -52,6 +52,18 @@ class LatticeContainer:
             seq_new.append(el)
         print(f'Done - inserted ({len(seq_new)-len(seq):.3f}) monitors')
         self.lattice.sequence = seq_new
+
+    def update_element_positions(self):
+        """
+        Updates the s-values of all elements
+        :return:
+        """
+        l = 0.0
+        for i, el in enumerate(self.lattice.sequence):
+            el.s_start = l
+            el.s = l + el.l/2
+            el.s_end = l + el.l
+            l += el.l
 
     def remove_markers(self):
         len_old = len(self.lattice.sequence)

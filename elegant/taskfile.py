@@ -12,7 +12,7 @@ from typing import Optional, Union
 
 import numpy as np
 from pyIOTA.lattice.elements import LatticeContainer
-from ocelot import Hcor, Vcor, Quadrupole, SBend
+from ocelot import Hcor, Vcor, Quadrupole, SBend, Marker, Monitor
 
 
 def task(name=None):
@@ -270,10 +270,10 @@ class Task:
         strings = [f'n_evaluations = {n_evaluations}',
                    f'n_passes = {n_passes}',
                    f'n_restarts = {n_restarts}',
-                   f'tolerance = 1e-16',
+                   # f'tolerance = 1e-16',
                    f'target =  {target}',
                    f'soft_failure = 0',
-                   f'log_file = /dev/tty',
+                   # f'log_file = /dev/tty',
                    f'term_log_file = {self.rf}/{term_log}',
                    f'output_sparsing_factor = {sparsing_factor}',
                    f'verbose = 1']
@@ -294,8 +294,9 @@ class Optimizer:
         strings = f'&optimization_term term = "{term}", weight = {weight}, verbose = 1 &end'
         self.strings.append(strings)
 
-    def add_variable(self, name: str, item: str, step_size: Union[int, float] = 1.0):
-        strings = f'&optimization_variable name = {name}, item = {item}, step_size = {step_size} &end'
+    def add_variable(self, name: str, item: str, step_size: Union[int, float] = 1.0, lower_limit: float = 0.0,
+                     upper_limit: float = 0.0):
+        strings = f'&optimization_variable name = {name}, item = {item}, step_size = {step_size}, lower_limit={lower_limit}, upper_limit={upper_limit}&end'
         self.strings.append(strings)
 
     def add_link(self, source: str, target: str, parameter: str):
@@ -305,7 +306,7 @@ class Optimizer:
     def add_comment(self, comment: str):
         self.strings.append(comment)
 
-    def sene(self, var1: str, var2: str, eps: float = 1e-4):
+    def sene(self, var1: Union[str,float,int], var2: Union[str,float,int], eps: float = 1e-4):
         strings = "{} {} {} sene".format(var1, var2, eps)
         # self.strings.append(strings)
         return strings
@@ -374,7 +375,8 @@ class IOTAOptimizer(Optimizer):
 
     ### adding variables
 
-    def add_corrector_variables(self, box: LatticeContainer = None, correctors: list = None, step_size: float = 0.1):
+    def add_corrector_variables(self, box: LatticeContainer = None, correctors: list = None, limits: dict = None,
+                                step_size: float = 0.1):
         """
         Adds a kick strength variable for all correctors. Assumes they are all integrated with dipoles/skew quads.
         :param step_size:
@@ -384,7 +386,12 @@ class IOTAOptimizer(Optimizer):
         """
         box = box or self.box
         correctors = correctors or box.correctors
+        if not limits: limits = {}
         for c in correctors:
+            if c in limits:
+                vmax, vmin = limits[c]
+            else:
+                vmax = vmin = 0.0
             if isinstance(c, Vcor):
                 item = 'VKICK'
             elif isinstance(c, Hcor):
@@ -396,10 +403,11 @@ class IOTAOptimizer(Optimizer):
                     raise Exception(
                         f'Corrector ({c.id}) can only be horizontal, since its in a dipole ({c.ref_el.id})!')
                 item = 'FSE_DIPOLE'
-                self.add_variable(name=c.ref_el.id, item=item, step_size=step_size/100)
+                self.add_variable(name=c.ref_el.id, item=item, step_size=step_size / 100, lower_limit=vmin,
+                                  upper_limit=vmax)
                 print(f'Added corrector ({c.id}) - variable ({c.ref_el.id}-{item})')
             else:
-                self.add_variable(name=c.ref_el.id, item=item, step_size=step_size)
+                self.add_variable(name=c.ref_el.id, item=item, step_size=step_size, lower_limit=vmin, upper_limit=vmax)
                 print(f'Added corrector ({c.id}) - variable ({c.ref_el.id}-{item})')
 
     def add_main_quad_variables(self, box: LatticeContainer = None, parameter: str = 'K1', side: Optional[str] = 'R'):
@@ -436,7 +444,7 @@ class IOTAOptimizer(Optimizer):
         """
         box = box or self.box
         if kicks_dict:
-            for c, (vmin,vmax) in kicks_dict.values():
+            for c, (vmin, vmax) in kicks_dict.values():
                 if isinstance(c, str):
                     obj_list = [el for el in box.correctors if c in el.id]
                     if len(obj_list) == 1:
@@ -487,8 +495,6 @@ class IOTAOptimizer(Optimizer):
                 self.add_term(f"{c.ref_el.id}.{item} {min_kicks[i]} {tol} selt")
                 print(f'Added constraint {c.ref_el.id}-{item}:({max_kicks[i]}|{min_kicks[i]})@{tol}')
 
-
-
     def add_orbit_constraints(self, box: LatticeContainer = None, goals: Union[list, dict] = None, tol: float = 1e-4,
                               zero_other_monitors: bool = True):
         """
@@ -531,6 +537,26 @@ class IOTAOptimizer(Optimizer):
 
         else:
             raise Exception(f'Unknown type of goals provided')
+
+    def add_orbit_constraints_for_region(self, box: LatticeContainer = None, region: tuple = (-1, -1),
+                                         orbit: tuple = None, tol: float = 1e-4):
+        box = box or self.box
+        assert len(region) == 2
+        if orbit is None:
+            orbit = (0, 0)
+        box.update_element_positions()
+        bound_lower = -np.inf if region[0] == -1 else region[0]
+        bound_upper = np.inf if region[1] == -1 else region[1]
+        for el in box.lattice.sequence:
+            if isinstance(el, Monitor) or isinstance(el, Marker):
+                if bound_lower < el.s < bound_upper:
+                    el.orbit_goal_x = orbit[0]
+                    el.orbit_goal_y = orbit[1]
+                else:
+                    el.orbit_goal_x = 0
+                    el.orbit_goal_y = 0
+                self.add_term(self.sene(f'{el.id}#1.xco', el.orbit_goal_x, tol))
+                self.add_term(self.sene(f'{el.id}#1.yco', el.orbit_goal_y, tol))
 
     def set_NL_drift_optics(self, shiftx=False, shifty=False):
         self.add_comment('!Betastar')
