@@ -6,7 +6,7 @@ import numpy as np
 
 class LatticeContainer:
     def __init__(self, name: str, lattice: list, correctors: list,
-                 monitors: list, reset_elements_to_defaults: bool = True, info: dict = None):
+                 monitors: list, reset_elements_to_defaults: bool = True, info: dict = None, variables: dict = None):
         if not info:
             info = {'source_file': 'unknown', 'source': 'unknown'}
         self.name = name
@@ -16,6 +16,7 @@ class LatticeContainer:
         self.source_file = info['source_file']
         self.source = info['source']
         self.pc = info['pc'] or 0.0
+        self.variables = variables
 
         if reset_elements_to_defaults:
             print(f'WARN - resetting any nonlinear elements to 0')

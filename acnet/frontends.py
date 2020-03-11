@@ -706,7 +706,7 @@ class ACNETRelay(Adapter):
                 elif isinstance(device, StatusDevice):
                     req_str_list.append(f'{device.name}.STATUS')
                 elif isinstance(device, DoubleDevice):
-                    req_str_list.append(f'{device.name + adds}@I')
+                    req_str_list.append(f'{device.name + adds}')
                 else:
                     raise Exception
             req_str = ';'.join(req_str_list)

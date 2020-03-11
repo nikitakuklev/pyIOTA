@@ -46,24 +46,26 @@ class DIPOLES:
 
 
 class CORRECTORS:
-    __combfun = ['A1R', 'A2R', 'B1R', 'B2R', 'C1R', 'C2R', 'D1R', 'D2R', 'E1R', 'E2R',
+    _combfun = ['A1R', 'A2R', 'B1R', 'B2R', 'C1R', 'C2R', 'D1R', 'D2R', 'E1R', 'E2R',
                  'E2L', 'E1L', 'D2L', 'D1L', 'C2L', 'C1L', 'B2L', 'B1L', 'A2L', 'A1L']
+
+    kHSQ = (0.1 - 0.034645) * 1.3 # calibration for current to field for panofsky magnets
 
     DIPOLE_TRIMS_I = ['N:IHM' + str(i) + 'LI' for i in range(1, 5)] + ['N:IHM' + str(i) + 'RI' for i in range(1, 5)]
     DIPOLE_TRIMS_V = ['N:IHM' + str(i) + 'LV' for i in range(1, 5)] + ['N:IHM' + str(i) + 'RV' for i in range(1, 5)]
     DIPOLE_TRIMS_ALL = DIPOLE_TRIMS_I + DIPOLE_TRIMS_V # 4000
 
     COMBINED_COILS_I = [i for sl in
-                        [['N:I1' + k + 'I', 'N:I2' + k + 'I', 'N:I3' + k + 'I', 'N:I4' + k + 'I'] for k in __combfun] for
+                        [['N:I1' + k + 'I', 'N:I2' + k + 'I', 'N:I3' + k + 'I', 'N:I4' + k + 'I'] for k in _combfun] for
                         i in sl]
     COMBINED_COILS_V = [i for sl in
-                      [['N:I1' + k + 'V', 'N:I2' + k + 'V', 'N:I3' + k + 'V', 'N:I4' + k + 'V'] for k in __combfun] for
-                      i in sl]
+                        [['N:I1' + k + 'V', 'N:I2' + k + 'V', 'N:I3' + k + 'V', 'N:I4' + k + 'V'] for k in _combfun] for
+                        i in sl]
     COMBINED_COILS_ALL = COMBINED_COILS_I + COMBINED_COILS_V #4000
 
-    VIRTUAL_H = [i for sl in [['N:IH' + k + 'I'] for k in __combfun] for i in sl]
-    VIRTUAL_V = [i for sl in [['N:IV' + k + 'I'] for k in __combfun] for i in sl]
-    COMBINED_VIRTUAL = [i for sl in [['N:IV' + k + 'I', 'N:IH' + k + 'I'] for k in __combfun] for i in sl]
+    VIRTUAL_H = [i for sl in [['N:IH' + k + 'I'] for k in _combfun] for i in sl]
+    VIRTUAL_V = [i for sl in [['N:IV' + k + 'I'] for k in _combfun] for i in sl]
+    COMBINED_VIRTUAL = [i for sl in [['N:IV' + k + 'I', 'N:IH' + k + 'I'] for k in _combfun] for i in sl]
 
     OTHER_CORRECTORS_I = ['N:IBMPLI', 'N:IBMPRI'] #4000
     OTHER_CORRECTORS_V = ['N:IBMPLV', 'N:IBMPRV'] #4000
@@ -108,8 +110,9 @@ class SKEWQUADS:
 class SEXTUPOLES:
     __sext_names = ['A1R', 'C1R', 'C2R', 'D1R', 'E1R', 'E2R',
                     'A2L', 'C1L', 'C2L', 'D1L', 'E1L', 'E2L']
-    ALL_CURRENTS = ['N:IS' + str(i) + 'I' for i in __sext_names]
-    ALL_VOLTAGES = ['N:IS' + str(i) + 'V' for i in __sext_names]
+    __sext_names_v2 = ['C1R', 'C2R', 'C1L', 'C2L']
+    ALL_CURRENTS = ['N:IS' + str(i) + 'I' for i in __sext_names] + ['N:TS' + str(i) + 'I' for i in __sext_names_v2]
+    ALL_VOLTAGES = ['N:IS' + str(i) + 'V' for i in __sext_names] + ['N:TS' + str(i) + 'V' for i in __sext_names_v2]
     ALL = ALL_CURRENTS + ALL_VOLTAGES
 
 

@@ -294,7 +294,8 @@ def parse_lattice(fpath: Path, verbose: bool = False):
           f'{len(correctors_ocelot)} correctors, {len(monitors_ocelot)} monitors')
 
     info_dict = {'source_file': str(fpath), 'source': '6dsim', 'pc': pc, 'N': N}
-    return lattice_ocelot, correctors_ocelot, monitors_ocelot, info_dict
+    var_dict = {k: KnobVariable(kind='$', var='$'+k, value=v) for k, v in lattice_vars.items()}
+    return lattice_ocelot, correctors_ocelot, monitors_ocelot, info_dict, var_dict
 
 
 def parse_knobs(fpath: Path, verbose: bool = True):
@@ -373,7 +374,15 @@ class Knob(AbstractKnob):
         else:
             return {v.var: v.value for v in self.vars.values()}
 
-    def copy(self, devices_only=True):
+    def only_keep_shared(self, other: 'Knob'):
+        self.vars = {k: v for (k, v) in self.vars.items() if k in other.vars}
+        return self
+
+    def union(self, other: 'Knob'):
+        self.vars = {k: v for (k, v) in self.vars.items() if k in other.vars and other.vars[k] == v}
+        return self
+
+    def copy(self, devices_only: bool = True):
         k = Knob(name=self.name)
         knobvars = [kv.copy() for kv in self.vars.values()]
         k.vars = {k.var: k for k in knobvars}
@@ -391,6 +400,7 @@ class Knob(AbstractKnob):
         tempdict = {k.acnet_var: k for k in self.vars.values()}
         for k, v in ds.devices.items():
             tempdict[k].value = v.value
+        return self
 
     def prune(self, tol: float = 1e-4, verbose: bool = False):
         if verbose or self.verbose:
@@ -399,49 +409,56 @@ class Knob(AbstractKnob):
             pruned = {k.var: k.value for k in self.vars.values() if np.abs(k.value) <= tol}
             print(f'{len(pruned)} pruned:', pruned)
         self.vars = {k.var: k for k in self.vars.values() if np.abs(k.value) > tol}
-        return self.vars
+        return self
 
-    def set(self, verbose: bool = False):
+    def is_empty(self):
+        return len(self.vars) == 0
+
+    def set(self, verbose: bool = False, split: bool = False):
         if verbose or self.verbose:
             verbose = True
         if not self.absolute:
             raise Exception('Attempt to set relative knob')
         if verbose: print(f'Setting knob {self.name}')
-        skews = [(DoubleDevice(d.acnet_var), d.value) for d in self.vars.values() if d.acnet_var in
-                 pyIOTA.iota.run2.SKEWQUADS.ALL_CURRENTS]
-        corrV = [(DoubleDevice(d.acnet_var), d.value) for d in self.vars.values() if d.acnet_var in
-                 pyIOTA.iota.run2.CORRECTORS.VIRTUAL_V]
-        corrH = [(DoubleDevice(d.acnet_var), d.value) for d in self.vars.values() if d.acnet_var in
-                 pyIOTA.iota.run2.CORRECTORS.VIRTUAL_H]
-        other = [(DoubleDevice(d.acnet_var), d.value) for d in self.vars.values() if d.acnet_var not in
-                 pyIOTA.iota.run2.SKEWQUADS.ALL_CURRENTS and d.acnet_var not in pyIOTA.iota.run2.CORRECTORS.COMBINED_VIRTUAL]
-        # random.shuffle(dlist3)
+        if split:
+            skews = [(DoubleDevice(d.acnet_var), d.value) for d in self.vars.values() if d.acnet_var in
+                     pyIOTA.iota.run2.SKEWQUADS.ALL_CURRENTS]
+            corrV = [(DoubleDevice(d.acnet_var), d.value) for d in self.vars.values() if d.acnet_var in
+                     pyIOTA.iota.run2.CORRECTORS.VIRTUAL_V]
+            corrH = [(DoubleDevice(d.acnet_var), d.value) for d in self.vars.values() if d.acnet_var in
+                     pyIOTA.iota.run2.CORRECTORS.VIRTUAL_H]
+            other = [(DoubleDevice(d.acnet_var), d.value) for d in self.vars.values() if d.acnet_var not in
+                     pyIOTA.iota.run2.SKEWQUADS.ALL_CURRENTS and d.acnet_var not in pyIOTA.iota.run2.CORRECTORS.COMBINED_VIRTUAL]
+            # random.shuffle(dlist3)
 
-        if len(other) >= 2:
-            other1, other2 = other[:len(other) // 2], other[len(other) // 2:]
-            assert len(other1) + len(other2) == len(other)
+            if len(other) >= 2:
+                other1, other2 = other[:len(other) // 2], other[len(other) // 2:]
+                assert len(other1) + len(other2) == len(other)
+            else:
+                other1 = other
+                other2 = []
+            # print()
+            # print(skews, corrV, corrH, other1, other2, sep='\n')
+
+            if len(skews) != 0:
+                ds = DoubleDeviceSet(name=self.name, members=[d[0] for d in skews])
+                ds.set([d[1] for d in skews], verbose=verbose)
+            if len(other1) != 0:
+                ds = DoubleDeviceSet(name=self.name, members=[d[0] for d in other1])
+                ds.set([d[1] for d in other1], verbose=verbose)
+            if len(corrV) != 0:
+                ds = DoubleDeviceSet(name=self.name, members=[d[0] for d in corrV])
+                ds.set([d[1] for d in corrV], verbose=verbose)
+            if len(other2) != 0:
+                ds = DoubleDeviceSet(name=self.name, members=[d[0] for d in other2])
+                ds.set([d[1] for d in other2], verbose=verbose)
+            time.sleep(0.3)
+            if len(corrH) != 0:
+                ds = DoubleDeviceSet(name=self.name, members=[d[0] for d in corrH])
+                ds.set([d[1] for d in corrH], verbose=verbose)
         else:
-            other1 = other
-            other2 = []
-        print()
-        print(skews, corrV, corrH, other1, other2, sep='\n')
-
-        if len(skews) != 0:
-            ds = DoubleDeviceSet(name=self.name, members=[d[0] for d in skews])
-            ds.set([d[1] for d in skews], verbose=verbose)
-        if len(other1) != 0:
-            ds = DoubleDeviceSet(name=self.name, members=[d[0] for d in other1])
-            ds.set([d[1] for d in other1], verbose=verbose)
-        if len(corrV) != 0:
-            ds = DoubleDeviceSet(name=self.name, members=[d[0] for d in corrV])
-            ds.set([d[1] for d in corrV], verbose=verbose)
-        if len(other2) != 0:
-            ds = DoubleDeviceSet(name=self.name, members=[d[0] for d in other2])
-            ds.set([d[1] for d in other2], verbose=verbose)
-        time.sleep(0.3)
-        if len(corrH) != 0:
-            ds = DoubleDeviceSet(name=self.name, members=[d[0] for d in corrH])
-            ds.set([d[1] for d in corrH], verbose=verbose)
+            ds = DoubleDeviceSet(name=self.name, members=[DoubleDevice(d.acnet_var) for d in self.vars.values()])
+            ds.set([d.value for d in self.vars.values()], verbose=verbose)
 
     def __sub__(self, other):
         assert isinstance(other, Knob)

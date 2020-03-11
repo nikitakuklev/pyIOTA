@@ -103,7 +103,8 @@ def get_bpm_data(bpm_ds=None, mode='tbt', kickv=np.nan, kickh=np.nan,
     return data, state, val_last_ret, saved_ok
 
 
-def transition(final_state: Knob, steps: int = 5, verbose: bool = True, extra_final_setting=True):
+def transition(final_state: Knob, steps: int = 5, verbose: bool = True, extra_final_setting=True,
+               retry=True, retry_limit=10):
     """
     Transition sequencing - moves towards knob state in uniform, smaller steps.
     :param extra_final_setting:
@@ -112,7 +113,9 @@ def transition(final_state: Knob, steps: int = 5, verbose: bool = True, extra_fi
     :param verbose:
     :return:
     """
+    t0 = time.time()
     if not final_state.absolute:
+        raise
         if verbose: print(f'Add relative knob ({final_state}) in ({steps}) steps')
         initial_state = final_state.copy()
         initial_state.read_current_state()
@@ -128,33 +131,32 @@ def transition(final_state: Knob, steps: int = 5, verbose: bool = True, extra_fi
             (initial_state + final_state).set(verbose=verbose)
         if verbose: print(f'Done')
     else:
-        if verbose: print(f'Transitioning to ({final_state}) in ({steps}) steps')
-        initial_state = final_state.copy()
-        initial_state.read_current_state()
+        #if verbose: print(f'Transitioning to ({final_state}) in ({steps}) steps')
+        print(f'Transitioning to ({final_state})(abs:{final_state.absolute}) in ({steps}) steps')
+        initial_state = final_state.copy().read_current_state()
         if verbose: print(f'\nCurrent state read OK')
-        delta_knob = (final_state - initial_state) / steps
-        to_change = delta_knob.prune(tol=1e-4)
-        if verbose: print(f'\nTo change', to_change)
-        if len(to_change) == 0:
+        delta_knob = ((final_state - initial_state) / steps).prune(tol=1e-4)
+        if verbose: print(f'\nTo change', delta_knob.vars)
+        if delta_knob.is_empty():
             if verbose: print(f'No changes necessary!')
             return
-        initial_state_pruned = initial_state.copy()
-        initial_state_pruned.vars = {k: v for k, v in initial_state_pruned.vars.items() if k in to_change}
-
+        initial_state_pruned = initial_state.copy().only_keep_shared(delta_knob)
         for step in range(1, steps + 1):
-            if verbose: print(f'{step}/{steps} ', end='')
+            #if verbose: print(f'{step}/{steps} ', end='')
+            print(f'step {step}/{steps}...', end='')
             intermediate_state = initial_state_pruned + delta_knob * step
             intermediate_state.set(verbose=verbose)
-            time.sleep(0.1)
+            time.sleep(0.5)
+        print('done!')
 
         if extra_final_setting:
             time.sleep(0.5)
             extra_state = final_state.copy()
             extra_state.read_current_state()
-            if verbose: print('\nExtra state:\n', [(k.var, k.value) for k in extra_state.vars.values()])
+            if verbose: print('\nExtra state read:\n', [(k.var, k.value) for k in extra_state.vars.values()])
             extra_delta = final_state - extra_state
             to_change_extra = extra_delta.prune(tol=1e-4)
-            if verbose: print(f'\nTo change', to_change)
+            if verbose: print(f'\nTo change', to_change_extra)
             if len(to_change_extra) == 0:
                 if verbose: print(f'No changes necessary!')
                 return
@@ -163,7 +165,21 @@ def transition(final_state: Knob, steps: int = 5, verbose: bool = True, extra_fi
             extra_state_pruned.vars = {k: v for k, v in extra_state_pruned.vars.items() if k in to_change_extra}
             extra_state_pruned.set(verbose=verbose)
 
-        if verbose: print(f'Done')
+        if retry:
+            for i in range(retry_limit):
+
+                extra_state = final_state.copy().read_current_state()
+                if verbose: print('\nExtra state read:\n', [(k.var, k.value) for k in extra_state.vars.values()])
+                extra_delta = (final_state - extra_state).prune(tol=1e-4)
+                if extra_delta.is_empty():
+                    if verbose: print(f'Retry {i}/{retry_limit} - all settings satisfied!')
+                    break
+                else:
+                    if verbose: print(f'\nExtra changes: {extra_delta.vars}')
+                extra_state_pruned = final_state.copy().only_keep_shared(extra_delta)
+                extra_state_pruned.set(verbose=verbose)
+                print(f'Running retry loop {i}/{retry_limit} - set {len(extra_state.vars)} devices')
+        print(f'Knob {final_state.name} set in {time.time()-t0:.5f}s')
 
 
 def inject_until_current(arm_bpms: bool = False, debug: bool = False, current: float = 1.0, limit: int = 10):

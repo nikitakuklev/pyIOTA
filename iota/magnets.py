@@ -1,5 +1,6 @@
 import numpy as np
 import scipy.constants
+from pyIOTA.sixdsim.io import KnobVariable
 
 
 def calc_octupole_strengths(current: float, energy: float):
@@ -152,3 +153,49 @@ def NL_Cur_t(I):
     k1 = 2*knn/cnn**2
     t = I/(k1/GI/L*BR/100)
     return t[9]
+
+
+directions = np.array([[1, -1, 1, -1],[-1, 1, 1, -1],[1, 1, -1, -1]])
+
+def calculate_current_margins(currents: np.ndarray, max_current: float = 1.9, min_current: float = -1.9):
+    margin_skew = np.abs(directions[0]*max_current-currents)
+    margin_skew2 = np.abs(directions[0]*min_current-currents)
+
+    margin_ch = np.abs(directions[1] * max_current - currents)
+    margin_ch2 = np.abs(directions[1] * min_current - currents)
+
+    margin_cv = np.abs(directions[2] * max_current - currents)
+    margin_cv2 = np.abs(directions[2] * min_current - currents)
+
+    return [(min(margin_skew), -min(margin_skew2)), (min(margin_ch), -min(margin_ch2)), (min(margin_cv), -min(margin_cv2))]
+
+
+def get_combfun_coil_currents(skew: KnobVariable = None, ch: KnobVariable = None, cv: KnobVariable = None):
+    """
+    Computes actual coil currents from respective virtual knob settings
+    :param skew:
+    :param ch:
+    :param cv:
+    :return:
+    """
+    currents = np.zeros(4)
+    if skew:
+        currents += np.array([1, -1, 1, -1]) * skew.value
+    if ch:
+        currents += np.array([-1, 1, 1, -1]) * ch.value
+    if cv:
+        currents += np.array([1, 1, -1, -1]) * cv.value
+    return currents
+
+
+def get_combfun_strengths(currents: np.ndarray):
+    """
+    Computes virtual H/V/skew from coil correctors
+    :param currents:
+    :return:
+    """
+    assert currents.ndim == 1 and len(currents) == 4
+    skew = np.sum(currents*np.array([1, -1, 1, -1]))
+    ch = np.sum(currents * np.array([-1, 1, 1, -1]))
+    cv = np.sum(currents * np.array([1, 1, -1, -1]))
+    return skew, ch, cv

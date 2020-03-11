@@ -463,6 +463,44 @@ class IOTAOptimizer(Optimizer):
             self.add_term(f"{c.ref_el.id}.{item} {min_kicks[i]} {tol} selt")
             print(f'Added constraint {c.ref_el.id}-{item}:({max_kicks[i]}|{min_kicks[i]})@{tol}')
 
+    def add_corrector_constraints_by_name(self, box: LatticeContainer = None, kicks_dict:dict = None,
+                                  tol: float = 1e-3):
+        """
+        Adds strength constraints on correctors - typically this is dictated by current limits
+        :param box:
+        :param tol:
+        :return:
+        """
+        box = box or self.box
+        if not kicks_dict: raise Exception('Maximum kicks must be specified')
+        max_kicks = np.array(max_kicks)
+        if len(max_kicks) == 1:
+            max_kicks = np.repeat(max_kicks, len(box.correctors))
+        if not min_kicks:
+            min_kicks = -1 * np.array(max_kicks)
+        elif len(min_kicks) == 1:
+            min_kicks = np.array(min_kicks)
+            min_kicks = np.repeat(min_kicks, len(box.correctors))
+        else:
+            min_kicks = np.array(min_kicks)
+        assert len(min_kicks) == len(max_kicks)
+
+        for i, c in enumerate(box.correctors):
+            if isinstance(c, Vcor):
+                item = 'VKICK'
+            elif isinstance(c, Hcor):
+                item = 'HKICK'
+            else:
+                continue
+            if isinstance(c.ref_el, SBend):
+                if item != 'HKICK':
+                    raise Exception(
+                        f'Corrector ({c.id}) can only be horizontal, since its in a dipole ({c.ref_el.id})!')
+                item = 'FSE_DIPOLE'
+            self.add_term(f"{c.ref_el.id}.{item} {max_kicks[i]} {tol} segt")
+            self.add_term(f"{c.ref_el.id}.{item} {min_kicks[i]} {tol} selt")
+            print(f'Added constraint {c.ref_el.id}-{item}:({max_kicks[i]}|{min_kicks[i]})@{tol}')
+
     def add_orbit_constraints(self, box: LatticeContainer = None, goals: Union[list, dict] = None, tol: float = 1e-4,
                               zero_other_monitors: bool = True):
         """
