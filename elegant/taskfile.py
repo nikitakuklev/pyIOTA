@@ -313,10 +313,10 @@ class Optimizer:
 
     def dump(self):
         print(f'Dumping ({len(self.strings)}) lines of optimizer setup')
-        print('\n'.join(self.strings))
+        print('\n'.join(self.strings)+'\n')
 
     def compile(self):
-        return '\n'.join(self.strings)
+        return '\n'.join(self.strings)+'\n'
 
 
 class IOTAOptimizer(Optimizer):
@@ -539,7 +539,7 @@ class IOTAOptimizer(Optimizer):
             raise Exception(f'Unknown type of goals provided')
 
     def add_orbit_constraints_for_region(self, box: LatticeContainer = None, region: tuple = (-1, -1),
-                                         orbit: tuple = None, tol: float = 1e-4):
+                                         orbit: tuple = None, tol: float = 1e-4, touch_markers: bool = False):
         box = box or self.box
         assert len(region) == 2
         if orbit is None:
@@ -548,7 +548,7 @@ class IOTAOptimizer(Optimizer):
         bound_lower = -np.inf if region[0] == -1 else region[0]
         bound_upper = np.inf if region[1] == -1 else region[1]
         for el in box.lattice.sequence:
-            if isinstance(el, Monitor) or isinstance(el, Marker):
+            if isinstance(el, Monitor) or (touch_markers and isinstance(el, Marker)):
                 if bound_lower < el.s < bound_upper:
                     el.orbit_goal_x = orbit[0]
                     el.orbit_goal_y = orbit[1]

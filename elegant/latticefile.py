@@ -5,7 +5,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from pyIOTA.lattice.elements import LatticeContainer
-from ocelot import Sextupole, Hcor, Vcor, Element, Edge
+from ocelot import Sextupole, Hcor, Vcor, Element, Edge, Marker
 
 
 class Writer:
@@ -256,6 +256,7 @@ class Writer:
         # vkickers = iota.GetElementsOfType('VKICKER')
         cavities = box.get_elements("Cavity")
         monitors = box.get_elements("Monitor")
+        markers = box.get_elements(Marker)
         nllenses = box.get_elements("DNMagnet")
 
         # Preamble
@@ -356,6 +357,12 @@ class Writer:
         for el in monitors:
             if self._check_if_already_defined(el, elements): continue
             sl.append(f'{el.id:<10}: MONI, l={el.l}, CO_FITPOINT=1\n')
+        sl.append('\n')
+
+        sl.append('!MARKERS\n')
+        for el in markers:
+            if self._check_if_already_defined(el, elements): continue
+            sl.append(f'{el.id:<10}: MARKER, FITPOINT=1\n')
         sl.append('\n')
 
         sl.append('!DRIFTS\n')
