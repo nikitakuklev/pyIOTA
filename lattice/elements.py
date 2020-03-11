@@ -1,6 +1,6 @@
 from typing import Union
 
-from ocelot import Element, Sextupole, MagneticLattice, Octupole, Drift, Monitor, Marker
+from ocelot import Element, Sextupole, MagneticLattice, Octupole, Drift, Monitor, Marker, Edge, SBend
 import numpy as np
 
 
@@ -45,12 +45,15 @@ class LatticeContainer:
         l = l_last = 0.0
         for i, el in enumerate(seq):
             l += el.l
+            if (isinstance(el, Edge) and isinstance(seq[i-1], SBend)) or isinstance(el, SBend):
+                # do not want to disturb edge links
+                continue
             if l > l_last + spacing:
                 seq_new.append(Marker(eid=f'MARKER_{i}'))
-                print(f'Inserted monitor at ({l:.3f}), ({l - l_last:.3f}) from last one')
+                print(f'Inserted monitor at ({l:.2f}), ({l - l_last:.2f}) from last one')
                 l_last = l
             seq_new.append(el)
-        print(f'Done - inserted ({len(seq_new)-len(seq):.3f}) monitors')
+        print(f'Done - inserted ({len(seq_new) - len(seq)}) markers')
         self.lattice.sequence = seq_new
 
     def update_element_positions(self):
@@ -61,14 +64,14 @@ class LatticeContainer:
         l = 0.0
         for i, el in enumerate(self.lattice.sequence):
             el.s_start = l
-            el.s = l + el.l/2
+            el.s = l + el.l / 2
             el.s_end = l + el.l
             l += el.l
 
     def remove_markers(self):
         len_old = len(self.lattice.sequence)
         self.lattice.sequence = [s for s in self.lattice.sequence if not isinstance(s, Marker)]
-        print(f'Removed ({len_old - len(self.lattice.sequence)}) elements')
+        print(f'Removed ({len_old - len(self.lattice.sequence)}) markers')
 
     def insert_monitors(self, monitors: list = None, verbose: bool = False):
         """
