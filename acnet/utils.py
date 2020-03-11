@@ -7,7 +7,7 @@ import datetime
 special_keys = ['idx', 'kickv', 'kickh', 'state']
 
 
-def load_data_tbt(fpath: Path, verbose: bool = True, version: int = 1):
+def load_data_tbt(fpath: Path, verbose: bool = True, version: int = 1, skip_corrupted=True):
     if version == 1:
         if fpath.is_file():
             files = [fpath]
@@ -32,7 +32,11 @@ def load_data_tbt(fpath: Path, verbose: bool = True, version: int = 1):
                 # df.loc[i] = [i, h5f['state'].attrs['kickv'], h5f['state'].attrs['kickh'], kick_arrays]
                 vlist = [v[0] for v in kick_arrays.values()]
                 if len(set(vlist)) != 1:
-                    raise Exception("Kick acquisition numbers are not the same - data is corrupted!")
+                    if skip_corrupted:
+                        print(f'File {fpath.name} has corrupted data from multiple kicks ({set(vlist)}) - skipping')
+                        return None
+                    else:
+                        raise Exception(f"Kick acquisition numbers ({set(vlist)})are not the same - data is corrupted!")
         df = pd.DataFrame(data=rowlist)
         if verbose: print(f'Read in {len(df)} files with {len(kick_arrays)} BPMs')
         return df

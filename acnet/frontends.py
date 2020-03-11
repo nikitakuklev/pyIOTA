@@ -682,7 +682,7 @@ class ACNETRelay(Adapter):
     def check_available(self, devices: dict, method=None):
         return len(devices) < 500
 
-    def readonce(self, ds: DeviceSet, settings: bool = False, verbose: bool = False) -> int:
+    def readonce(self, ds: DeviceSet, settings: bool = False, verbose: bool = False, retries:int = 1) -> int:
         if verbose or self.verbose:
             verbose = True
 
@@ -722,39 +722,47 @@ class ACNETRelay(Adapter):
                 raise Exception
         if verbose: print(f'{self.name} : params {params}')
 
-        try:
-            # async def get(json_lists):
-            #     results = [await c.post(self.address, json=p) for p in json_lists]
-            #     print(results)
-            #     return results
-            # results = asyncio.run(get(params))
-            # def get(json_lists):
-            #     results = [self.client.post(self.address, json=p) for p in json_lists]
-            #     #print(results)
-            #     return results
-            async def get(json_lists):
-                tasks = [c.post(self.address, json=p) for p in json_lists]
-                results = await asyncio.gather(*tasks)
-                return results
+        try_cnt = 0
+        while try_cnt < retries+1:
+            try:
+                # async def get(json_lists):
+                #     results = [await c.post(self.address, json=p) for p in json_lists]
+                #     print(results)
+                #     return results
+                # results = asyncio.run(get(params))
+                # def get(json_lists):
+                #     results = [self.client.post(self.address, json=p) for p in json_lists]
+                #     #print(results)
+                #     return results
+                async def get(json_lists):
+                    tasks = [c.post(self.address, json=p) for p in json_lists]
+                    results = await asyncio.gather(*tasks)
+                    return results
 
-            responses = asyncio.run(get(params))
-            t1 = datetime.datetime.utcnow().timestamp()
-            data = {}
-            for r in responses:
-                # if not isinstance(ds, BPMDeviceSet):
-                if verbose: print(f'{self.name} : result {r._content}')
-                if r.status_code == 200:
-                    data.update(self._process(ds, r.json()))
+                responses = asyncio.run(get(params))
+                t1 = datetime.datetime.utcnow().timestamp()
+                data = {}
+                for r in responses:
+                    # if not isinstance(ds, BPMDeviceSet):
+                    if verbose: print(f'{self.name} : result {r._content}')
+                    if r.status_code == 200:
+                        data.update(self._process(ds, r.json()))
+                    else:
+                        return -1
+                assert len(data) == len(ds.devices)
+                for k, v in ds.devices.items():
+                    v.update(data[k], t1, self.name)
+                return len(data)
+            except Exception as e:
+                try_cnt += 1
+                if try_cnt >= retries+1:
+                    print(f'{self.name} : FINAL EXCEPTION IN READONCE - {str(e)}')
+                    # print(e, sys.exc_info())
+                    raise
                 else:
-                    return -1
-            assert len(data) == len(ds.devices)
-            for k, v in ds.devices.items():
-                v.update(data[k], t1, self.name)
-            return len(data)
-        except Exception as e:
-            print(f'{self.name} : EXCEPTION IN READONCE - {str(e)}')
-            # print(e, sys.exc_info())
-            raise
+                    print(f'{self.name} : EXCEPTION IN READONCE (try {try_cnt-1}) - {str(e)}')
+
+
 
     def _process(self, ds: DeviceSet, r):
         responses = r['responseJson']

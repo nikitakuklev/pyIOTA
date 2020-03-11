@@ -189,9 +189,9 @@ class LatticeContainer:
 
         if el_type:
             if isinstance(el_type, str):
-                seq = [el for el in seq if el.__class__.__name__ in el_type][0]
+                seq = [el for el in seq if el.__class__.__name__ in el_type]
             else:
-                seq = [el for el in seq if isinstance(el, el_type)][0]
+                seq = [el for el in seq if isinstance(el, el_type)]
 
         if len(seq) > 0:
             return seq[0]

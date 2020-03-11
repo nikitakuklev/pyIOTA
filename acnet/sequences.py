@@ -64,6 +64,7 @@ def get_bpm_data(bpm_ds=None, mode='tbt', kickv=np.nan, kickh=np.nan,
     state['run_uuid'] = str(uuid.uuid4())
 
     repeat_data = False
+    mixed_data = False
     if check_sequence_id:
         if len(data) == 0:
             val_last_ret = np.nan
@@ -83,6 +84,7 @@ def get_bpm_data(bpm_ds=None, mode='tbt', kickv=np.nan, kickh=np.nan,
             else:
                 if val_seq != int(v[0]):
                     print(f'Sequence number is not uniform - {val_seq} vs {int(v[0])} on BPM {k}(#{i})')
+                    mixed_data = True
                     # raise Exception
                     break
     else:
@@ -92,7 +94,7 @@ def get_bpm_data(bpm_ds=None, mode='tbt', kickv=np.nan, kickh=np.nan,
     datadict = [{'idx': 0.0, 'kickv': kickv, 'kickh': kickh, 'state': state, **data}]
     df = pd.DataFrame(data=datadict)
 
-    if (save_repeats or not repeat_data) and save:
+    if (save_repeats or not repeat_data) and save and not mixed_data:
         savedate = datetime.datetime.now().strftime("%Y_%m_%d")
         fpath = Path(fpath) / f'{savedate}'
         acutils.save_data_tbt(fpath, df)
