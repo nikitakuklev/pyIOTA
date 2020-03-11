@@ -298,7 +298,8 @@ class Optimizer:
                      upper_limit: float = 0.0):
         strings = f'&optimization_variable name = {name}, item = {item}, step_size = {step_size}'
         if lower_limit: strings += f', lower_limit = {lower_limit}',
-        if upper_limit: strings += f', upper_limit = {upper_limit} &end'
+        if upper_limit: strings += f', upper_limit = {upper_limit}'
+        strings += ' &end'
         self.strings.append(strings)
 
     def add_link(self, source: str, target: str, parameter: str):
