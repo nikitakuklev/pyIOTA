@@ -542,7 +542,8 @@ class IOTAOptimizer(Optimizer):
             raise Exception(f'Unknown type of goals provided')
 
     def add_orbit_constraints_for_region(self, box: LatticeContainer = None, region: tuple = (-1, -1),
-                                         orbit: tuple = None, tol: float = 1e-4, touch_markers: bool = False, eps: float = 1e-10):
+                                         orbit: tuple = None, tol: float = 1e-4, touch_markers: bool = False, eps: float = 1e-10,
+                                         bump_terms_weight: float = 10.0):
         box = box or self.box
         assert len(region) == 2
         if orbit is None:
@@ -555,11 +556,13 @@ class IOTAOptimizer(Optimizer):
                 if bound_lower <= el.s <= bound_upper:
                     el.orbit_goal_x = orbit[0]
                     el.orbit_goal_y = orbit[1]
+                    self.add_term(self.sene(f'{el.id}#1.xco', el.orbit_goal_x, tol), weight=bump_terms_weight)
+                    self.add_term(self.sene(f'{el.id}#1.yco', el.orbit_goal_y, tol), weight=bump_terms_weight)
                 else:
                     el.orbit_goal_x = 0
                     el.orbit_goal_y = 0
-                self.add_term(self.sene(f'{el.id}#1.xco', el.orbit_goal_x, tol))
-                self.add_term(self.sene(f'{el.id}#1.yco', el.orbit_goal_y, tol))
+                    self.add_term(self.sene(f'{el.id}#1.xco', el.orbit_goal_x, tol))
+                    self.add_term(self.sene(f'{el.id}#1.yco', el.orbit_goal_y, tol))
         return np.array([[m.s, m.orbit_goal_x, m.orbit_goal_y] for m in box.get_elements(Monitor)+box.get_elements(Marker)]), None
 
     def set_NL_drift_optics(self, shiftx=False, shifty=False):

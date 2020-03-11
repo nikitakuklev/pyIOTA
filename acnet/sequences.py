@@ -17,9 +17,11 @@ def trigger_bpms_orbit_mode(debug: bool = False):
     StatusDevice(iota.CONTROLS.BPM_ORB_TRIGGER).reset()
 
 
-def get_bpm_data(bpm_ds=None, mode='tbt', kickv=np.nan, kickh=np.nan,
-                 read_beam_current=True, read_state=True, read_aux=True, state_ds=None, status_ds=None,
-                 check_sequence_id=True, last_sequence_id=None, save=False, fpath=None, save_repeats=False):
+def get_bpm_data(bpm_ds=None, mode: str = 'tbt', kickv: float = np.nan, kickh: float = np.nan,
+                 read_beam_current: bool = True, read_state: bool = True, read_aux=True, state_ds=None, status_ds=None,
+                 check_sequence_id: bool = True, last_sequence_id: bool = None, save: bool = False, fpath: Path = None,
+                 save_repeats=False,
+                 custom_state_parameters: dict = None):
     state = {}
     if read_state:
         if state_ds is None:
@@ -91,7 +93,9 @@ def get_bpm_data(bpm_ds=None, mode='tbt', kickv=np.nan, kickh=np.nan,
         val_seq = -1
         val_last_ret = -1
 
-    datadict = [{'idx': 0.0, 'kickv': kickv, 'kickh': kickh, 'state': state, **data}]
+    custom_state_parameters = {} if custom_state_parameters is None else custom_state_parameters
+    datadict = [{'idx': 0.0, 'kickv': kickv, 'kickh': kickh, 'state': state,
+                 'custom': custom_state_parameters, ** data}]
     df = pd.DataFrame(data=datadict)
 
     if (save_repeats or not repeat_data) and save and not mixed_data:
@@ -133,7 +137,7 @@ def transition(final_state: Knob, steps: int = 5, verbose: bool = True, extra_fi
             (initial_state + final_state).set(verbose=verbose)
         if verbose: print(f'Done')
     else:
-        #if verbose: print(f'Transitioning to ({final_state}) in ({steps}) steps')
+        # if verbose: print(f'Transitioning to ({final_state}) in ({steps}) steps')
         print(f'Transitioning to ({final_state})(abs:{final_state.absolute}) in ({steps}) steps')
         initial_state = final_state.copy().read_current_state()
         if verbose: print(f'\nCurrent state read OK')
@@ -144,7 +148,7 @@ def transition(final_state: Knob, steps: int = 5, verbose: bool = True, extra_fi
             return
         initial_state_pruned = initial_state.copy().only_keep_shared(delta_knob)
         for step in range(1, steps + 1):
-            #if verbose: print(f'{step}/{steps} ', end='')
+            # if verbose: print(f'{step}/{steps} ', end='')
             print(f'step {step}/{steps}...', end='')
             intermediate_state = initial_state_pruned + delta_knob * step
             intermediate_state.set(verbose=verbose)
@@ -181,7 +185,7 @@ def transition(final_state: Knob, steps: int = 5, verbose: bool = True, extra_fi
                 extra_state_pruned = final_state.copy().only_keep_shared(extra_delta)
                 extra_state_pruned.set(verbose=verbose)
                 print(f'Running retry loop {i}/{retry_limit} - set {len(extra_state.vars)} devices')
-        print(f'Knob {final_state.name} set in {time.time()-t0:.5f}s')
+        print(f'Knob {final_state.name} set in {time.time() - t0:.5f}s')
 
 
 def inject_until_current(arm_bpms: bool = False, debug: bool = False, current: float = 1.0, limit: int = 10):

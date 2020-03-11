@@ -7,7 +7,7 @@ import datetime
 special_keys = ['idx', 'kickv', 'kickh', 'state']
 
 
-def load_data_tbt(fpath: Path, verbose: bool = True, version: int = 1, skip_corrupted=True):
+def load_data_tbt(fpath: Path, verbose: bool = True, version: int = 1, soft_fail=False, force_load=False):
     if version == 1:
         if fpath.is_file():
             files = [fpath]
@@ -32,9 +32,9 @@ def load_data_tbt(fpath: Path, verbose: bool = True, version: int = 1, skip_corr
                 # df.loc[i] = [i, h5f['state'].attrs['kickv'], h5f['state'].attrs['kickh'], kick_arrays]
                 vlist = [v[0] for v in kick_arrays.values()]
                 if len(set(vlist)) != 1:
-                    if skip_corrupted:
-                        print(f'File {fpath.name} has corrupted data from multiple kicks ({set(vlist)}) - skipping')
-                        return None
+                    if soft_fail:
+                        print(f'File {fpath.name} has corrupted data from multiple kicks ({set(vlist)})')
+                        if not force_load: return None
                     else:
                         raise Exception(f"Kick acquisition numbers ({set(vlist)})are not the same - data is corrupted!")
         df = pd.DataFrame(data=rowlist)
@@ -67,6 +67,9 @@ def save_data_tbt(fpath: Path, df: pd.DataFrame, name_format: str = "iota_kicks_
 
             stategr = f.create_group('state')
             for (k, v) in df_dict['state'].items():
+                #print(k,v)
+                stategr.attrs[k] = v
+            for (k, v) in df_dict['custom'].items():
                 #print(k,v)
                 stategr.attrs[k] = v
 
