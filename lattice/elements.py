@@ -45,13 +45,14 @@ class LatticeContainer:
         l = l_last = 0.0
         for i, el in enumerate(seq):
             l += el.l
-            if (isinstance(el, Edge) and isinstance(seq[i-1], SBend)) or isinstance(el, SBend):
+            if (isinstance(el, Edge) and isinstance(seq[i - 1], SBend)) or isinstance(el, SBend):
                 # do not want to disturb edge links
                 seq_new.append(el)
                 continue
             if l > l_last + spacing:
                 seq_new.append(Marker(eid=f'MARKER_{i}'))
-                print(f'Inserted monitor at ({l:.2f}) before ({el.id}) and after ({seq[i-1].id}), ({l - l_last:.2f}) from last one')
+                print(
+                    f'Inserted monitor at ({l:.2f}) before ({el.id}) and after ({seq[i - 1].id}), ({l - l_last:.2f}) from last one')
                 l_last = l
             seq_new.append(el)
         print(f'Done - inserted ({len(seq_new) - len(seq)}) markers')
@@ -89,22 +90,23 @@ class LatticeContainer:
         self.lattice.sequence = [s for s in self.lattice.sequence if not isinstance(s, Monitor)]
         print(f'Removed ({len_old - len(self.lattice.sequence)}) monitors')
 
-    def insert_extra_monitors(self, spacing: float = 1.0):
+    def insert_extra_monitors(self, spacing: float = 1.0, verbose: bool = False):
         seq = self.lattice.sequence
         seq_new = [Monitor(eid=f'MONITOR_START')]
         l = l_last = 0.0
         for i, el in enumerate(seq):
             l += el.l
-            if (isinstance(el, Edge) and isinstance(seq[i-1], SBend)) or isinstance(el, SBend):
+            if (isinstance(el, Edge) and isinstance(seq[i - 1], SBend)) or isinstance(el, SBend):
                 # do not want to disturb edge links
                 seq_new.append(el)
                 continue
             if l > l_last + spacing:
                 seq_new.append(Monitor(eid=f'MONITOR_{i}'))
-                print(f'Inserted monitor at ({l:.2f}) before ({el.id}) and after ({seq[i-1].id}), ({l - l_last:.2f}) from last one')
+                if verbose: print(
+                    f'Inserted monitor at ({l:.2f}) before ({el.id}) and after ({seq[i - 1].id}), ({l - l_last:.2f}) from last one')
                 l_last = l
             seq_new.append(el)
-        print(f'Done - inserted ({len(seq_new) - len(seq)}) monitors')
+        print(f'Inserted ({len(seq_new) - len(seq)}) monitors')
         self.lattice.sequence = seq_new
 
     def insert_monitors(self, monitors: list = None, verbose: bool = False):

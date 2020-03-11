@@ -296,7 +296,9 @@ class Optimizer:
 
     def add_variable(self, name: str, item: str, step_size: Union[int, float] = 1.0, lower_limit: float = 0.0,
                      upper_limit: float = 0.0):
-        strings = f'&optimization_variable name = {name}, item = {item}, step_size = {step_size}, lower_limit={lower_limit}, upper_limit={upper_limit}&end'
+        strings = f'&optimization_variable name = {name}, item = {item}, step_size = {step_size}'
+        if lower_limit: strings += f', lower_limit = {lower_limit}',
+        if upper_limit: strings += f', upper_limit = {upper_limit} &end'
         self.strings.append(strings)
 
     def add_link(self, source: str, target: str, parameter: str):
