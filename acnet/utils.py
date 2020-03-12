@@ -4,7 +4,7 @@ import h5py
 import pandas as pd
 import datetime
 
-special_keys = ['idx', 'kickv', 'kickh', 'state']
+special_keys = ['idx', 'kickv', 'kickh', 'state', 'custom']
 
 
 def load_data_tbt(fpath: Path, verbose: bool = True, version: int = 1, soft_fail=False, force_load=False):
@@ -27,6 +27,7 @@ def load_data_tbt(fpath: Path, verbose: bool = True, version: int = 1, soft_fail
                                 'kickv': h5f['state'].attrs['kickv'],
                                 'kickh': h5f['state'].attrs['kickh'],
                                 'state': dict(h5f['state'].attrs),
+                                'custom': dict(h5f['custom'].attrs),
                                 'ts': h5f.attrs['time_utcstamp'],
                                 **kick_arrays})
                 # df.loc[i] = [i, h5f['state'].attrs['kickv'], h5f['state'].attrs['kickh'], kick_arrays]
@@ -69,6 +70,7 @@ def save_data_tbt(fpath: Path, df: pd.DataFrame, name_format: str = "iota_kicks_
             for (k, v) in df_dict['state'].items():
                 #print(k,v)
                 stategr.attrs[k] = v
+            stategr = f.create_group('custom')
             for (k, v) in df_dict['custom'].items():
                 #print(k,v)
                 stategr.attrs[k] = v

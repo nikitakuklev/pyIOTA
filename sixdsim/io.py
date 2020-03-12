@@ -390,13 +390,13 @@ class Knob(AbstractKnob):
         k.verbose = self.verbose
         return k
 
-    def read_current_state(self, verbose: bool = False):
+    def read_current_state(self, settings: bool = True, verbose: bool = False):
         if verbose or self.verbose:
             verbose = True
         if verbose: print(f'Reading in knob {self.name} current values')
         ds = DoubleDeviceSet(name=self.name,
                              members=[DoubleDevice(d.acnet_var) for d in self.vars.values()])
-        ds.readonce(settings=True, verbose=verbose)
+        ds.readonce(settings=settings, verbose=verbose)
         tempdict = {k.acnet_var: k for k in self.vars.values()}
         for k, v in ds.devices.items():
             tempdict[k].value = v.value
@@ -460,6 +460,9 @@ class Knob(AbstractKnob):
             ds = DoubleDeviceSet(name=self.name, members=[DoubleDevice(d.acnet_var) for d in self.vars.values()])
             ds.set([d.value for d in self.vars.values()], verbose=verbose)
 
+    def __len__(self):
+        return len(self.vars)
+
     def __sub__(self, other):
         assert isinstance(other, Knob)
         if self.verbose: print(f'Subtracting ({other.name}) from ({self.name}) | ({len(self.vars)} values)')
@@ -515,7 +518,7 @@ class Knob(AbstractKnob):
         return k
 
     def __str__(self):
-        return f'Knob {self.name} at {hex(id(self))}: {len(self.vars)} devices, absolute:{self.absolute}'
+        return f'Knob (abs {self.absolute}) ({self.name}) at {hex(id(self))}:({len(self.vars)}) devices'
 
     def __repr__(self):
         return self.__str__()

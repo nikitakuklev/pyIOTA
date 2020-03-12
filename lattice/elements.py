@@ -1,6 +1,6 @@
 from typing import Union
 
-from ocelot import Element, Sextupole, MagneticLattice, Octupole, Drift, Monitor, Marker, Edge, SBend
+from ocelot import Element, Sextupole, MagneticLattice, Octupole, Drift, Monitor, Marker, Edge, SBend, twiss
 import numpy as np
 
 
@@ -69,6 +69,9 @@ class LatticeContainer:
             el.s = l + el.l / 2
             el.s_end = l + el.l
             l += el.l
+
+    def update_twiss(self):
+        return twiss(self.lattice)
 
     def remove_markers(self):
         """

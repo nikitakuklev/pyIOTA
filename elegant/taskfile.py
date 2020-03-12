@@ -291,13 +291,13 @@ class Optimizer:
         self.box = box
 
     def add_term(self, term: str, weight=1.0):
-        strings = f'&optimization_term term = "{term}", weight = {weight}, verbose = 1 &end'
+        strings = f'&optimization_term term = "{term}", weight = {weight}, verbose = 0 &end'
         self.strings.append(strings)
 
     def add_variable(self, name: str, item: str, step_size: Union[int, float] = 1.0, lower_limit: float = 0.0,
                      upper_limit: float = 0.0):
         strings = f'&optimization_variable name = {name}, item = {item}, step_size = {step_size}'
-        if lower_limit: strings += f', lower_limit = {lower_limit}',
+        if lower_limit: strings += f', lower_limit = {lower_limit}'
         if upper_limit: strings += f', upper_limit = {upper_limit}'
         strings += ' &end'
         self.strings.append(strings)
@@ -316,10 +316,10 @@ class Optimizer:
 
     def dump(self):
         print(f'Dumping ({len(self.strings)}) lines of optimizer setup')
-        print('\n'.join(self.strings)+'\n')
+        print('\n'.join(self.strings) + '\n')
 
     def compile(self):
-        return '\n'.join(self.strings)+'\n'
+        return '\n'.join(self.strings) + '\n'
 
 
 class IOTAOptimizer(Optimizer):
@@ -537,23 +537,29 @@ class IOTAOptimizer(Optimizer):
                     f'default to reference orbit)')
             else:
                 print(f'Added {len(goals)} orbit constraints ({len(monitors_other)} monitors untouched)')
-            return np.array([[m.s, x, y] for m, (x, y) in goals.items()]), np.array([[m.s, 0, 0] for m in monitors_other])
+            return np.array([[m.s, x, y] for m, (x, y) in goals.items()]), np.array(
+                [[m.s, 0, 0] for m in monitors_other])
         else:
             raise Exception(f'Unknown type of goals provided')
 
     def add_orbit_constraints_for_region(self, box: LatticeContainer = None, region: tuple = (-1, -1),
-                                         orbit: tuple = None, tol: float = 1e-4, touch_markers: bool = False, eps: float = 1e-10,
+                                         orbit: tuple = None, tol: float = 1e-4, touch_markers: bool = False,
+                                         eps: float = 1e-10,
                                          bump_terms_weight: float = 10.0):
         box = box or self.box
         assert len(region) == 2
         if orbit is None:
             orbit = (0, 0)
         box.update_element_positions()
-        bound_lower = -np.inf if region[0] == -1 else region[0] - eps
-        bound_upper = np.inf if region[1] == -1 else region[1] + eps
+        bound_lower = -np.inf if region[0] <= -40 else region[0] - eps
+        bound_upper = np.inf if region[1] >= 40 else region[1] + eps
+        ring_len = box.lattice.totalLen
+
         for el in box.lattice.sequence:
             if isinstance(el, Monitor) or (touch_markers and isinstance(el, Marker)):
-                if bound_lower <= el.s <= bound_upper:
+                if ((bound_lower <= el.s <= bound_upper) or
+                        (bound_lower < 0 and el.s > ring_len + bound_lower) or
+                        (bound_upper > ring_len and el.s < bound_upper - ring_len)):
                     el.orbit_goal_x = orbit[0]
                     el.orbit_goal_y = orbit[1]
                     self.add_term(self.sene(f'{el.id}#1.xco', el.orbit_goal_x, tol), weight=bump_terms_weight)
@@ -563,7 +569,8 @@ class IOTAOptimizer(Optimizer):
                     el.orbit_goal_y = 0
                     self.add_term(self.sene(f'{el.id}#1.xco', el.orbit_goal_x, tol))
                     self.add_term(self.sene(f'{el.id}#1.yco', el.orbit_goal_y, tol))
-        return np.array([[m.s, m.orbit_goal_x, m.orbit_goal_y] for m in box.get_elements(Monitor)+box.get_elements(Marker)]), None
+        return np.array(
+            [[m.s, m.orbit_goal_x, m.orbit_goal_y] for m in box.get_elements(Monitor) + box.get_elements(Marker)]), None
 
     def set_NL_drift_optics(self, shiftx=False, shifty=False):
         self.add_comment('!Betastar')

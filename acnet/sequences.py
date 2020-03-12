@@ -85,7 +85,7 @@ def get_bpm_data(bpm_ds=None, mode: str = 'tbt', kickv: float = np.nan, kickh: f
                 val_seq = int(v[0])
             else:
                 if val_seq != int(v[0]):
-                    print(f'Sequence number is not uniform - {val_seq} vs {int(v[0])} on BPM {k}(#{i})')
+                    print(f'Sequence number is not uniform - {val_seq} vs {int(v[0])} on BPM {k}(#{i}) (wont be saved)')
                     mixed_data = True
                     # raise Exception
                     break
@@ -95,7 +95,7 @@ def get_bpm_data(bpm_ds=None, mode: str = 'tbt', kickv: float = np.nan, kickh: f
 
     custom_state_parameters = {} if custom_state_parameters is None else custom_state_parameters
     datadict = [{'idx': 0.0, 'kickv': kickv, 'kickh': kickh, 'state': state,
-                 'custom': custom_state_parameters, ** data}]
+                 'custom': custom_state_parameters, **data}]
     df = pd.DataFrame(data=datadict)
 
     if (save_repeats or not repeat_data) and save and not mixed_data:
@@ -109,7 +109,7 @@ def get_bpm_data(bpm_ds=None, mode: str = 'tbt', kickv: float = np.nan, kickh: f
     return data, state, val_last_ret, saved_ok
 
 
-def transition(final_state: Knob, steps: int = 5, verbose: bool = True, extra_final_setting=True,
+def transition(final_state: Knob, steps: int = 5, verbose: bool = True, extra_final_setting=False,
                retry=True, retry_limit=10):
     """
     Transition sequencing - moves towards knob state in uniform, smaller steps.
@@ -162,29 +162,28 @@ def transition(final_state: Knob, steps: int = 5, verbose: bool = True, extra_fi
             if verbose: print('\nExtra state read:\n', [(k.var, k.value) for k in extra_state.vars.values()])
             extra_delta = final_state - extra_state
             to_change_extra = extra_delta.prune(tol=1e-4)
-            if verbose: print(f'\nTo change', to_change_extra)
-            if len(to_change_extra) == 0:
+            if verbose: print(f'\nTo change ({to_change_extra})')
+            if to_change_extra.is_empty():
                 if verbose: print(f'No changes necessary!')
                 return
             if verbose: print('\nExtra delta:\n', [(k.var, k.value) for k in extra_delta.vars.values()])
             extra_state_pruned = final_state.copy()
-            extra_state_pruned.vars = {k: v for k, v in extra_state_pruned.vars.items() if k in to_change_extra}
+            extra_state_pruned.vars = {k: v for k, v in extra_state_pruned.vars.items() if k in to_change_extra.vars}
             extra_state_pruned.set(verbose=verbose)
 
         if retry:
             for i in range(retry_limit):
-
-                extra_state = final_state.copy().read_current_state()
+                extra_state = final_state.copy().read_current_state(settings=True)
                 if verbose: print('\nExtra state read:\n', [(k.var, k.value) for k in extra_state.vars.values()])
-                extra_delta = (final_state - extra_state).prune(tol=1e-4)
+                extra_delta = (final_state - extra_state).prune(tol=1e-3)
                 if extra_delta.is_empty():
                     if verbose: print(f'Retry {i}/{retry_limit} - all settings satisfied!')
                     break
                 else:
-                    if verbose: print(f'\nExtra changes: {extra_delta.vars}')
+                    print(f'\nExtra changes left: {extra_delta.vars}')
                 extra_state_pruned = final_state.copy().only_keep_shared(extra_delta)
                 extra_state_pruned.set(verbose=verbose)
-                print(f'Running retry loop {i}/{retry_limit} - set {len(extra_state.vars)} devices')
+                print(f'Running retry loop {i}/{retry_limit} - set {len(extra_state_pruned.vars)} devices')
         print(f'Knob {final_state.name} set in {time.time() - t0:.5f}s')
 
 

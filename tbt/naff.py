@@ -7,7 +7,7 @@ import scipy.signal
 from scipy.optimize import minimize
 
 
-# @jit(nopython=True, fastmath=True, nogil=True)
+@jit(nopython=True, fastmath=True, nogil=True)
 def _get_integral_v11(ztabs, twin, i_line, coeffs, FR, turns, order):
     """Numba-optimized trapezoidal integrator"""
     # ZTF = np.zeros(len(ztabs), np.complex128)

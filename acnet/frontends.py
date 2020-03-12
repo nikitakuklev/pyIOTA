@@ -61,10 +61,10 @@ class DoubleDevice(Device):
             raise
         super().update(data, timestamp, source)
 
-    def read(self, adapter=None, verbose: bool = False):
+    def read(self, adapter=None, verbose: bool = False, setting: bool = False):
         if not self._device_set:
             adapter = adapter or default_adapter or ACL(fallback=True)
-            DoubleDeviceSet(self.name, members=[self], adapter=adapter).readonce()
+            DoubleDeviceSet(self.name, members=[self], adapter=adapter).readonce(settings=setting)
         else:
             self._device_set.readonce()
         return self.value
@@ -334,8 +334,8 @@ class DeviceSet:
 
 
 class DoubleDeviceSet(DeviceSet):
-    def __init__(self, name: str, members: list, adapter=None):
-        leaf = all([isinstance(ds, DoubleDevice) for ds in members])
+    def __init__(self, name: str, members: list, adapter: 'Adapter' = None):
+        leaf = all([isinstance(ds, DoubleDevice) for ds in members]) or all([isinstance(ds, str) for ds in members])
         if not leaf:
             raise AttributeError('Can only contain devices - use DeviceSet for coalescing')
         super().__init__(name, members, adapter)
@@ -353,7 +353,7 @@ class BPMDeviceSet(DeviceSet):
     """
 
     def __init__(self, name: str, members: list, adapter=None, enforce_array_length: int = 1000):
-        leaf = all([isinstance(ds, Device) for ds in members])
+        leaf = all([isinstance(ds, Device) for ds in members]) or all([isinstance(ds, str) for ds in members])
         if not leaf:
             raise AttributeError('BPM set can only contain devices - use DeviceSet for coalescing')
         assert enforce_array_length is None or isinstance(enforce_array_length, int)
@@ -375,7 +375,7 @@ class StatusDeviceSet(DeviceSet):
     """
 
     def __init__(self, name: str, members: list, adapter=None):
-        leaf = all([isinstance(m, StatusDevice) for m in members])
+        leaf = all([isinstance(ds, StatusDevice) for ds in members]) or all([isinstance(ds, str) for ds in members])
         if not leaf:
             print([isinstance(m, StatusDevice) for m in members])
             print(members, [type(m) for m in members])
@@ -682,7 +682,7 @@ class ACNETRelay(Adapter):
     def check_available(self, devices: dict, method=None):
         return len(devices) < 500
 
-    def readonce(self, ds: DeviceSet, settings: bool = False, verbose: bool = False, retries:int = 1) -> int:
+    def readonce(self, ds: DeviceSet, settings: bool = False, verbose: bool = False, retries: int = 1) -> int:
         if verbose or self.verbose:
             verbose = True
 
@@ -723,7 +723,7 @@ class ACNETRelay(Adapter):
         if verbose: print(f'{self.name} : params {params}')
 
         try_cnt = 0
-        while try_cnt < retries+1:
+        while try_cnt < retries + 1:
             try:
                 # async def get(json_lists):
                 #     results = [await c.post(self.address, json=p) for p in json_lists]
@@ -755,14 +755,12 @@ class ACNETRelay(Adapter):
                 return len(data)
             except Exception as e:
                 try_cnt += 1
-                if try_cnt >= retries+1:
+                if try_cnt >= retries + 1:
                     print(f'{self.name} : FINAL EXCEPTION IN READONCE - {str(e)}')
                     # print(e, sys.exc_info())
                     raise
                 else:
-                    print(f'{self.name} : EXCEPTION IN READONCE (try {try_cnt-1}) - {str(e)}')
-
-
+                    print(f'{self.name} : EXCEPTION IN READONCE (try {try_cnt - 1}) - {str(e)}')
 
     def _process(self, ds: DeviceSet, r):
         responses = r['responseJson']
