@@ -121,3 +121,53 @@ def plot_disp(ax, tws, top_plot, font_size):
     #ax.plot(S, Dx,'black', lw = 2, label=lable)
     leg2 = ax.legend(loc='upper right', shadow=False, fancybox=True, prop=font_manager.FontProperties(size=font_size))
     leg2.get_frame().set_alpha(0.2)
+
+
+def plot_API(lat, fig=None, legend=True, fig_name=1, grid=True, font_size=12):
+    """
+    Function creates a picture with lattice on the bottom part of the picture and top part of the picture can be
+    plot arbitrary lines.
+    :param lat: MagneticLattice
+    :param legend: True, description of the elements, if False it is switched legend off
+    :return: fig, ax
+    """
+    if not fig:
+        fig = plt.figure(fig_name)
+    plt.rc('axes', grid=grid)
+    plt.rc('grid', color='0.75', linestyle='-', linewidth=0.5)
+    left, width = 0.1, 0.85
+    rect2 = [left, 0.19, width, 0.69]
+    rect3 = [left, 0.07, width, 0.12]
+
+
+    #rect1 = [left, 0.65, width, 0.3]
+    #rect2 = [left, 0.19, width, 0.46]
+    #rect3 = [left, 0.07, width, 0.12]
+
+    ax_xy = fig.add_axes(rect2)  #left, bottom, width, height
+    ax_el = fig.add_axes(rect3, sharex=ax_xy)
+
+
+    for ax in ax_xy, ax_el:
+        if ax!=ax_el:
+            for label in ax.get_xticklabels():
+                label.set_visible(False)
+
+    ax_xy.grid(grid)
+    ax_el.set_yticks([])
+    ax_el.grid(grid)
+    #plt.xlim(S[0], S[-1])
+
+    ax_xy.tick_params(axis='both', labelsize=font_size)
+    # leg = ax_xy.legend(loc='upper left', shadow=False, fancybox=True, prop=font_manager.FontProperties(size=font_size))
+    # leg.get_frame().set_alpha(0.2)
+
+    fig.subplots_adjust(hspace=0)
+
+    #plot_xy(ax_xy, S, X, Y, font_size)
+
+    #plot_elems(ax_el, lat, nturns = 1, legend = True) # plot elements
+    #new_plot_elems(fig, ax_el, lat, nturns = 1, legend = legend)
+    new_plot_elems(fig, ax_el, lat, legend=legend, y_scale=0.8, font_size=font_size)
+
+    return fig, ax_xy

@@ -1,12 +1,12 @@
 from typing import Union
 
-from ocelot import Element, Sextupole, MagneticLattice, Octupole, Drift, Monitor, Marker, Edge, SBend, twiss
+from ocelot import Element, Sextupole, MagneticLattice, Octupole, Drift, Monitor, Marker, Edge, SBend, twiss, Vcor, Hcor
 import numpy as np
 
 
 class LatticeContainer:
     def __init__(self, name: str, lattice: list, correctors: list,
-                 monitors: list, reset_elements_to_defaults: bool = True, info: dict = None, variables: dict = None):
+                 monitors: list, reset_elements_to_defaults: bool = True, info: dict = None, variables: dict = None, method=None):
         if not info:
             info = {'source_file': 'unknown', 'source': 'unknown'}
         self.name = name
@@ -28,7 +28,10 @@ class LatticeContainer:
             for el in elems:
                 el.k3 = 0
 
-        self.lattice = MagneticLattice(tuple(self.lattice_list))
+        if not method:
+            self.lattice = MagneticLattice(tuple(self.lattice_list))
+        else:
+            self.lattice = MagneticLattice(tuple(self.lattice_list), method=method)
 
         print(f'Lattice ({self.name}) initialized')
         # self.twiss = twiss(self.lattice)
@@ -38,6 +41,40 @@ class LatticeContainer:
             raise Exception('Cannot place thick correctors without removing skew quads!')
         raise Exception('Thick correctors on top of other elements cannot be integrated, however they are added upon'
                         'export when possible (i.e. KQUAD has VKICK/HKICK set in elegant export)')
+
+    def rotate_lattice(self, new_start: Element):
+        seq = self.lattice.sequence
+        self.lattice.sequence_original = seq
+        if new_start not in seq:
+            raise Exception(f'Element ({new_start.id}) not in current lattice')
+        elif seq[0] == new_start:
+            print(f'Lattice already starts with {new_start.id}')
+        elif len([el for el in seq if el == new_start]) > 1:
+            raise Exception(f'Too many element matches ({len([el for el in seq if el == new_start])}) to ({new_start.id})')
+        else:
+            i = seq.index(new_start)
+            self.lattice.sequence = seq[i:] + seq[:i]
+            print(f'Rotated by ({i}) - starting element is now ({self.lattice.sequence[0].id}) and ending element is ({self.lattice.sequence[-1].id})')
+
+    def replace_element(self, old_el:Element, new_el: Element):
+        seq = self.lattice.sequence
+        if old_el not in seq:
+            raise Exception(f'Element ({old_el.id}) not in current lattice')
+        elif len([el for el in seq if el == old_el]) > 1:
+            raise Exception(f'Too many element matches ({len([el for el in seq if el == old_el])}) to ({old_el.id})')
+        else:
+            if new_el.l != old_el.l:
+                print(f'Bew length ({new_el.l}) does not match old one ({old_el.l}) - careful!')
+            i = seq.index(old_el)
+            seq[i] = new_el
+            print(f'Inserted at ({i}) - element is now ({seq[i].id})')
+
+    def get_response_matrix(self):
+        import ocelot.cpbd.response_matrix
+        ringrm = ocelot.cpbd.response_matrix.RingRM(lattice=self.lattice, hcors=self.get_elements(Hcor),
+                                                    vcors=self.get_elements(Vcor), bpms=self.get_elements(Monitor))
+        return ringrm.calculate()
+
 
     def insert_extra_markers(self, spacing: float = 1.0):
         seq = self.lattice.sequence
@@ -66,7 +103,7 @@ class LatticeContainer:
         l = 0.0
         for i, el in enumerate(self.lattice.sequence):
             el.s_start = l
-            el.s = l + el.l / 2
+            el.s_mid = l + el.l / 2
             el.s_end = l + el.l
             l += el.l
 
@@ -131,11 +168,11 @@ class LatticeContainer:
         # print('S:', {k.id: v for k, v in zip(self.lattice.sequence, s)})
         # print('Sinv:', {v: k.id for k, v in zip(self.lattice.sequence, s)})
         for m in monitors:
-            m.s = s_dict[m.ref_el] + m.shift
-            if m.s > self.lattice.totalLen:
-                raise Exception(f'Monitor {m} is outside lattice length at {m.s}')
+            m.s_mid = s_dict[m.ref_el] + m.shift
+            if m.s_mid > self.lattice.totalLen:
+                raise Exception(f'Monitor {m} is outside lattice length at {m.s_mid}')
             else:
-                if verbose: print(f'Resolved {m.id} position (ref {m.ref_el.id}) + {m.shift} = {m.s}')
+                if verbose: print(f'Resolved {m.id} position (ref {m.ref_el.id}) + {m.shift} = {m.s_mid}')
         a, b, c = 0, 0, 0
         rejected = []
         for m in monitors:
@@ -144,37 +181,37 @@ class LatticeContainer:
             s_dict = {k: v for k, v in zip(self.lattice.sequence, s)}
             s_inverse_dict = {v: k for k, v in zip(self.lattice.sequence, s)}
             # print('S:', {k.id: v for k, v in zip(self.lattice.sequence, s)})
-            if m.s in s or np.any(np.isclose(m.s, s)):
-                i = np.where(np.isclose(m.s, s))[0][-1]
+            if m.s_mid in s or np.any(np.isclose(m.s_mid, s)):
+                i = np.where(np.isclose(m.s_mid, s))[0][-1]
                 # print(i,m.s)
                 if verbose: print(
-                    f'{m.id} - inserted at {m.s}(idx {i}) between {self.lattice.sequence[i - 1].id} and {self.lattice.sequence[i].id}')
+                    f'{m.id} - inserted at {m.s_mid}(idx {i}) between {self.lattice.sequence[i - 1].id} and {self.lattice.sequence[i].id}')
                 self.lattice.sequence.insert(i, m)
                 self.lattice.update_transfer_maps()
                 a += 1
             else:
-                occupant_s_idx = np.where(s < m.s)[0][-1]
+                occupant_s_idx = np.where(s < m.s_mid)[0][-1]
                 occupant_s = s[occupant_s_idx]
                 occupant = s_inverse_dict[occupant_s]
                 if verbose: print(
-                    f'{m.id} - location {m.s} in collision with ({occupant.__class__.__name__} {occupant.id})(sidx:{occupant_s_idx}) - length {occupant.l}m, between {s[max(occupant_s_idx - 1, 0):min(occupant_s_idx + 3, len(s) - 1)]}')
+                    f'{m.id} - location {m.s_mid} in collision with ({occupant.__class__.__name__} {occupant.id})(sidx:{occupant_s_idx}) - length {occupant.l}m, between {s[max(occupant_s_idx - 1, 0):min(occupant_s_idx + 3, len(s) - 1)]}')
                 if isinstance(occupant, Drift):
                     len_before = self.lattice.totalLen
-                    d_before = Drift(eid=occupant.id + '_1', l=m.s - occupant_s)
-                    d_after = Drift(eid=occupant.id + '_2', l=s[occupant_s_idx + 1] - m.s)
+                    d_before = Drift(eid=occupant.id + '_1', l=m.s_mid - occupant_s)
+                    d_after = Drift(eid=occupant.id + '_2', l=s[occupant_s_idx + 1] - m.s_mid)
                     self.lattice.sequence.insert(occupant_s_idx, d_after)
                     self.lattice.sequence.insert(occupant_s_idx, m)
                     self.lattice.sequence.insert(occupant_s_idx, d_before)
                     self.lattice.sequence.remove(occupant)
                     if verbose: print(
-                        f'{m.id} - inserted at {m.s}, two new drifts {d_before.l} and {d_after.l} created')
+                        f'{m.id} - inserted at {m.s_mid}, two new drifts {d_before.l} and {d_after.l} created')
                     self.lattice.update_transfer_maps()
                     if self.lattice.totalLen != len_before:
                         raise Exception(f"Lattice length changed from {len_before} to {self.lattice.totalLen}!!!")
                     b += 1
                 else:
                     if verbose: print(
-                        f'Could not place monitor {m.id} at {m.s} - collision with {occupant.__class__.__name__} {occupant.id} - length {occupant.l}m, closest edges ({np.max(s[s < m.s])}|{np.min(s[s > m.s])})')
+                        f'Could not place monitor {m.id} at {m.s_mid} - collision with {occupant.__class__.__name__} {occupant.id} - length {occupant.l}m, closest edges ({np.max(s[s < m.s_mid])}|{np.min(s[s > m.s_mid])})')
                     rejected.append(m.id)
                     c += 1
         print(f'Inserted ({a}) cleanly, ({b}) with drift splitting, ({c}) rejected: {rejected}')
@@ -187,6 +224,7 @@ class LatticeContainer:
 
     def get_first(self, el_name: str = None, el_type: Union[str, type] = None):
         seq = self.lattice.sequence.copy()
+        if el_name: el_name = el_name.upper()
         if el_name:
             seq = [el for el in seq if el_name in el.id]
 

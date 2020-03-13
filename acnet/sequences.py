@@ -20,8 +20,8 @@ def trigger_bpms_orbit_mode(debug: bool = False):
 def get_bpm_data(bpm_ds=None, mode: str = 'tbt', kickv: float = np.nan, kickh: float = np.nan,
                  read_beam_current: bool = True, read_state: bool = True, read_aux=True, state_ds=None, status_ds=None,
                  check_sequence_id: bool = True, last_sequence_id: bool = None, save: bool = False, fpath: Path = None,
-                 save_repeats=False,
-                 custom_state_parameters: dict = None):
+                 save_repeats=False, custom_state_parameters: dict = None, collection_seq_number: int = 0):
+
     state = {}
     if read_state:
         if state_ds is None:
@@ -31,8 +31,6 @@ def get_bpm_data(bpm_ds=None, mode: str = 'tbt', kickv: float = np.nan, kickh: f
         state.update({d.name + '.SETTING': d.value for d in state_ds.devices.values()})
     else:
         nstate = 0
-    state['kickv'] = kickv
-    state['kickh'] = kickh
 
     if read_beam_current:
         state[iota.run2.OTHER.BEAM_CURRENT_AVERAGE + '.READING'] = DoubleDevice(
@@ -62,6 +60,8 @@ def get_bpm_data(bpm_ds=None, mode: str = 'tbt', kickv: float = np.nan, kickh: f
         bpm_ds.array_length = 2048
         data = {d.name: d.value for d in bpm_ds.devices.values()}
 
+    state['kickv'] = kickv
+    state['kickh'] = kickh
     state['aq_timestamp'] = datetime.datetime.utcnow().timestamp()
     state['run_uuid'] = str(uuid.uuid4())
 
@@ -94,7 +94,7 @@ def get_bpm_data(bpm_ds=None, mode: str = 'tbt', kickv: float = np.nan, kickh: f
         val_last_ret = -1
 
     custom_state_parameters = {} if custom_state_parameters is None else custom_state_parameters
-    datadict = [{'idx': 0.0, 'kickv': kickv, 'kickh': kickh, 'state': state,
+    datadict = [{'idx': collection_seq_number, 'kickv': kickv, 'kickh': kickh, 'state': state,
                  'custom': custom_state_parameters, **data}]
     df = pd.DataFrame(data=datadict)
 
@@ -282,8 +282,8 @@ def inject(arm_bpms: bool = False, debug: bool = False):
 
 def kick(vertical_kv: float = 0.0, horizontal_kv: float = 0.0,
          restore: bool = False, debug: bool = False):
-    assert 1.0 > vertical_kv >= 0.0
-    assert 3.0 > horizontal_kv >= 0.0
+    assert 1.1 > vertical_kv >= 0.0
+    assert 3.3 > horizontal_kv >= 0.0
 
     if debug: print('>>Setting up Chip PLC')
     plc = StatusDevice(iota.CONTROLS.CHIP_PLC)
@@ -371,7 +371,7 @@ def kick(vertical_kv: float = 0.0, horizontal_kv: float = 0.0,
             time.sleep(0.1)
             for i in range(100):
                 delta = np.abs(hkicker.read() - horizontal_kv)
-                if delta > 0.05:
+                if delta > 0.2:
                     if i < 10:
                         time.sleep(0.1)
                         continue

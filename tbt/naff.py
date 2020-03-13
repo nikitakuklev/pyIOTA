@@ -1,3 +1,5 @@
+from typing import Union
+
 import numpy as np, scipy as sc
 import numba
 from numba import jit
@@ -5,6 +7,7 @@ import numexpr as ne
 import scipy.integrate as sci
 import scipy.signal
 from scipy.optimize import minimize
+from pyIOTA.tbt.tbt import Kick
 
 
 @jit(nopython=True, fastmath=True, nogil=True)
@@ -30,7 +33,7 @@ class NAFF:
         self.window_type = window_type
         self.window_power = window_power
 
-    def fft_hanning(self, data: np.ndarray, power: int = None, just_do_fft:bool=False, search_peaks: bool = False):
+    def fft_hanning_peaks(self, data: np.ndarray, power: int = None, just_do_fft:bool=False, search_peaks: bool = False):
         """
         Preliminary guess of peak frequency based on FTT with hanning window
         :param just_do_fft:
@@ -65,40 +68,24 @@ class NAFF:
         else:
             return np.fft.rfftfreq(n_turns)[np.argmax(fft_power)]
 
-    def fft_hanning(self, data: np.ndarray, power: int = None, just_do_fft:bool=False, search_peaks: bool = False):
-        """
-        Preliminary guess of peak frequency based on FTT with hanning window
-        :param just_do_fft:
-        :param data:
-        :param power:
-        :param search_peaks: whether to use scipy peak finding or just return highest bin
-        :return:
-        """
-        power = power or self.window_power
+    def fft(self, data: Union[np.ndarray, Kick], power: int = None):
+        if power is None:
+            power = self.window_power
         n_turns = len(data)
-        if (n_turns, power) not in self.hann_cache:
-            window = np.hanning(n_turns) ** power
-            self.hann_cache[(n_turns, power)] = window
-        else:
-            window = self.hann_cache[(n_turns, power)]
-
         data_centered = data - np.mean(data)
-        fft_power = np.abs(np.fft.rfft(data_centered * window)) ** 2
+        if power == 0:
+            fft_power = np.abs(np.fft.rfft(data_centered)) ** 2
+        else:
+            if (n_turns, power) not in self.hann_cache:
+                window = np.hanning(n_turns) ** power
+                self.hann_cache[(n_turns, power)] = window
+            else:
+                window = self.hann_cache[(n_turns, power)]
+            fft_power = np.abs(np.fft.rfft(data_centered * window)) ** 2
+
         fft_freq = np.fft.rfftfreq(n_turns)
 
-        if just_do_fft:
-            return fft_freq, fft_power
-
-        if search_peaks:
-            peak_idx, peak_props = sc.signal.find_peaks(fft_power)
-            peak_tunes = fft_freq[peak_idx]
-            if len(peak_idx) > 0:
-                top_tune = peak_tunes[np.argmax(fft_power[peak_idx])]
-            else:
-                top_tune = None
-            return top_tune, fft_freq, fft_power, peak_idx
-        else:
-            return np.fft.rfftfreq(n_turns)[np.argmax(fft_power)]
+        return fft_freq, fft_power
 
     def __calculate_naff_turns(self, data, turns, order):
         """
@@ -211,7 +198,7 @@ class NAFF:
             raise Exception(f"Number of points+skips exceeds available data length ({len(data)})")
         sample = data[n_skip:n_skip + n_points + 1]
         sample -= np.mean(sample)
-        tune0 = self.fft_hanning(sample, power=1, search_peaks=False)
+        tune0 = self.fft_hanning_peaks(sample, power=1, search_peaks=False)
 
         def get_amplitude(freq: float, data: np.ndarray, order: int, method: int):
             return self.compute_correlations(data, [freq], integrator_order=order, method=method)[0]

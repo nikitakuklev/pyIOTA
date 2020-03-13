@@ -1,9 +1,13 @@
 import numpy as np
+import pyIOTA.acnet.utils
 import scipy as sc
 import pandas as pd
 from scipy.signal import hilbert, chirp, butter, filtfilt
 
-special_keys = ['idx', 'kickv', 'kickh', 'state']
+# special_keys = ['idx', 'kickv', 'kickh', 'state', 'custom']
+special_keys = pyIOTA.acnet.utils.special_keys.copy()
+
+critical_keys = ['kickv', 'kickh', 'idx']
 
 
 def FilteredSignalButter(signal, fs, cutoff):
@@ -13,43 +17,67 @@ def FilteredSignalButter(signal, fs, cutoff):
 
 
 class Kick:
-    def __init__(self, df: pd.DataFrame, kick_id: int = None, bpm_list: list = None,  parent_sequence=None):
+    def __init__(self, df: pd.DataFrame, kick_id: int = None, bpm_list: list = None, parent_sequence=None):
+        for ck in critical_keys:
+            if ck not in df.columns:
+                raise Exception(f'Missing critical key ({ck}')
+
         if not bpm_list:
             bpm_list = set([k[:-1] for k in df.columns if k not in special_keys])
             print(f'BPM list not specified - deducing {len(bpm_list)}: {bpm_list}')
-            self.HG = self.BPMS_HG = [i + "H" for i in bpm_list]
-            self.VG = self.BPMS_VG = [i + "V" for i in bpm_list]
-            self.SG = self.BPMS_SG = [i + "S" for i in bpm_list]
-            self.BPMS_ALLG = self.BPMS_HG + self.BPMS_VG + self.BPMS_SG
-            self.bpm_families = {'H': self.BPMS_HG, 'V': self.BPMS_VG, 'S': self.BPMS_SG}
-        else:
-            self.HG = self.BPMS_HG = ["N:" + i + "H" for i in bpm_list]
-            self.VG = self.BPMS_VG = ["N:" + i + "V" for i in bpm_list]
-            self.SG = self.BPMS_SG = ["N:" + i + "S" for i in bpm_list]
-            self.BPMS_ALLG = self.BPMS_HG + self.BPMS_VG + self.BPMS_SG
-            self.bpm_families = {'H': self.BPMS_HG, 'V': self.BPMS_VG, 'S': self.BPMS_SG}
+
+        self.HG = self.BPMS_HG = [i + "H" for i in bpm_list]
+        self.VG = self.BPMS_VG = [i + "V" for i in bpm_list]
+        self.SG = self.BPMS_SG = [i + "S" for i in bpm_list]
+        self.BPMS_ALLG = self.BPMS_HG + self.BPMS_VG + self.BPMS_SG
+        self.bpm_families = {'H': self.BPMS_HG, 'V': self.BPMS_VG, 'S': self.BPMS_SG}
 
         self.df = df
         self.idx = kick_id
+        self.collection_id = df.iloc[0].loc['idx']
         self.ks = parent_sequence
-        self.nux = None
-        self.nuy = None
+        self.nux = None  # main tune
+        self.nuy = None  # main tune
+        self.matrix_cache = {}
 
+        # print('Read in kick')
         # Determine which BPMs are behaving ok using a rolling window average
 
     def determine_active_bpms(cutoff=0.05):
+
         pass
 
-    def compute_tunes_naff():
+    def compute_tunes_naff(self):
         pass
 
-    def get_bpm_matrix(self, family='V'):
+    def get_bpm_matrix(self, family: str = 'V', remove_sequence_data: bool = True):
         if family in ['H', 'V', 'S']:
-            bpms = self.bpm_families[family]
-            data = np.vstack(self.df.iloc[0].loc[bpms])
-            return data
+            if family in self.matrix_cache:
+                data = self.matrix_cache[family]
+            else:
+                bpms = self.bpm_families[family]
+                data = np.vstack(self.df.iloc[0].loc[bpms])
+                self.matrix_cache[family] = data
+            if remove_sequence_data:
+                return data[:, 1:]
+            else:
+                return data
         else:
             raise Exception("Invalid family specified")
+
+    def as_dict(self, family: str = 'V', bpmlist: list = None):
+        datadict = {}
+        if bpmlist is None:
+            if family in ['H', 'V', 'S']:
+                bpms = self.bpm_families[family]
+                for b in bpms:
+                    # datadict[b] = df.loc[idx, b].values[0]
+                    datadict[b] = self.df.iloc[0].loc[b]
+            else:
+                raise Exception
+        else:
+            raise Exception(f'BPM list not supported yet')
+        return datadict
 
 
 class KickSequence:
@@ -96,7 +124,6 @@ class KickSequence:
 
     def get_kick(self, idx):
         return Kick(self.df.loc[idx, :], kick_id=idx, parent_sequence=self)
-
 
     def get_bpm_matrix(self, idx, family, bpm_list=None, scaled=False):
         """
