@@ -1,4 +1,4 @@
-from typing import Union
+from typing import Union, Callable, Dict, List
 
 import numpy as np
 import pyIOTA.acnet.utils
@@ -36,12 +36,14 @@ class Kick:
         self.VG = self.BPMS_VG = [i + "V" for i in bpm_list]
         self.SG = self.BPMS_SG = [i + "S" for i in bpm_list]
         self.BPMS_ALLG = self.BPMS_HG + self.BPMS_VG + self.BPMS_SG
-        self.bpm_families = {'H': self.BPMS_HG, 'V': self.BPMS_VG, 'S': self.BPMS_SG}
+        self.CG = self.BPMS_CG = [] # Calculated
+        self.bpm_families = {'H': self.BPMS_HG, 'V': self.BPMS_VG, 'S': self.BPMS_SG, 'C': self.BPMS_CG}
+
 
         self.df = df
         self.idx = kick_id
-        if df.iloc[0].loc['idx'] == 0:
-            df.loc[0, 'idx'] = kick_id
+        #if df.iloc[0].loc['idx'] == 0:
+        df.loc[0, 'idx'] = kick_id
         self.collection_id = df.iloc[0].loc['idx']
         self.ks = parent_sequence
         self.nux = None  # main tune
@@ -53,22 +55,17 @@ class Kick:
         # print('Read in kick')
         # Determine which BPMs are behaving ok using a rolling window average
 
-    def copy(self):
+    def copy(self) -> 'Kick':
         df2 = self.df.copy(deep=True)
         return Kick(df=df2, kick_id=self.idx)
 
-
-
     def determine_active_bpms(cutoff=0.05):
-
         pass
 
     def compute_tunes_naff(self):
         pass
 
-
-
-    def get_bpm_matrix(self, family: str = 'V', remove_sequence_data: bool = False):
+    def get_bpm_matrix(self, family: str = 'V', remove_sequence_data: bool = False) -> np.ndarray:
         if family in ['H', 'V', 'S']:
             if family in self.matrix_cache:
                 data = self.matrix_cache[family]
@@ -83,7 +80,7 @@ class Kick:
         else:
             raise Exception("Invalid family specified")
 
-    def as_dict(self, family: str = 'A', bpmlist: list = None, trim: tuple = (1, -1)):
+    def as_dict(self, family: str = 'A', bpmlist: list = None, trim: tuple = (1, -1)) -> dict:
         datadict = {}
         if bpmlist is None:
             bpms = self.get_bpms(family)
@@ -97,7 +94,7 @@ class Kick:
             raise Exception(f'BPM list not supported yet')
         return datadict
 
-    def compute_tune_fft(self, naff: NAFF, selector=None):
+    def compute_tune_fft(self, naff: NAFF, selector: Callable = None, search_kwargs: Dict[str, int] = None):
         bpms = self.get_bpms(['H', 'V'])
         freq = {}
         pwr = {}
@@ -105,7 +102,8 @@ class Kick:
         average_tunes = {'H': [], 'V': []}
         for i, bpm in enumerate(bpms):
             top_tune, peak_tunes, peak_idx, peak_props, (pf, pp) = naff.fft_peaks(self.df.iloc[0].loc[bpm],
-                                                                                  search_peaks=True)
+                                                                                  search_peaks=True,
+                                                                                  search_kwargs=search_kwargs)
             # a, b = naff.fft(self.df.iloc[0].loc[bpm])
             freq[bpm] = pf
             pwr[bpm] = pp
@@ -128,7 +126,7 @@ class Kick:
     def get_tune_data(self, bpm: str):
         return self.fft_freq[bpm], self.fft_pwr[bpm], self.peaks[bpm]
 
-    def get_bpms(self, family: Union[list, str] = 'A'):
+    def get_bpms(self, family: Union[list, str] = 'A') -> List[str]:
         bpms = []
         if isinstance(family, str):
             family = [family]
@@ -143,11 +141,11 @@ class Kick:
             raise Exception(f'No BPMs found for families: {family}')
         return list(set(bpms))
 
-    def get_turns(self):
+    def get_turns(self) -> int:
         bpm = self.get_bpms()[0]
         return len(self.df.iloc[0].loc[bpm])
 
-    def calculate_sum_signal(self):
+    def calculate_sum_signal(self) -> float:
         avg = 0
         bpms = self.get_bpms('S')
         for bpm in bpms:
@@ -186,9 +184,6 @@ class KickSequence:
     def __len__(self):
         return len(self.df)
 
-    #     def sort(self, col):
-    #         self.df = self.df.sort_values(col)
-
     def calculate_sum_signal(self):
         for k in self.kicks:
             k.calculate_sum_signal()
@@ -209,10 +204,10 @@ class KickSequence:
         dflist = [k.df for k in self.kicks]
         self.df = pd.concat(dflist).sort_values(['kickv', 'kickh'])
 
-    def compute_tunes_fft(self, naff: NAFF, selector):
+    def compute_tunes_fft(self, naff: NAFF, selector: Callable, search_kwargs: Dict[str, int]):
         naff = naff or self.naff
         for r in self.df.itertuples():
-            r.kick.compute_tune_fft(naff, selector)
+            r.kick.compute_tune_fft(naff, selector, search_kwargs=search_kwargs)
 
     def get_kick_magnitudes(self):
         return self.df.loc[:, 'kickV'].values

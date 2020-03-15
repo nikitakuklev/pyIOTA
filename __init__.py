@@ -1,3 +1,7 @@
+import logging
+
+logging.basicConfig()
+
 #from lattice import *
 #from .sim import *
 #import sim

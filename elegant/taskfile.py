@@ -379,7 +379,7 @@ class IOTAOptimizer(Optimizer):
     ### adding variables
 
     def add_corrector_variables(self, box: LatticeContainer = None, correctors: list = None, limits: dict = None,
-                                step_size: float = 0.1):
+                                step_size: float = 0.1, verbose: bool = False):
         """
         Adds a kick strength variable for all correctors. Assumes they are all integrated with dipoles/skew quads.
         :param step_size:
@@ -408,12 +408,13 @@ class IOTAOptimizer(Optimizer):
                 item = 'FSE_DIPOLE'
                 self.add_variable(name=c.ref_el.id, item=item, step_size=step_size / 100, lower_limit=vmin,
                                   upper_limit=vmax)
-                print(f'Added corrector ({c.id}) - variable ({c.ref_el.id}-{item})')
+                if verbose: print(f'Added corrector ({c.id}) - variable ({c.ref_el.id}-{item})')
             else:
                 self.add_variable(name=c.ref_el.id, item=item, step_size=step_size, lower_limit=vmin, upper_limit=vmax)
-                print(f'Added corrector ({c.id}) - variable ({c.ref_el.id}-{item})')
+                if verbose: print(f'Added corrector ({c.id}) - variable ({c.ref_el.id}-{item})')
 
-    def add_main_quad_variables(self, box: LatticeContainer = None, parameter: str = 'K1', side: Optional[str] = 'R'):
+    def add_main_quad_variables(self, box: LatticeContainer = None, parameter: str = 'K1',
+                                side: Optional[str] = 'R', verbose: bool = False):
         """
         Adds a variable for all main quadrupoles
         :param box:
@@ -431,12 +432,13 @@ class IOTAOptimizer(Optimizer):
             quads = [q for q in box.get_elements(Quadrupole) if q.id.startswith('Q')]
         for el_name in quads:
             self.add_variable(name=el_name, item=parameter, step_size=1)
-        print(f'Added {len(quads)} variables of parameter {parameter} for main quads')
+        if verbose: print(f'Added {len(quads)} variables of parameter {parameter} for main quads')
 
     def add_corrector_constraints(self, box: LatticeContainer = None, max_kicks: list = None, min_kicks: list = None,
-                                  tol: float = 1e-3, kicks_dict: dict = None):
+                                  tol: float = 1e-3, kicks_dict: dict = None, verbose: bool = False):
         """
         Adds strength constraints on correctors - typically this is dictated by current limits
+        :param verbose:
         :param kicks_dict:
         :param box:
         :param max_kicks: List of maximum positive kicks. Must either match corrector count or be a singleton
@@ -467,7 +469,7 @@ class IOTAOptimizer(Optimizer):
                     item = 'FSE_DIPOLE'
                 self.add_term(f"{c.ref_el.id}.{item} {vmax} {tol} segt")
                 self.add_term(f"{c.ref_el.id}.{item} {vmin} {tol} selt")
-                print(f'Added constraint {c.ref_el.id}-{item}:({vmax}|{vmin})@{tol}')
+                if verbose: print(f'Added constraint {c.ref_el.id}-{item}:({vmax}|{vmin})@{tol}')
         else:
             if not max_kicks: raise Exception('Maximum kicks must be specified')
             max_kicks = np.array(max_kicks)
@@ -496,13 +498,14 @@ class IOTAOptimizer(Optimizer):
                     item = 'FSE_DIPOLE'
                 self.add_term(f"{c.ref_el.id}.{item} {max_kicks[i]} {tol} segt")
                 self.add_term(f"{c.ref_el.id}.{item} {min_kicks[i]} {tol} selt")
-                print(f'Added constraint {c.ref_el.id}-{item}:({max_kicks[i]}|{min_kicks[i]})@{tol}')
+                if verbose: print(f'Added constraint {c.ref_el.id}-{item}:({max_kicks[i]}|{min_kicks[i]})@{tol}')
 
     def add_orbit_constraints(self, box: LatticeContainer = None, goals: Union[list, dict] = None, tol: float = 1e-4,
-                              zero_other_monitors: bool = True):
+                              zero_other_monitors: bool = True, verbose: bool = False):
         """
         Simple method that adds orbit position goals to all monitors. Consider inserting additional markers and using
         range-based selection for more complicated cases.
+        :param verbose:
         :param zero_other_monitors:
         :param box:
         :param goals: list of tuples (x,y) for each monitor
@@ -532,11 +535,11 @@ class IOTAOptimizer(Optimizer):
                 for m in monitors_other:
                     self.add_term(self.sene(f'{m.id}#1.xco', str(0), tol))
                     self.add_term(self.sene(f'{m.id}#1.yco', str(0), tol))
-                print(
+                if verbose: print(
                     f'Added {len(monitors_other) + len(goals)} orbit constraints, ({len(monitors_other)} set by '
                     f'default to reference orbit)')
             else:
-                print(f'Added {len(goals)} orbit constraints ({len(monitors_other)} monitors untouched)')
+                if verbose: print(f'Added {len(goals)} orbit constraints ({len(monitors_other)} monitors untouched)')
             return np.array([[m.s, x, y] for m, (x, y) in goals.items()]), np.array(
                 [[m.s, 0, 0] for m in monitors_other])
         else:
@@ -545,9 +548,10 @@ class IOTAOptimizer(Optimizer):
     def add_orbit_constraints_for_region(self, box: LatticeContainer = None, region: tuple = (-1, -1),
                                          orbit: tuple = None, tol: float = 1e-4, touch_markers: bool = False,
                                          eps: float = 1e-10,
-                                         bump_terms_weight: float = 10.0):
+                                         bump_terms_weight: float = 10.0, verbose: bool = False):
         box = box or self.box
         assert len(region) == 2
+        assert not touch_markers # can't do closed orbit with elegant markers
         if orbit is None:
             orbit = (0, 0)
         box.update_element_positions()
@@ -557,9 +561,9 @@ class IOTAOptimizer(Optimizer):
 
         for el in box.lattice.sequence:
             if isinstance(el, Monitor) or (touch_markers and isinstance(el, Marker)):
-                if ((bound_lower <= el.s <= bound_upper) or
-                        (bound_lower < 0 and el.s > ring_len + bound_lower) or
-                        (bound_upper > ring_len and el.s < bound_upper - ring_len)):
+                if ((bound_lower <= el.s_mid <= bound_upper) or
+                        (bound_lower < 0 and el.s_mid > ring_len + bound_lower) or
+                        (bound_upper > ring_len and el.s_mid < bound_upper - ring_len)):
                     el.orbit_goal_x = orbit[0]
                     el.orbit_goal_y = orbit[1]
                     self.add_term(self.sene(f'{el.id}#1.xco', el.orbit_goal_x, tol), weight=bump_terms_weight)
@@ -570,9 +574,9 @@ class IOTAOptimizer(Optimizer):
                     self.add_term(self.sene(f'{el.id}#1.xco', el.orbit_goal_x, tol))
                     self.add_term(self.sene(f'{el.id}#1.yco', el.orbit_goal_y, tol))
         return np.array(
-            [[m.s, m.orbit_goal_x, m.orbit_goal_y] for m in box.get_elements(Monitor) + box.get_elements(Marker)]), None
+            [[m.s_mid, m.orbit_goal_x, m.orbit_goal_y] for m in box.get_elements(Monitor)]), None
 
-    def set_NL_drift_optics(self, shiftx=False, shifty=False):
+    def set_NL_drift_optics(self, shiftx=False, shifty=False, verbose: bool = False):
         self.add_comment('!Betastar')
         if shiftx:
             self.add_term("MN01_2#1.alphax 0 0.00001 sene")

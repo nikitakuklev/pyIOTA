@@ -12,6 +12,7 @@ class Writer:
     def __init__(self, options: dict):
         self.options = options or {}
         self.iota = None
+        self.verbose = False
 
     def set_options(self, opt: dict) -> None:
         self.options = opt
@@ -455,7 +456,7 @@ class Writer:
 
     def _check_if_already_defined(self, el: Element, elements: list):
         if el.id in elements:
-            print(f'Found repeat definition: {el.id}')
+            if self.verbose: print(f'Found repeat definition: {el.id}')
             return True
         else:
             elements.append(el.id)

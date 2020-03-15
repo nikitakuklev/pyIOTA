@@ -13,6 +13,10 @@ data_entry = collections.namedtuple('DataEntry', ['id', 'value', 'ts', 'src'])
 default_adapter = None
 
 
+# class CommManager:
+#     default_adapter = None
+
+
 class Device:
 
     def __init__(self, name: str, drf2: str, history: int = 10):
@@ -40,10 +44,10 @@ class Device:
         self.update_cnt += 1
 
     def __str__(self) -> str:
-        return f'Device {self.name}: {self.value_string}'
+        return f'Device {self.name}: {self.value_string[:20]}'
 
     def __repr__(self) -> str:
-        return f'Device {self.name}: {self.value_string}'
+        return f'Device {self.name}: {self.value_string[:20]}'
 
 
 class DoubleDevice(Device):
@@ -163,6 +167,12 @@ class BPMDevice(Device):
             raise
         super().update(data, timestamp, source)
 
+    def __str__(self) -> str:
+        return f'{self.__class__.__name__} {self.name}:{self.value_string[:4]}...'
+
+    def __repr__(self) -> str:
+        return f'{self.__class__.__name__} {self.name}:{self.value_string[:4]}...'
+
 
 #####
 
@@ -219,6 +229,9 @@ class DeviceSet:
                 time.sleep(1)
                 yield d
             raise StopIteration
+
+    def __getitem__(self, item):
+        return self.devices[item]
 
     def add(self, device: Device) -> None:
         if isinstance(device, Device):
@@ -335,9 +348,12 @@ class DeviceSet:
 
 class DoubleDeviceSet(DeviceSet):
     def __init__(self, name: str, members: list, adapter: 'Adapter' = None):
-        leaf = all([isinstance(ds, DoubleDevice) for ds in members]) or all([isinstance(ds, str) for ds in members])
-        if not leaf:
-            raise AttributeError('Can only contain devices - use DeviceSet for coalescing')
+        if all([isinstance(d, str) for d in members]):
+            members = [DoubleDevice(d) for d in members]
+        elif all([isinstance(ds, DoubleDevice) for ds in members]):
+            pass
+        else:
+            raise AttributeError(f'{self.__class__.__name__} can only contain devices - use DeviceSet for coalescing')
         super().__init__(name, members, adapter)
 
     def add(self, device: DoubleDevice):
@@ -352,11 +368,13 @@ class BPMDeviceSet(DeviceSet):
     Leaf container of BPM and other array devices. Exposes methods for fast batch readout, and enforces data uniformity.
     """
 
-    def __init__(self, name: str, members: list, adapter=None, enforce_array_length: int = 1000):
-        leaf = all([isinstance(ds, Device) for ds in members]) or all([isinstance(ds, str) for ds in members])
-        if not leaf:
-            raise AttributeError('BPM set can only contain devices - use DeviceSet for coalescing')
-        assert enforce_array_length is None or isinstance(enforce_array_length, int)
+    def __init__(self, name: str, members: list, adapter=None, enforce_array_length: int = None):
+        if all([isinstance(d, str) for d in members]):
+            members = [BPMDevice(d) for d in members]
+        elif all([isinstance(ds, BPMDevice) for ds in members]):
+            pass
+        else:
+            raise AttributeError(f'{self.__class__.__name__} can only contain devices - use DeviceSet for coalescing')
         super().__init__(name, members, adapter)
         self.array_length = enforce_array_length
 
@@ -375,11 +393,14 @@ class StatusDeviceSet(DeviceSet):
     """
 
     def __init__(self, name: str, members: list, adapter=None):
-        leaf = all([isinstance(ds, StatusDevice) for ds in members]) or all([isinstance(ds, str) for ds in members])
-        if not leaf:
+        if all([isinstance(d, str) for d in members]):
+            members = [BPMDevice(d) for d in members]
+        elif all([isinstance(ds, BPMDevice) for ds in members]):
+            pass
+        else:
             print([isinstance(m, StatusDevice) for m in members])
             print(members, [type(m) for m in members])
-            raise AttributeError('Status set can only contain devices - use DeviceSet for coalescing')
+            raise AttributeError(f'{self.__class__.__name__} can only contain devices - use DeviceSet for coalescing')
         super().__init__(name, members, adapter)
 
     def add(self, device: Device):
@@ -396,10 +417,6 @@ class Adapter:
 
     def __init__(self):
         pass
-        # if method not in self.supported:
-        #     raise AttributeError('Acquisition method not supported')
-        # else:
-        #     self.method = method
 
     def check_supported(self, devices: dict, method: str = None) -> bool:
         if not method or method not in self.supported:
@@ -407,10 +424,6 @@ class Adapter:
         else:
             self.method = method
             return True
-        # if self.method:
-        #     return True
-        # else:
-        #     return method in self.supported
 
     def check_available(self, devices: dict, method: str = None) -> bool:
         return len(devices) < 500
@@ -496,16 +509,14 @@ class ACL(Adapter):
 
     def __init__(self, fallback: bool = False):
         self.name = 'ACL'
-        self.supported = ['oneshot', 'polling']
+        self.supported = ['oneshot']
         self.rate_limit = [-1, -1]
         self.can_set = False
         self.fallback = fallback
         try:
             import httpx
-            # import yarl
         except ImportError:
-            print('HTTP functionality requires httpx library')
-            raise
+            raise Exception('HTTP functionality requires httpx library')
         tm = httpx.Timeout(timeout=20, connect_timeout=5)
         pool = httpx.PoolLimits(soft_limit=25, hard_limit=25)
         # self.aclient = httpx.AsyncClient()
@@ -536,7 +547,8 @@ class ACL(Adapter):
 
     def _raw_command(self, cmd):
         """
-        Hacky raw command!!!
+        Executes specified ACL directly, with no modification, on the blocking client. Can be useful to wait for
+        events and similar weird calls.
         :param cmd:
         :return:
         """
@@ -653,14 +665,17 @@ class ACNETRelay(Adapter):
     Adapter based on Java commmand proxy. One of quickest, but can be error-prone. Requires async libraries.
     """
 
-    def __init__(self, address: str = "http://127.0.0.1:8080/", method=1, set_multi=False, verbose: bool = False):
+    def __init__(self, address: str = "http://127.0.0.1:8080/", comm_method=1, set_multi=False, verbose: bool = False):
         self.name = 'ACNETRelay'
         self.supported = ['oneshot', 'polling']
         self.rate_limit = [-1, -1]
         self.can_set = True
         self.address = address
-        self.method = method
+        # method 0 = cached values, method 1 = always read fresh
+        if comm_method not in [0, 1]:
+            raise Exception(f'unsupported method: {comm_method}')
         self.comm_method = 1
+        self.method = 'oneshot'
         self.set_method_multi = set_multi
         self.verbose = verbose
         super().__init__()
@@ -670,8 +685,7 @@ class ACNETRelay(Adapter):
             import nest_asyncio
             nest_asyncio.apply()
         except ImportError:
-            print('Relay functionality requires certain libraries')
-            raise
+            raise Exception('Relay functionality requires certain libraries')
         tm = httpx.Timeout(timeout=20, connect_timeout=2)
         pool = httpx.PoolLimits(soft_limit=5, hard_limit=5)
         # self.aclient = httpx.AsyncClient()
@@ -688,35 +702,36 @@ class ACNETRelay(Adapter):
 
         assert ds.leaf
         c = self.aclient
-        adds = '.SETTING' if settings else '.READING'
+        postfix = '.SETTING' if settings else '.READING'
         if isinstance(ds, BPMDeviceSet):
+            # BPMS are slow to read out
             num_lists = len(ds.devices)
         else:
-            num_lists = min(len(ds.devices), 10)
+            num_lists = min(len(ds.devices), 5)
         device_lists = [list(ll) for ll in np.array_split(list(ds.devices.values()), num_lists)]
         params = []
         for dl in device_lists:
-            req_str_list = []
+            request_items = []
             for device in dl:
                 if isinstance(device, BPMDevice):
                     if ds.array_length:
-                        req_str_list.append(f'{device.name}{adds}' + f'[:{ds.array_length}]@I')
+                        request_items.append(f'{device.name}{postfix}' + f'[:{ds.array_length}]@I')
                     else:
-                        req_str_list.append(f'{device.name}{adds}' + '[]@I')
+                        request_items.append(f'{device.name}{postfix}' + '[]@I')
                 elif isinstance(device, StatusDevice):
-                    req_str_list.append(f'{device.name}.STATUS')
+                    request_items.append(f'{device.name}.STATUS')
                 elif isinstance(device, DoubleDevice):
-                    req_str_list.append(f'{device.name + adds}')
+                    request_items.append(f'{device.name + postfix}@I')
                 else:
-                    raise Exception
-            req_str = ';'.join(req_str_list)
+                    raise Exception(f'Unrecognized device type {device.__class__.__name__}')
+            request_string = ';'.join(request_items)
 
             if self.comm_method == 0:
                 params.append({'requestType': 'V1_DRF2_READ_MULTI_CACHED',
-                               'request': req_str})
+                               'request': request_string})
             elif self.comm_method == 1:
                 params.append({'requestType': 'V1_DRF2_READ_SINGLE',
-                               'request': req_str})
+                               'request': request_string})
             else:
                 print(self.comm_method)
                 raise Exception
@@ -756,11 +771,11 @@ class ACNETRelay(Adapter):
             except Exception as e:
                 try_cnt += 1
                 if try_cnt >= retries + 1:
-                    print(f'{self.name} : FINAL EXCEPTION IN READONCE - {str(e)}')
+                    print(f'{self.name} : FINAL EXCEPTION IN READONCE (try {try_cnt - 1}) - {e}')
                     # print(e, sys.exc_info())
                     raise
                 else:
-                    print(f'{self.name} : EXCEPTION IN READONCE (try {try_cnt - 1}) - {str(e)}')
+                    print(f'{self.name} : EXCEPTION IN READONCE (try {try_cnt - 1}) - {e}')
 
     def _process(self, ds: DeviceSet, r):
         responses = r['responseJson']

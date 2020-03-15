@@ -27,7 +27,8 @@ class NAFF:
     linspace_cache = {}
     hann_cache = {}
 
-    def __init__(self, window_type=None, window_power: int = 0, fft_pad_zeros_power = None, data_trim=None, output_trim = None):
+    def __init__(self, window_type=None, window_power: int = 0, fft_pad_zeros_power=None, data_trim=None,
+                 output_trim=None):
         self.window_type = window_type
         self.window_power = window_power
         self.data_trim = data_trim
@@ -71,19 +72,21 @@ class NAFF:
         else:
             return np.fft.rfftfreq(n_turns)[np.argmax(fft_power)]
 
-    def fft_peaks(self, data: np.ndarray, search_peaks: bool = False):
+    def fft_peaks(self, data: np.ndarray, search_peaks: bool = False, search_kwargs: dict = None):
         """
         Preliminary guess of peak frequency based on FFT
+        :param search_kwargs:
         :param data:
         :param search_peaks: whether to use scipy peak finding or just return highest bin
         :return:
         """
+        if not search_kwargs:
+            search_kwargs = {'prominence': 1 / 8, 'distance': 1 / 70}
         fft_freq, fft_power = self.fft(data)
         if search_peaks:
             peak_idx, peak_props = sc.signal.find_peaks(fft_power,
-                                                        prominence=np.max(fft_power)/8,
-                                                        distance=len(fft_power)//70
-
+                                                        prominence=np.max(fft_power) * search_kwargs['prominence'],
+                                                        distance=len(fft_power) * search_kwargs['distance']
                                                         )
             peak_tunes = fft_freq[peak_idx]
             if len(peak_idx) > 0:
@@ -106,14 +109,14 @@ class NAFF:
             data = data[data_trim]
         data_centered = data - np.mean(data)
 
-        #print(data_centered)
+        # print(data_centered)
         if pad_zeros_power is not None:
             len_padded = 2 ** pad_zeros_power
             if n_turns < len_padded:
-                #print(f'To pad: {len_padded - n_turns} (have {data_centered.shape} turns)')
+                # print(f'To pad: {len_padded - n_turns} (have {data_centered.shape} turns)')
                 data_centered = np.pad(data_centered, ((0, len_padded - n_turns),))
                 n_turns = len(data_centered)
-                #print(f'Padded to {n_turns} points')
+                # print(f'Padded to {n_turns} points')
         if window_power == 0:
             fft_power = np.abs(np.fft.rfft(data_centered)) ** 2
         else:

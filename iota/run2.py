@@ -8,6 +8,16 @@ class BPMS:
         return ['N:' + n for n in names]
 
     @staticmethod
+    def to_sixdsim(names: list) -> list:
+        assert [n[:3] == 'N:I' for n in names] # acnet names
+        return [n[3:] for n in names]
+
+    @staticmethod
+    def from_sixdsim(names: list) -> list:
+        assert [len(n) == 4 or len(n) == 5 for n in names] # i.e. BC2L or BC2LH
+        return ['N:I' + n for n in names]
+
+    @staticmethod
     def from_acnet(names: list):
         return [n[2:] if n[0:2] == 'N:' else n for n in names]
 
@@ -163,7 +173,7 @@ class CONTROLS:
     VKICKER_ONOFF_DEVICES = [VKICKER_RESCHARGE, VKICKER_TRIG]
 
 
-MASTER_STATUS_DEVICES = CONTROLS.VKICKER_ONOFF_DEVICES + CONTROLS.HKICKER_ONOFF_DEVICES + [CONTROLS.HKICKER] + [CONTROLS.VKICKER]
+MASTER_STATUS_DEVICES = CONTROLS.VKICKER_ONOFF_DEVICES + CONTROLS.HKICKER_ONOFF_DEVICES + [CONTROLS.HKICKER] + [CONTROLS.VKICKER] + [CONTROLS.CHIP_PLC]
 
 
 MASTER_STATE_CURRENTS = DIPOLES.ALL_I + CORRECTORS.ALL + QUADS.ALL_CURRENTS + SKEWQUADS.ALL_CURRENTS + SEXTUPOLES.ALL_CURRENTS + \

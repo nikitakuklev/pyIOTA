@@ -234,6 +234,7 @@ def parse_lattice(fpath: Path, verbose: bool = False):
             assert e1.gap == e2.gap
             assert e1.fint == e2.fint
             v.fint = e1.fint
+            v.fintx = e2.fint
             v.gap = e1.gap
             lattice_ocelot.remove(e1)
             lattice_ocelot.remove(e2)

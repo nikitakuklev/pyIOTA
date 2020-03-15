@@ -1,12 +1,16 @@
+import logging
 from typing import Union
 
 from ocelot import Element, Sextupole, MagneticLattice, Octupole, Drift, Monitor, Marker, Edge, SBend, twiss, Vcor, Hcor
 import numpy as np
 
+logger = logging.getLogger(__name__)
+
 
 class LatticeContainer:
     def __init__(self, name: str, lattice: list, correctors: list,
-                 monitors: list, reset_elements_to_defaults: bool = True, info: dict = None, variables: dict = None, method=None):
+                 monitors: list, reset_elements_to_defaults: bool = True, info: dict = None, variables: dict = None,
+                 method=None):
         if not info:
             info = {'source_file': 'unknown', 'source': 'unknown'}
         self.name = name
@@ -50,13 +54,15 @@ class LatticeContainer:
         elif seq[0] == new_start:
             print(f'Lattice already starts with {new_start.id}')
         elif len([el for el in seq if el == new_start]) > 1:
-            raise Exception(f'Too many element matches ({len([el for el in seq if el == new_start])}) to ({new_start.id})')
+            raise Exception(
+                f'Too many element matches ({len([el for el in seq if el == new_start])}) to ({new_start.id})')
         else:
             i = seq.index(new_start)
             self.lattice.sequence = seq[i:] + seq[:i]
-            print(f'Rotated by ({i}) - starting element is now ({self.lattice.sequence[0].id}) and ending element is ({self.lattice.sequence[-1].id})')
+            print(
+                f'Rotated by ({i}) - starting element is now ({self.lattice.sequence[0].id}) and ending element is ({self.lattice.sequence[-1].id})')
 
-    def replace_element(self, old_el:Element, new_el: Element):
+    def replace_element(self, old_el: Element, new_el: Element):
         seq = self.lattice.sequence
         if old_el not in seq:
             raise Exception(f'Element ({old_el.id}) not in current lattice')
@@ -74,7 +80,6 @@ class LatticeContainer:
         ringrm = ocelot.cpbd.response_matrix.RingRM(lattice=self.lattice, hcors=self.get_elements(Hcor),
                                                     vcors=self.get_elements(Vcor), bpms=self.get_elements(Monitor))
         return ringrm.calculate()
-
 
     def insert_extra_markers(self, spacing: float = 1.0):
         seq = self.lattice.sequence
@@ -101,11 +106,14 @@ class LatticeContainer:
         :return:
         """
         l = 0.0
+        slist = []
         for i, el in enumerate(self.lattice.sequence):
             el.s_start = l
             el.s_mid = l + el.l / 2
             el.s_end = l + el.l
             l += el.l
+            slist.append(el.s_mid)
+        return slist
 
     def update_twiss(self):
         return twiss(self.lattice)
@@ -131,6 +139,13 @@ class LatticeContainer:
         print(f'Removed ({len_old - len(self.lattice.sequence)}) monitors')
 
     def insert_extra_monitors(self, spacing: float = 1.0, verbose: bool = False):
+        """
+        Inserts virtual monitors between elements, as close as possible but above specified spacing. Useful for
+        defining orbit bumps and other optimization goals.
+        :param spacing: Spacing in meters
+        :param verbose:
+        :return:
+        """
         seq = self.lattice.sequence
         seq_new = [Monitor(eid=f'MONITOR_START')]
         l = l_last = 0.0
@@ -142,8 +157,8 @@ class LatticeContainer:
                 continue
             if l > l_last + spacing:
                 seq_new.append(Monitor(eid=f'MONITOR_{i}'))
-                if verbose: print(
-                    f'Inserted monitor at ({l:.2f}) before ({el.id}) and after ({seq[i - 1].id}), ({l - l_last:.2f}) from last one')
+                if verbose: print(f'Inserted monitor at ({l:.2f}) before ({el.id}) and'
+                                  f' after ({seq[i - 1].id}), ({l - l_last:.2f}) from last one')
                 l_last = l
             seq_new.append(el)
         print(f'Inserted ({len(seq_new) - len(seq)}) monitors')
@@ -159,20 +174,20 @@ class LatticeContainer:
         """
         if not monitors:
             monitors = self.monitors
-            print(f'No monitors specified - using default set')
-        print('WARN - only monitors between elements can be inserted for thick lattices')
+            logger.warning(f'No monitors specified - inserting default set')
+        logger.warning('Only monitors between elements can be inserted for thick lattices')
+
         lengths = [0.0] + [el.l for el in self.lattice.sequence]
         s = np.cumsum(lengths)
         s_dict = {k: v for k, v in zip(self.lattice.sequence, s)}
         s_inverse_dict = {v: k for k, v in zip(self.lattice.sequence, s)}
-        # print('S:', {k.id: v for k, v in zip(self.lattice.sequence, s)})
-        # print('Sinv:', {v: k.id for k, v in zip(self.lattice.sequence, s)})
         for m in monitors:
             m.s_mid = s_dict[m.ref_el] + m.shift
             if m.s_mid > self.lattice.totalLen:
                 raise Exception(f'Monitor {m} is outside lattice length at {m.s_mid}')
             else:
                 if verbose: print(f'Resolved {m.id} position (ref {m.ref_el.id}) + {m.shift} = {m.s_mid}')
+
         a, b, c = 0, 0, 0
         rejected = []
         for m in monitors:
@@ -181,11 +196,13 @@ class LatticeContainer:
             s_dict = {k: v for k, v in zip(self.lattice.sequence, s)}
             s_inverse_dict = {v: k for k, v in zip(self.lattice.sequence, s)}
             # print('S:', {k.id: v for k, v in zip(self.lattice.sequence, s)})
+
             if m.s_mid in s or np.any(np.isclose(m.s_mid, s)):
                 i = np.where(np.isclose(m.s_mid, s))[0][-1]
                 # print(i,m.s)
                 if verbose: print(
-                    f'{m.id} - inserted at {m.s_mid}(idx {i}) between {self.lattice.sequence[i - 1].id} and {self.lattice.sequence[i].id}')
+                    f'{m.id} - inserted at {m.s_mid}(idx {i}) between {self.lattice.sequence[i - 1].id}'
+                    f' and {self.lattice.sequence[i].id}')
                 self.lattice.sequence.insert(i, m)
                 self.lattice.update_transfer_maps()
                 a += 1
@@ -194,7 +211,8 @@ class LatticeContainer:
                 occupant_s = s[occupant_s_idx]
                 occupant = s_inverse_dict[occupant_s]
                 if verbose: print(
-                    f'{m.id} - location {m.s_mid} in collision with ({occupant.__class__.__name__} {occupant.id})(sidx:{occupant_s_idx}) - length {occupant.l}m, between {s[max(occupant_s_idx - 1, 0):min(occupant_s_idx + 3, len(s) - 1)]}')
+                    f'{m.id} - location {m.s_mid} in collision with ({occupant.__class__.__name__} {occupant.id})'
+                    f'(sidx:{occupant_s_idx}) - length {occupant.l}m, between {s[max(occupant_s_idx - 1, 0):min(occupant_s_idx + 3, len(s) - 1)]}')
                 if isinstance(occupant, Drift):
                     len_before = self.lattice.totalLen
                     d_before = Drift(eid=occupant.id + '_1', l=m.s_mid - occupant_s)
@@ -211,7 +229,8 @@ class LatticeContainer:
                     b += 1
                 else:
                     if verbose: print(
-                        f'Could not place monitor {m.id} at {m.s_mid} - collision with {occupant.__class__.__name__} {occupant.id} - length {occupant.l}m, closest edges ({np.max(s[s < m.s_mid])}|{np.min(s[s > m.s_mid])})')
+                        f'Could not place monitor {m.id} at {m.s_mid} - collision with {occupant.__class__.__name__} '
+                        f'{occupant.id} - length {occupant.l}m, closest edges ({np.max(s[s < m.s_mid])}|{np.min(s[s > m.s_mid])})')
                     rejected.append(m.id)
                     c += 1
         print(f'Inserted ({a}) cleanly, ({b}) with drift splitting, ({c}) rejected: {rejected}')
@@ -239,9 +258,16 @@ class LatticeContainer:
         else:
             raise Exception(f'No matches found for {el_name}|{el_type}')
 
-    def monitors_in_sequence(self):
-        return [m for m in self.lattice.sequence if isinstance(m, Monitor)]
+    def filter(self, fun):
+        return [el for el in self.lattice.sequence if fun(el)]
 
+    def filter_by_id(self, id_list, loose_match=True):
+        if isinstance(id_list, str):
+            id_list = [id_list]
+        if loose_match:
+            return [el for el in self.lattice.sequence if any([el.id in item for item in id_list])]
+        else:
+            return [el for el in self.lattice.sequence if el.id in id_list]
 
 class DNMagnet(Element):
     """

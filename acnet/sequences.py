@@ -19,7 +19,7 @@ def trigger_bpms_orbit_mode(debug: bool = False):
 
 def get_bpm_data(bpm_ds=None, mode: str = 'tbt', kickv: float = np.nan, kickh: float = np.nan,
                  read_beam_current: bool = True, read_state: bool = True, read_aux=True, state_ds=None, status_ds=None,
-                 check_sequence_id: bool = True, last_sequence_id: bool = None, save: bool = False, fpath: Path = None,
+                 check_sequence_id: bool = True, last_sequence_id: int = None, save: bool = False, fpath: Path = None,
                  save_repeats=False, custom_state_parameters: dict = None, collection_seq_number: int = 0):
 
     state = {}
@@ -27,10 +27,10 @@ def get_bpm_data(bpm_ds=None, mode: str = 'tbt', kickv: float = np.nan, kickh: f
         if state_ds is None:
             knobs_to_save = iota.run2.MASTER_STATE_CURRENTS  # all iota magnets + RF + kickers
             state_ds = DoubleDeviceSet(name='state', members=[DoubleDevice(d) for d in knobs_to_save])
-        nstate = state_ds.readonce(settings=True, verbose=False)
+        n_state = state_ds.readonce(settings=True, verbose=False)
         state.update({d.name + '.SETTING': d.value for d in state_ds.devices.values()})
     else:
-        nstate = 0
+        n_state = 0
 
     if read_beam_current:
         state[iota.run2.OTHER.BEAM_CURRENT_AVERAGE + '.READING'] = DoubleDevice(
@@ -39,26 +39,25 @@ def get_bpm_data(bpm_ds=None, mode: str = 'tbt', kickv: float = np.nan, kickh: f
     if read_aux:
         aux = iota.run2.OTHER.AUX_DEVICES
         state_ds = DoubleDeviceSet(name='state', members=[DoubleDevice(d) for d in aux])
-        nstate2 = state_ds.readonce(verbose=False)
+        n_state2 = state_ds.readonce(verbose=False)
         state.update({d.name + '.READING': d.value for d in state_ds.devices.values()})
-        nstate += nstate2
+        n_state += n_state2
 
         statuses = iota.run2.MASTER_STATUS_DEVICES
         status_ds = StatusDeviceSet(name='status', members=[StatusDevice(d) for d in statuses])
-        nstate3 = status_ds.readonce(verbose=False)
+        n_state3 = status_ds.readonce(verbose=False)
         state.update({d.name + '.STATUS': d.value for d in status_ds.devices.values()})
-        nstate += nstate3
+        n_state += n_state3
 
     if bpm_ds is None:
         bpms = [BPMDevice(b) for b in iota.BPMS.ALLA]
-        bpm_ds = BPMDeviceSet(name='bpms', members=bpms, adapter=ACNETRelay(method=1), enforce_array_length=None)
-    nbpm = bpm_ds.readonce(verbose=False)
+        bpm_ds = BPMDeviceSet(name='bpms', members=bpms, adapter=ACNETRelay(), enforce_array_length=None)
     if mode == 'tbt':
         bpm_ds.array_length = None
-        data = {d.name: d.value for d in bpm_ds.devices.values()}
     else:
         bpm_ds.array_length = 2048
-        data = {d.name: d.value for d in bpm_ds.devices.values()}
+    n_bpm = bpm_ds.readonce(verbose=False)
+    data = {d.name: d.value for d in bpm_ds.devices.values()}
 
     state['kickv'] = kickv
     state['kickh'] = kickh
@@ -85,7 +84,7 @@ def get_bpm_data(bpm_ds=None, mode: str = 'tbt', kickv: float = np.nan, kickh: f
                 val_seq = int(v[0])
             else:
                 if val_seq != int(v[0]):
-                    print(f'Sequence number is not uniform - {val_seq} vs {int(v[0])} on BPM {k}(#{i}) (wont be saved)')
+                    print(f'Sequence number not uniform - {val_seq} vs {int(v[0])} on BPM {k}(#{i}) (wont be saved)')
                     mixed_data = True
                     # raise Exception
                     break
@@ -191,7 +190,7 @@ def inject_until_current(arm_bpms: bool = False, debug: bool = False, current: f
     ibeama = DoubleDevice(iota.run2.OTHER.BEAM_CURRENT_AVERAGE)
     for i in range(limit):
         inject(arm_bpms=arm_bpms, debug=debug)
-        time.sleep(1.0)
+        time.sleep(1.2)
         i = ibeama.read()
         if i < current:
             print(f'Injection loop - got {i}mA - goal met')
@@ -201,7 +200,7 @@ def inject_until_current(arm_bpms: bool = False, debug: bool = False, current: f
 
 
 def inject(arm_bpms: bool = False, debug: bool = False):
-    a6cnt = DoubleDevice(iota.CONTROLS.TRIGGER_A6)
+    #a6cnt = DoubleDevice(iota.CONTROLS.TRIGGER_A6)
 
     if debug: print('>>Setting up Chip PLC')
     plc = StatusDevice(iota.CONTROLS.CHIP_PLC)
@@ -225,13 +224,13 @@ def inject(arm_bpms: bool = False, debug: bool = False):
 
     if debug: print('>>Turning on VKICKER aux devices')
     vres = StatusDevice(iota.CONTROLS.VKICKER_RESCHARGE)
-    vres.read()
-    if not vres.on:
-        vres.set_on()
+    #vres.read()
+    #if not vres.on:
+    vres.set_on()
     vtrig = StatusDevice(iota.CONTROLS.VKICKER_TRIG)
-    vtrig.read()
-    if not vtrig.on:
-        vtrig.set_on()
+    #vtrig.read()
+    #if not vtrig.on:
+    vtrig.set_on()
 
     if debug: print('>>Enabling vertical kicker')
     vkicker_status = StatusDevice(iota.CONTROLS.VKICKER)
@@ -244,29 +243,30 @@ def inject(arm_bpms: bool = False, debug: bool = False):
     vertical_kv = 4.15
     if debug: print('>>Setting vertical kicker')
     vkicker = DoubleDevice(iota.CONTROLS.VKICKER)
-    vkicker.read()
-    if np.abs(vkicker.value - vertical_kv) > 0.01:
+    # Quick check for settings
+    setting = vkicker.read(setting=True)
+    if np.abs(setting - vertical_kv) > 1e-3:
         vkicker.set(vertical_kv)
         time.sleep(0.1)
         for i in range(100):
+            delta_set = np.abs(vkicker.read(setting=True) - vertical_kv)
             delta = np.abs(vkicker.read() - vertical_kv)
-            if delta > 0.15:
+            if delta > 0.15 or delta_set > 1e-3:
                 if i < 10:
                     time.sleep(0.1)
                     continue
                 else:
-                    raise Exception(f'>>Failed to set kicker - final delta: {delta}')
+                    raise Exception(f'>>Failed to set kicker - final deltas: {delta} | {delta_set}')
             else:
-                if debug: print(f'>>Kicker setting ok - delta {delta}')
+                if debug: print(f'>>Kicker setting ok - deltas {delta} | {delta_set}')
                 break
 
     shutter = StatusDevice(iota.CONTROLS.FAST_LASER_SHUTTER)
     shutter.read()
     if not shutter.on:
-        print('FYI - SHUTTER CLOSED ARGGGG!!!!')
+        raise Exception("SHUTTER IS CLOSED - ABORT")
     if not shutter.ready:
-        print('MPS FAULT!')
-        raise Exception("MPS FAULT - ABORTING INJECTION")
+        raise Exception("MPS FAULT - ABORT")
 
     if debug: print('>>Awaiting A8')
     acl = pyIOTA.acnet.frontends.ACL(fallback=True)
@@ -320,14 +320,15 @@ def kick(vertical_kv: float = 0.0, horizontal_kv: float = 0.0,
     if vertical_kv > 0.0:
         if debug: print('>>Turning on VKICKER aux devices')
         vres = StatusDevice(iota.CONTROLS.VKICKER_RESCHARGE)
-        vres.read()
-        if not vres.on:
-            vres.set_on()
+        #vres.read()
+        #if not vres.on:
+        vres.set_on()
         vtrig = StatusDevice(iota.CONTROLS.VKICKER_TRIG)
-        vtrig.read()
-        if not vtrig.on:
-            vtrig.set_on()
+        #vtrig.read()
+        #if not vtrig.on:
+        vtrig.set_on()
 
+        readback_tolerance_V = 0.05
         if debug: print('>>Setting vertical kicker')
         vkicker = DoubleDevice(iota.CONTROLS.VKICKER)
         vkicker.read()
@@ -336,7 +337,7 @@ def kick(vertical_kv: float = 0.0, horizontal_kv: float = 0.0,
             time.sleep(0.1)
             for i in range(100):
                 delta = np.abs(vkicker.read() - vertical_kv)
-                if delta > 0.05:
+                if delta > readback_tolerance_V:
                     if i < 10:
                         time.sleep(0.1)
                         continue
@@ -352,16 +353,17 @@ def kick(vertical_kv: float = 0.0, horizontal_kv: float = 0.0,
         vtrig = StatusDevice(iota.CONTROLS.VKICKER_TRIG)
         vtrig.set_off()
 
+    readback_tolerance_H = 0.2
     if horizontal_kv > 0.0:
         if debug: print('>>Turning on HKICKER aux devices')
         hres = StatusDevice(iota.CONTROLS.HKICKER_RESCHARGE)
-        hres.read()
-        if not hres.on:
-            hres.set_on()
+        #hres.read()
+        #if not hres.on:
+        hres.set_on()
         htrig = StatusDevice(iota.CONTROLS.HKICKER_TRIG)
-        htrig.read()
-        if not htrig.on:
-            htrig.set_on()
+        #htrig.read()
+        #if not htrig.on:
+        htrig.set_on()
 
         if debug: print('>>Setting horizontal kicker')
         hkicker = DoubleDevice(iota.CONTROLS.HKICKER)
@@ -371,7 +373,7 @@ def kick(vertical_kv: float = 0.0, horizontal_kv: float = 0.0,
             time.sleep(0.1)
             for i in range(100):
                 delta = np.abs(hkicker.read() - horizontal_kv)
-                if delta > 0.2:
+                if delta > readback_tolerance_H:
                     if i < 10:
                         time.sleep(0.1)
                         continue
@@ -396,16 +398,17 @@ def kick(vertical_kv: float = 0.0, horizontal_kv: float = 0.0,
     a5.reset()
     # Await actual fire event
     t0 = time.time()
+    time.sleep(0.1)
     for i in range(20):
         a5_new_val = a5cnt.read()
         if a5_new_val > a5_initial_val:
-            print(f'>>$A5 received (new: {a5_new_val}) - kick complete')
+            print(f'>>$A5 received ({a5_initial_val}->{a5_new_val}) - kick complete')
             return
         else:
             print(f'>>Awaiting $A5 {i}/{20} ({time.time() - t0:.3f}s)')
             time.sleep(0.1)
 
-    raise Exception('$A5 never received - something went wrong!')
+    raise Exception(f'$A5 never received (cnt: {a5_initial_val}) - something went wrong!')
 
 # def kick_vertical(vertical_kv: float = 0.0, restore: bool = False, debug: bool = False):
 #     assert 1.0 > vertical_kv >= 0.0

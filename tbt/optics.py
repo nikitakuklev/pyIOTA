@@ -72,7 +72,9 @@ class Phase():
 
 
 class Envelope:
-
+    """
+    Provides several models of signal amplitude envelopes, and associated fitting methods
+    """
     def __init__(self, data_trim=None, output_trim=None):
         self.data_trim = data_trim
         self.output_trim = output_trim
@@ -85,6 +87,31 @@ class Envelope:
                   ofsy: float, c3: float):
         ans = amplitude * np.exp(-tau * (xdata - ofsx) ** 2 - c2 * (np.sin(freq * (xdata - ofsx)) ** 2)) + ofsy
         ans = ans * (1+c3*np.arange(len(ans)))
+        return ans
+
+    @staticmethod
+    @jit(nopython=True, fastmath=True, nogil=True)
+    def coupled_envelope(x: np.ndarray,
+                         amplitude: float,
+                         c1: float, c2: float, c3: float, nu:float,
+                         ofsx:float, ofsy: float):
+        """
+        Envelope that includes chromaticity and octupolar nonlinear decoherence, multiplied by coupling cosine envelope
+        In other words, a 2D model with additional coupling 'beating' envelope
+        :param xdata:
+        :param amplitude:
+        :param tau:
+        :param c2:
+        :param freq:
+        :param ofsx:
+        :param ofsy:
+        :param c3:
+        :return:
+        """
+        xsc = x * c2
+        xscsq = xsc**2
+        ans = 1/(1+xscsq)   *   np.exp(-xscsq*(c1**2)/(1+xscsq))    *   np.exp(-((np.sin[nu*x])*(c3/nu))**2)
+        #ans = ans * (1+c3*np.arange(len(ans)))
         return ans
 
     def find_envelope(self, data_raw, normalize=False, p0=None, lu=None, full=False):
@@ -160,6 +187,15 @@ class SVD:
         matrix -= np.mean(matrix, axis=1)[:, np.newaxis]
         U, S, vh = np.linalg.svd(matrix, full_matrices=False)
         V = vh.T  # transpose it back to conventional U @ S @ V.T
+        return U, S, V, vh
+
+    def decompose_kick_2D(self, kick: Kick, tag: str = 'SVD'):
+        assert isinstance(kick, Kick)
+        for plane in ['H', 'V']:
+            matrix = kick.get_bpm_matrix(plane)
+            U, S, V, vh = self.decompose2D(matrix)
+            kick.df[f'{tag}_{plane}_M0'] = vh[0, :]
+            kick.df[f'{tag}_{plane}_M1'] = vh[1, :]
         return U, S, V, vh
 
     def decompose2D_into_kicks(self, kick: Kick, plane: str):
