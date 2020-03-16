@@ -44,10 +44,10 @@ class Device:
         self.update_cnt += 1
 
     def __str__(self) -> str:
-        return f'Device {self.name}: {self.value_string[:20]}'
+        return f'Device {self.name}: {self.value_string}'
 
     def __repr__(self) -> str:
-        return f'Device {self.name}: {self.value_string[:20]}'
+        return f'Device {self.name}: {self.value_string}'
 
 
 class DoubleDevice(Device):
@@ -394,8 +394,8 @@ class StatusDeviceSet(DeviceSet):
 
     def __init__(self, name: str, members: list, adapter=None):
         if all([isinstance(d, str) for d in members]):
-            members = [BPMDevice(d) for d in members]
-        elif all([isinstance(ds, BPMDevice) for ds in members]):
+            members = [StatusDevice(d) for d in members]
+        elif all([isinstance(ds, StatusDevice) for ds in members]):
             pass
         else:
             print([isinstance(m, StatusDevice) for m in members])

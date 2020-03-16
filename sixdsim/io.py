@@ -530,10 +530,10 @@ class KnobVariable:
     A single variable in a knob. Should be extended to provide tool-specific methods.
     """
 
-    def __init__(self, kind: str, var: str, value: float):
+    def __init__(self, kind: str, var: str, value: float, acnet_var: str = None):
         self.kind = kind
         self.var = var
-        self.acnet_var = var.strip('$').replace('_', ':')
+        self.acnet_var = acnet_var or var.strip('$').replace('_', ':')
         self.value = value
 
     def copy(self):

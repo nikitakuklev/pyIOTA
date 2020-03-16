@@ -129,10 +129,13 @@ class SEXTUPOLES:
 class OCTUPOLES:
     ALL_CURRENTS = ['N:IO' + str(i) + 'LI' for i in range(1, 19)] + ['N:OB9L6I', 'N:O4L6I', 'N:O14L6I']
     ALL_VOLTAGES = ['N:IO' + str(i) + 'LV' for i in range(1, 19)] + ['N:OB9L6V', 'N:O4L6V', 'N:O14L6V']
-    ALL_CURRENTS_ACTIVE = ['N:IO' + str(i) + 'LI' for i in range(1, 9)] + ['N:OB9L6I'] + \
-                          ['N:IO' + str(i) + 'LI' for i in range(10, 18)]
-    ALL_VOLTAGES_ACTIVE = ['N:IO' + str(i) + 'LV' for i in range(1, 9)] + ['N:OB9L6V'] + \
-                          ['N:IO' + str(i) + 'LV' for i in range(10, 18)]
+    ALL_CURRENTS_ACTIVE = ['N:IO' + str(i) + 'LI' for i in range(1, 18)]
+    ALL_VOLTAGES_ACTIVE = ['N:IO' + str(i) + 'LV' for i in range(1, 18)]
+    # Mar 10 - switched out to regular PS
+    #ALL_CURRENTS_ACTIVE = ['N:IO' + str(i) + 'LI' for i in range(1, 9)] + ['N:OB9L6I'] + \
+    #                      ['N:IO' + str(i) + 'LI' for i in range(10, 18)]
+    #ALL_VOLTAGES_ACTIVE = ['N:IO' + str(i) + 'LV' for i in range(1, 9)] + ['N:OB9L6V'] + \
+    #                      ['N:IO' + str(i) + 'LV' for i in range(10, 18)]
     ALL = ALL_CURRENTS + ALL_VOLTAGES
 
 
@@ -140,16 +143,6 @@ class DNMAGNET:
     ALL_CURRENTS = ['N:INL{:02d}I'.format(i) for i in range(1, 19)]
     ALL_VOLTAGES = ['N:INL{:02d}V'.format(i) for i in range(1, 19)]
     ALL = ALL_CURRENTS + ALL_VOLTAGES
-
-
-class OTHER:
-    RF = ['N:IRFLLF', 'N:IRFLLA', 'N:IRFMOD', 'N:IRFEAT', 'N:IRFEPC']
-    KICKERS = ['N:IKPSV', 'N:IKPSH', 'N:IKPSVX', 'N:IKPSVD']
-    BEAM_CURRENT = 'N:IBEAM'
-    BEAM_CURRENT_AVERAGE = 'N:IBEAMA'
-    WCM_PARAMS = ['N:IWCMBF','N:IWCMBR','N:IWCMI','N:IWCMBP','N:IRFEPA','N:IRFEPP']
-    AUX_DEVICES = [BEAM_CURRENT] + [BEAM_CURRENT_AVERAGE] + WCM_PARAMS
-
 
 class CONTROLS:
     TRIGGER_A5 = 'N:EA5TRG'  # $A5 timing event on reset
@@ -171,6 +164,15 @@ class CONTROLS:
     VKICKER_RESCHARGE = 'N:IKPSVR'
     VKICKER_TRIG = 'N:IKPSVT'
     VKICKER_ONOFF_DEVICES = [VKICKER_RESCHARGE, VKICKER_TRIG]
+
+class OTHER:
+    RF = ['N:IRFLLF', 'N:IRFLLA', 'N:IRFMOD', 'N:IRFEAT', 'N:IRFEPC']
+    KICKERS = ['N:IKPSV', 'N:IKPSH', 'N:IKPSVX', 'N:IKPSVD']
+    BEAM_CURRENT = 'N:IBEAM'
+    BEAM_CURRENT_AVERAGE = 'N:IBEAMA'
+    WCM_PARAMS = ['N:IWCMBF', 'N:IWCMBR', 'N:IWCMI', 'N:IWCMBP', 'N:IRFEPA', 'N:IRFEPP']
+    BPM_ATN = ['Z:RP2ATN']
+    AUX_DEVICES = [BEAM_CURRENT] + [BEAM_CURRENT_AVERAGE] + WCM_PARAMS + BPM_ATN + [CONTROLS.TRIGGER_A5] + [CONTROLS.TRIGGER_A6]
 
 
 MASTER_STATUS_DEVICES = CONTROLS.VKICKER_ONOFF_DEVICES + CONTROLS.HKICKER_ONOFF_DEVICES + [CONTROLS.HKICKER] + [CONTROLS.VKICKER] + [CONTROLS.CHIP_PLC]

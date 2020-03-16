@@ -51,7 +51,8 @@ class Kick:
         self.matrix_cache = {}
         self.n_turns = self.get_turns()
         self.fft_pwr = self.fft_freq = self.peaks = None
-
+        self.v = self.kickv = self.df.iloc[0].loc['kickv']
+        self.h = self.kickh = self.df.iloc[0].loc['kickh']
         # print('Read in kick')
         # Determine which BPMs are behaving ok using a rolling window average
 
@@ -155,6 +156,18 @@ class Kick:
         if np.isnan(self.df.iloc[0]['intensity']):
             raise Exception
         return avg / len(bpms)
+
+    def calculate_stats(self) -> dict:
+        stats = {}
+        bpms = self.get_bpms('A')
+        for bpm in bpms:
+            mean, std = np.mean(self.df.iloc[0].loc[bpm]), np.std(self.df.iloc[0].loc[bpm])
+            self.df['avg_' + bpm] = mean
+            self.df['sig_' + bpm] = std
+            stats[bpm] = (mean, std)
+            if np.isnan(mean) or np.isnan(std):
+                raise Exception
+        return stats
 
 
 class KickSequence:
