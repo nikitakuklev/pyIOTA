@@ -1,6 +1,9 @@
+import operator
 import time
 from pathlib import Path
 import random
+from typing import Callable
+
 import numpy as np
 
 import pyIOTA
@@ -295,11 +298,11 @@ def parse_lattice(fpath: Path, verbose: bool = False):
           f'{len(correctors_ocelot)} correctors, {len(monitors_ocelot)} monitors')
 
     info_dict = {'source_file': str(fpath), 'source': '6dsim', 'pc': pc, 'N': N}
-    var_dict = {k: KnobVariable(kind='$', var='$'+k, value=v) for k, v in lattice_vars.items()}
+    var_dict = {k: KnobVariable(kind='$', var='$' + k, value=v) for k, v in lattice_vars.items()}
     return lattice_ocelot, correctors_ocelot, monitors_ocelot, info_dict, var_dict
 
 
-def parse_knobs(fpath: Path, verbose: bool = True):
+def parse_knobs(fpath: Path, verbose: bool = False):
     knobs = []
     with open(str(fpath), 'r') as f:
         lines = f.readlines()
@@ -357,8 +360,8 @@ class AbstractKnob:
 
 
 class Knob(AbstractKnob):
-    def __init__(self, name: str):
-        self.vars = {}
+    def __init__(self, name: str, vars: dict):
+        self.vars = vars or {}
         self.absolute = True
         super().__init__(name)
 
@@ -368,6 +371,7 @@ class Knob(AbstractKnob):
         ds.readonce()
         for k, v in ds.devices:
             pass
+        return self
 
     def get_dict(self, as_devices=False):
         if as_devices:
@@ -380,16 +384,20 @@ class Knob(AbstractKnob):
         return self
 
     def union(self, other: 'Knob'):
+        """
+        Returns knob with only variables contained in the other one
+        :param other:
+        :return:
+        """
         self.vars = {k: v for (k, v) in self.vars.items() if k in other.vars and other.vars[k] == v}
         return self
 
-    def copy(self, devices_only: bool = True):
-        k = Knob(name=self.name)
-        knobvars = [kv.copy() for kv in self.vars.values()]
-        k.vars = {k.var: k for k in knobvars}
-        k.absolute = self.absolute
-        k.verbose = self.verbose
-        return k
+    def copy(self):
+        knob = Knob(name=self.name)
+        knob.vars = {k.var: k.copy() for k in self.vars.values()}
+        knob.absolute = self.absolute
+        knob.verbose = self.verbose
+        return knob
 
     def read_current_state(self, settings: bool = True, verbose: bool = False):
         if verbose or self.verbose:
@@ -458,65 +466,65 @@ class Knob(AbstractKnob):
                 ds = DoubleDeviceSet(name=self.name, members=[d[0] for d in corrH])
                 ds.set([d[1] for d in corrH], verbose=verbose)
         else:
-            ds = DoubleDeviceSet(name=self.name, members=[DoubleDevice(d.acnet_var) for d in self.vars.values()])
+            ds = DoubleDeviceSet(name=self.name, members=[d.acnet_var for d in self.vars.values()])
             ds.set([d.value for d in self.vars.values()], verbose=verbose)
 
     def __len__(self):
         return len(self.vars)
 
+    def __math(self, other, operation: Callable, opcode: str = ' ', keep_unique_values: bool = True):
+        if isinstance(other, Knob):
+            set1 = set(self.vars.keys())
+            set2 = set(other.vars.keys())
+
+            if keep_unique_values:
+                if self.absolute == other.absolute:
+                    # Both absolute or relative
+                    new_vars = {kv.var: KnobVariable(kind=kv.kind, var=kv.var,
+                                                     value=kv.value
+                                                     ) for knob, kv in self.vars.items()}
+                    for k, v in other.vars.items():
+                        if k in new_vars:
+                            new_vars[k].value = operation(new_vars[k].value, v.value)
+                        else:
+                            new_vars[k] = v.copy()
+                if (not other.absolute and not set2.issubset(set1)) or (not self.absolute and not set1.issubset(set2)):
+                    raise Exception("Cannot keep unique relative variables when other knob is absolute")
+            else:
+                keyset = set1.intersection(set2)
+                setvars = {k: self.vars[k] for k in keyset}
+                new_vars = {kv.var: KnobVariable(kind=kv.kind, var=kv.var,
+                                                 value=operation(kv.value, other.vars[knob].value)
+                                                 ) for knob, kv in setvars}
+        else:
+            new_vars = {kv.var: KnobVariable(kind=kv.kind, var=kv.var,
+                                             value=operation(kv.value, other)
+                                             ) for knob, kv in self.vars.items()}
+        knob = self.copy()
+        knob.name = '(' + self.name + opcode + other.name + ')'
+        knob.vars = new_vars
+        knob.absolute = True if (self.absolute or other.absolute) else False
+        return knob
+
     def __sub__(self, other):
         assert isinstance(other, Knob)
         if self.verbose: print(f'Subtracting ({other.name}) from ({self.name}) | ({len(self.vars)} values)')
-        if not set(self.vars.keys()) == set(other.vars.keys()):
-            raise Exception
-        knobvars = []
-        for k, kv in self.vars.items():
-            knobvars.append(KnobVariable(kind=kv.kind, var=kv.var,
-                                         value=kv.value - other.vars[k].value))
-        k = self.copy()
-        k.name = self.name + '-' + other.name
-        k.vars = {k.var: k for k in knobvars}
-        k.absolute = True if (self.absolute or other.absolute) else False
-        return k
+        return self.__math(other, operator.sub, '-')
 
     def __add__(self, other):
         assert isinstance(other, Knob)
         if self.verbose: print(f'Adding ({other.name}) to ({self.name}) | ({len(self.vars)} values)')
-        if not set(self.vars.keys()) == set(other.vars.keys()):
-            raise Exception
-        knobvars = []
-        for k, kv in self.vars.items():
-            knobvars.append(KnobVariable(kind=kv.kind, var=kv.var,
-                                         value=kv.value + other.vars[k].value))
-        k = self.copy()
-        k.name = self.name + '+' + other.name
-        k.vars = {k.var: k for k in knobvars}
-        k.absolute = True if (self.absolute or other.absolute) else False
-        return k
+        return self.__math(other, operator.add, '+')
 
     def __truediv__(self, other):
         assert isinstance(other, float) or isinstance(other, int)
         if self.verbose: print(f'Diving knob {self.name} by {other} (returning copy)')
-        knobvars = []
-        for k, kv in self.vars.items():
-            knobvars.append(KnobVariable(kind=kv.kind, var=kv.var,
-                                         value=kv.value / other))
-        k = self.copy()
-        k.name = self.name + '/' + str(other)
-        k.vars = {k.var: k for k in knobvars}
-        return k
+        return self.__math(other, operator.truediv, '/')
 
     def __mul__(self, other):
         assert isinstance(other, float) or isinstance(other, int)
         if self.verbose: print(f'Multiplying knob {self.name} by {other} (returning copy)')
-        knobvars = []
-        for k, kv in self.vars.items():
-            knobvars.append(KnobVariable(kind=kv.kind, var=kv.var,
-                                         value=kv.value * other))
-        k = self.copy()
-        k.name = self.name + '*' + str(other)
-        k.vars = {k.var: k for k in knobvars}
-        return k
+        return self.__math(other, operator.mul, '*')
 
     def __str__(self):
         return f'Knob (abs {self.absolute}) ({self.name}) at {hex(id(self))}:({len(self.vars)}) devices'
@@ -537,4 +545,4 @@ class KnobVariable:
         self.value = value
 
     def copy(self):
-        return KnobVariable(self.kind, self.var, self.value)
+        return KnobVariable(self.kind, self.var, self.value, self.acnet_var,)
