@@ -17,17 +17,40 @@ def trigger_bpms_orbit_mode(debug: bool = False):
     StatusDevice(iota.CONTROLS.BPM_ORB_TRIGGER).reset()
 
 
+def check_bpm_saturation(bpm_indices: list, threshold: int = 65000, calculate_load: bool = True, turns: int = 256,
+                         load_turns:int = 128) -> dict:
+    bpm_index = DoubleDevice(iota.CONTROLS.BPM_RAWREAD_INDEX)
+    bpm_control = StatusDevice(iota.CONTROLS.BPM_CONFIG_DEVICE)
+
+    load = {}
+    for idx in bpm_indices:
+        bpm_index.set(idx)
+        time.sleep(0.01)
+        bpm_control.set('RawReadout')
+        time.sleep(0.1)
+        bpms = [BPMDevice(plate) for plate in iota.BPMS.RAW_ALL]
+        ds = BPMDeviceSet(name='temp', members=bpms, enforce_array_length=turns)
+        ds.readonce()
+        for bpm in bpms:
+            arr = np.abs(bpm.value)
+            if np.abs(np.max(arr)) > threshold:
+                raise Exception(f'Plate ({bpm.name}) of ({idx}) exceeded limit ({threshold}): {bpm.value[:40]} (loads:{load})')
+            else:
+                load[str(idx) + '-' + bpm.name] = np.mean(arr[:load_turns])
+    return load
+
+
 def get_bpm_data(bpm_ds=None, mode: str = 'tbt', kickv: float = np.nan, kickh: float = np.nan,
                  read_beam_current: bool = True, read_state: bool = True, read_aux=True, state_ds=None, status_ds=None,
                  check_sequence_id: bool = True, last_sequence_id: int = None, save: bool = False, fpath: Path = None,
                  save_repeats=False, custom_state_parameters: dict = None, collection_seq_number: int = 0):
-
     state = {}
     if read_state:
         if state_ds is None:
             knobs_to_save = iota.run2.MASTER_STATE_CURRENTS  # all iota magnets + RF + kickers
             state_ds = DoubleDeviceSet(name='state', members=[DoubleDevice(d) for d in knobs_to_save])
-        n_state = state_ds.readonce(settings=True, verbose=False)
+        read_state = state_ds.readonce(settings=True, verbose=False)
+        n_state = len(read_state)
         state.update({d.name + '.SETTING': d.value for d in state_ds.devices.values()})
     else:
         n_state = 0
@@ -39,15 +62,15 @@ def get_bpm_data(bpm_ds=None, mode: str = 'tbt', kickv: float = np.nan, kickh: f
     if read_aux:
         aux = iota.run2.OTHER.AUX_DEVICES
         state_ds = DoubleDeviceSet(name='state', members=[DoubleDevice(d) for d in aux])
-        n_state2 = state_ds.readonce(verbose=False)
+        read_state2 = state_ds.readonce(verbose=False)
         state.update({d.name + '.READING': d.value for d in state_ds.devices.values()})
-        n_state += n_state2
+        n_state += len(read_state2)
 
         statuses = iota.run2.MASTER_STATUS_DEVICES
         status_ds = StatusDeviceSet(name='status', members=[StatusDevice(d) for d in statuses])
-        n_state3 = status_ds.readonce(verbose=False)
+        read_state3 = status_ds.readonce(verbose=False)
         state.update({d.name + '.STATUS': d.value for d in status_ds.devices.values()})
-        n_state += n_state3
+        n_state += len(read_state3)
 
     if bpm_ds is None:
         bpms = [BPMDevice(b) for b in iota.BPMS.ALLA]
@@ -56,7 +79,7 @@ def get_bpm_data(bpm_ds=None, mode: str = 'tbt', kickv: float = np.nan, kickh: f
         bpm_ds.array_length = None
     else:
         bpm_ds.array_length = 2048
-    n_bpm = bpm_ds.readonce(verbose=False)
+    read_bpms = bpm_ds.readonce(verbose=False)
     data = {d.name: d.value for d in bpm_ds.devices.values()}
 
     state['kickv'] = kickv
@@ -112,6 +135,8 @@ def transition(final_state: Knob, steps: int = 5, verbose: bool = True, extra_fi
                retry=True, retry_limit=10):
     """
     Transition sequencing - moves towards knob state in uniform, smaller steps.
+    :param retry_limit:
+    :param retry:
     :param extra_final_setting:
     :param final_state:
     :param steps:
@@ -136,21 +161,20 @@ def transition(final_state: Knob, steps: int = 5, verbose: bool = True, extra_fi
             (initial_state + final_state).set(verbose=verbose)
         if verbose: print(f'Done')
     else:
-        # if verbose: print(f'Transitioning to ({final_state}) in ({steps}) steps')
-        print(f'Transitioning to ({final_state})(abs:{final_state.absolute}) in ({steps}) steps')
+        print(f'Transitioning to ({final_state}) in ({steps}) steps')
         initial_state = final_state.copy().read_current_state()
         if verbose: print(f'\nCurrent state read OK')
-        delta_knob = ((final_state - initial_state) / steps).prune(tol=1e-4)
+        delta_knob = ((final_state - initial_state)).prune(tol=1e-4) / steps
         if verbose: print(f'\nTo change', delta_knob.vars)
         if delta_knob.is_empty():
-            if verbose: print(f'No changes necessary!')
+            print(f'No changes necessary!')
             return
         initial_state_pruned = initial_state.copy().only_keep_shared(delta_knob)
         for step in range(1, steps + 1):
             # if verbose: print(f'{step}/{steps} ', end='')
-            print(f'step {step}/{steps}...', end='')
+            print(f'{step}/{steps}...', end='')
             intermediate_state = initial_state_pruned + delta_knob * step
-            intermediate_state.set(verbose=verbose)
+            intermediate_state.set(verbose=verbose, split_types=False, split=False)
             time.sleep(1.0)
         print('done!')
 
@@ -185,6 +209,9 @@ def transition(final_state: Knob, steps: int = 5, verbose: bool = True, extra_fi
                 extra_state_pruned.set(verbose=verbose)
                 print(f'Running retry loop {i}/{retry_limit} - set {len(extra_state_pruned.vars)} devices')
                 time.sleep(0.5)
+                if i == retry_limit - 1:
+                    raise Exception(
+                        f'Transition FAILED - variables left: {extra_state_pruned.vars} | {extra_delta.vars}')
         print(f'Knob {final_state.name} set in {time.time() - t0:.5f}s')
 
 
@@ -202,7 +229,7 @@ def inject_until_current(arm_bpms: bool = False, debug: bool = False, current: f
 
 
 def inject(arm_bpms: bool = False, debug: bool = False):
-    #a6cnt = DoubleDevice(iota.CONTROLS.TRIGGER_A6)
+    # a6cnt = DoubleDevice(iota.CONTROLS.TRIGGER_A6)
 
     if debug: print('>>Setting up Chip PLC')
     plc = StatusDevice(iota.CONTROLS.CHIP_PLC)
@@ -226,12 +253,12 @@ def inject(arm_bpms: bool = False, debug: bool = False):
 
     if debug: print('>>Turning on VKICKER aux devices')
     vres = StatusDevice(iota.CONTROLS.VKICKER_RESCHARGE)
-    #vres.read()
-    #if not vres.on:
+    # vres.read()
+    # if not vres.on:
     vres.set_on()
     vtrig = StatusDevice(iota.CONTROLS.VKICKER_TRIG)
-    #vtrig.read()
-    #if not vtrig.on:
+    # vtrig.read()
+    # if not vtrig.on:
     vtrig.set_on()
 
     if debug: print('>>Enabling vertical kicker')
@@ -283,171 +310,149 @@ def inject(arm_bpms: bool = False, debug: bool = False):
 
 
 def kick(vertical_kv: float = 0.0, horizontal_kv: float = 0.0,
-         restore: bool = False, debug: bool = False):
+         restore: bool = False, debug: bool = False, silent: bool = False):
     assert 1.1 > vertical_kv >= 0.0
     assert 3.3 > horizontal_kv >= 0.0
 
-    if debug: print('>>Setting up Chip PLC')
     plc = StatusDevice(iota.CONTROLS.CHIP_PLC)
+    vkicker_status = StatusDevice(iota.CONTROLS.VKICKER)
+    hkicker_status = StatusDevice(iota.CONTROLS.HKICKER)
+    vkicker = DoubleDevice(iota.CONTROLS.VKICKER)
+    hkicker = DoubleDevice(iota.CONTROLS.HKICKER)
+    a5 = StatusDevice(iota.CONTROLS.TRIGGER_A5)
+    vres = StatusDevice(iota.CONTROLS.VKICKER_RESCHARGE)
+    vtrig = StatusDevice(iota.CONTROLS.VKICKER_TRIG)
+    hres = StatusDevice(iota.CONTROLS.HKICKER_RESCHARGE)
+    htrig = StatusDevice(iota.CONTROLS.HKICKER_TRIG)
+    inj = DoubleDevice(iota.CONTROLS.FAST_LASER_INJECTOR)
+    bpminj = StatusDevice(iota.CONTROLS.BPM_INJ_TRIGGER)
+
+    readback_tolerance_V = 0.04
+    readback_tolerance_H = 0.15
+
+    if debug: print('>>Setting up Chip PLC')
     plc.read()
     if not plc.on:
         raise Exception("Chip PLC is not on???")
     if plc.remote:
         plc.set("Trig:Circ")
 
+    vres.read()
+    vtrig.read()
     if vertical_kv > 0.0:
         if debug: print('>>Enabling vertical kicker')
-        vkicker_status = StatusDevice(iota.CONTROLS.VKICKER)
         vkicker_status.read()
-        if not vkicker_status.on:
-            vkicker_status.set_on()
-        if not vkicker_status.ready:
-            vkicker_status.reset()
-
-    if horizontal_kv > 0.0:
-        if debug: print('>>Enabling horizontal kicker')
-        hkicker_status = StatusDevice(iota.CONTROLS.HKICKER)
-        hkicker_status.read()
-        if not hkicker_status.on:
-            hkicker_status.set_on()
-        if not hkicker_status.ready:
-            hkicker_status.reset()
-
-    if debug: print('>>Checking $A5')
-    a5 = StatusDevice(iota.CONTROLS.TRIGGER_A5)
-    a5.read()
-    if not a5.on:
-        a5.set_on()
-
-    if vertical_kv > 0.0:
-        if debug: print('>>Turning on VKICKER aux devices')
-        vres = StatusDevice(iota.CONTROLS.VKICKER_RESCHARGE)
-        vres.read()
-        if not vres.on:
-            vres.set_on()
-        vtrig = StatusDevice(iota.CONTROLS.VKICKER_TRIG)
-        vtrig.read()
-        if not vtrig.on:
-            vtrig.set_on()
-
-        readback_tolerance_V = 0.04
-        if debug: print('>>Setting vertical kicker')
-        vkicker = DoubleDevice(iota.CONTROLS.VKICKER)
-        vkicker.read()
-        if np.abs(vkicker.value - vertical_kv) > 0.01 or np.abs(vkicker.read(setting=True) - vertical_kv) > 1e-3:
-            vkicker.set(vertical_kv)
-            time.sleep(0.15)
-            for i in range(100):
-                delta = np.abs(vkicker.read() - vertical_kv)
-                if delta > readback_tolerance_V or np.abs(vkicker.read(setting=True) - vertical_kv) > 1e-3:
-                    if i < 30:
-                        if i > 20:
-                            vkicker.set(vertical_kv)
-                        time.sleep(0.1)
-                        continue
-                    else:
-                        raise Exception(f'>>Failed to set kicker - final delta: {delta}')
-                else:
-                    if debug: print(f'>>Kicker setting ok - delta {delta} (set:{vkicker.read(setting=True)})')
-                    break
+        if not vkicker_status.on: vkicker_status.set_on_and_verify()
+        if not vkicker_status.ready: vkicker_status.reset_and_verify()
+        if not vres.on: vres.set_on_and_verify()
+        if not vtrig.on: vtrig.set_on_and_verify()
     else:
         if debug: print('>>Turning off VKICKER aux devices')
-        vres = StatusDevice(iota.CONTROLS.VKICKER_RESCHARGE)
-        vres.set_off()
-        vtrig = StatusDevice(iota.CONTROLS.VKICKER_TRIG)
-        vtrig.set_off()
+        if vres.on: vres.set_off_and_verify()
+        if vtrig.on: vtrig.set_off_and_verify()
 
-    readback_tolerance_H = 0.15
+    hres.read()
+    htrig.read()
     if horizontal_kv > 0.0:
-        if debug: print('>>Turning on HKICKER aux devices')
-        hres = StatusDevice(iota.CONTROLS.HKICKER_RESCHARGE)
-        hres.read()
-        if not hres.on:
-            hres.set_on()
-        htrig = StatusDevice(iota.CONTROLS.HKICKER_TRIG)
-        htrig.read()
-        if not htrig.on:
-            htrig.set_on()
-
-        if debug: print('>>Setting horizontal kicker')
-        hkicker = DoubleDevice(iota.CONTROLS.HKICKER)
-        hkicker.read()
-        if np.abs(hkicker.value - horizontal_kv) > 0.01 or np.abs(hkicker.read(setting=True) - horizontal_kv) > 1e-3:
-            hkicker.set(horizontal_kv)
-            time.sleep(0.15)
-            for i in range(100):
-                delta = np.abs(hkicker.read() - horizontal_kv)
-                if delta > readback_tolerance_H or np.abs(hkicker.read(setting=True) - horizontal_kv) > 1e-3:
-                    if i < 30:
-                        if i > 20:
-                            hkicker.set(horizontal_kv)
-                        time.sleep(0.1)
-                        continue
-                    else:
-                        raise Exception(f'>>Failed to set kicker - final delta: {delta}')
-                else:
-                    if debug: print(f'>>Kicker setting ok - delta {delta}')
-                    break
+        if debug: print('>>Enabling horizontal kicker')
+        hkicker_status.read()
+        if not hkicker_status.on: hkicker_status.set_on_and_verify()
+        if not hkicker_status.ready: hkicker_status.reset_and_verify()
+        if not hres.on: hres.set_on_and_verify()
+        if not htrig.on: htrig.set_on_and_verify()
     else:
         if debug: print('>>Turning off HKICKER aux devices')
-        hres = StatusDevice(iota.CONTROLS.HKICKER_RESCHARGE)
-        hres.set_off()
-        htrig = StatusDevice(iota.CONTROLS.HKICKER_TRIG)
-        htrig.set_off()
+        if hres.on: hres.set_off_and_verify()
+        if htrig.on: htrig.set_off_and_verify()
+
+    if debug: print('>>Checking $A5')
+
+    a5.read()
+    if not a5.on:
+        a5.set_on_and_verify()
+
+    if vertical_kv > 0.0:
+        if debug: print('>>Setting vertical kicker')
+        for i in range(100):
+            delta = np.abs(vkicker.read() - vertical_kv)
+            delta_setpt = np.abs(vkicker.read(setting=True) - vertical_kv)
+            if delta > readback_tolerance_V or delta_setpt > 1e-4:
+                vkicker.set(vertical_kv)
+            else:
+                if debug: print(f'>>Kicker set ok - {vertical_kv}|{delta}|{delta_setpt}')
+                break
+            if i < 30:
+                if i > 20:
+                    vkicker.set(vertical_kv)
+                    time.sleep(0.1)
+                else:
+                    time.sleep(0.02)
+                continue
+            else:
+                raise Exception(f'>>Failed to set kicker - final delta: {delta} | {delta_setpt}')
+
+    if horizontal_kv > 0.0:
+        if debug: print('>>Setting vertical kicker')
+        for i in range(100):
+            delta = np.abs(hkicker.read() - horizontal_kv)
+            delta_setpt = np.abs(hkicker.read(setting=True) - horizontal_kv)
+            if delta > readback_tolerance_H or delta_setpt > 1e-4:
+                hkicker.set(horizontal_kv)
+            else:
+                if debug: print(f'>>Kicker set ok - {horizontal_kv}|{delta}|{delta_setpt}')
+                break
+            if i < 30:
+                if i > 20:
+                    hkicker.set(horizontal_kv)
+                    time.sleep(0.1)
+                else:
+                    time.sleep(0.02)
+                continue
+            else:
+                raise Exception(f'>>Failed to set kicker - final delta: {delta} | {delta_setpt}')
 
     a5cnt = DoubleDevice(iota.CONTROLS.TRIGGER_A5)
     a5_initial_val = a5cnt.read()
     if debug: print(f'Initial $A5 cnt: {a5_initial_val}')
 
-    time.sleep(0.5)
-
+    # Extra checks since things are weirdly unreliable!!!
     if vertical_kv > 0.0:
         if debug: print('>>Checking vertical kicker')
-        vkicker_status = StatusDevice(iota.CONTROLS.VKICKER)
         vkicker_status.read()
-        if not vkicker_status.on or not vkicker_status.ready:
-            raise Exception("VKICK not ready")
-        vres = StatusDevice(iota.CONTROLS.VKICKER_RESCHARGE)
         vres.read()
-        if not vres.on:
-            raise Exception("VKICK not ready")
-        vtrig = StatusDevice(iota.CONTROLS.VKICKER_TRIG)
         vtrig.read()
-        if not vtrig.on:
+        if not vkicker_status.on or not vkicker_status.ready or not vres.on or not vtrig.on:
             raise Exception("VKICK not ready")
 
     if horizontal_kv > 0.0:
         if debug: print('>>Checking horizontal kicker')
-        hkicker_status = StatusDevice(iota.CONTROLS.HKICKER)
         hkicker_status.read()
-        if not hkicker_status.on or not hkicker_status.ready:
-            raise Exception("HKICK not ready")
-        hres = StatusDevice(iota.CONTROLS.HKICKER_RESCHARGE)
-        hres.read()
-        if not hres.on:
-            raise Exception("HKICK not ready")
-        htrig = StatusDevice(iota.CONTROLS.HKICKER_TRIG)
         htrig.read()
-        if not htrig.on:
+        hres.read()
+        if not hkicker_status.on or not hkicker_status.ready or not hres.on or not htrig.on:
             raise Exception("HKICK not ready")
 
+    plc.read()
+    if plc.remote:
+        raise Exception("PLCCCCCCCCCC FIX PLZ")
+
     if debug: print('>>Firing')
-    inj = DoubleDevice(iota.CONTROLS.FAST_LASER_INJECTOR)
-    StatusDevice(iota.CONTROLS.BPM_INJ_TRIGGER).reset()
-    #time.sleep(0.01)
+    bpminj.reset()
+    # time.sleep(0.01)
     a5.reset()
     inj.set(1)
     # Await actual fire event
     t0 = time.time()
+    time.sleep(0.05)
     for i in range(20):
         a5_new_val = a5cnt.read()
         if a5_new_val > a5_initial_val:
-            print(f'>>$A5 received ({a5_initial_val}->{a5_new_val}) - kick complete')
+            if not silent: print(f'>>$A5 received ({a5_initial_val}->{a5_new_val}) - kick complete')
             return
         else:
             if i > 5:
                 print(f'>>Awaiting $A5 {i}/{20} ({time.time() - t0:.3f}s)')
-            time.sleep(0.1)
+            time.sleep(0.05)
 
     raise Exception(f'$A5 never received (cnt: {a5_initial_val}) - something went wrong!')
 

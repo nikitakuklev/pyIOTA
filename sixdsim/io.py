@@ -303,6 +303,12 @@ def parse_lattice(fpath: Path, verbose: bool = False):
 
 
 def parse_knobs(fpath: Path, verbose: bool = False):
+    """
+    Parses knob files in sixdsim format. All are assumed absolute unless explicitly specified.
+    :param fpath:
+    :param verbose:
+    :return:
+    """
     knobs = []
     with open(str(fpath), 'r') as f:
         lines = f.readlines()
@@ -360,7 +366,7 @@ class AbstractKnob:
 
 
 class Knob(AbstractKnob):
-    def __init__(self, name: str, vars: dict):
+    def __init__(self, name: str, vars: dict = None):
         self.vars = vars or {}
         self.absolute = True
         super().__init__(name)
@@ -423,21 +429,22 @@ class Knob(AbstractKnob):
     def is_empty(self):
         return len(self.vars) == 0
 
-    def set(self, verbose: bool = False, split: bool = False):
+    def set(self, verbose: bool = False, split_types: bool = False, split: bool = True):
         if verbose or self.verbose:
             verbose = True
         if not self.absolute:
             raise Exception('Attempt to set relative knob')
         if verbose: print(f'Setting knob {self.name}')
-        if split:
+        if split_types:
             skews = [(DoubleDevice(d.acnet_var), d.value) for d in self.vars.values() if d.acnet_var in
                      pyIOTA.iota.run2.SKEWQUADS.ALL_CURRENTS]
             corrV = [(DoubleDevice(d.acnet_var), d.value) for d in self.vars.values() if d.acnet_var in
                      pyIOTA.iota.run2.CORRECTORS.VIRTUAL_V]
             corrH = [(DoubleDevice(d.acnet_var), d.value) for d in self.vars.values() if d.acnet_var in
                      pyIOTA.iota.run2.CORRECTORS.VIRTUAL_H]
-            other = [(DoubleDevice(d.acnet_var), d.value) for d in self.vars.values() if d.acnet_var not in
-                     pyIOTA.iota.run2.SKEWQUADS.ALL_CURRENTS and d.acnet_var not in pyIOTA.iota.run2.CORRECTORS.COMBINED_VIRTUAL]
+            other = [(DoubleDevice(d.acnet_var), d.value) for d in self.vars.values()
+                     if d.acnet_var not in pyIOTA.iota.run2.SKEWQUADS.ALL_CURRENTS
+                     and d.acnet_var not in pyIOTA.iota.run2.CORRECTORS.COMBINED_VIRTUAL]
             # random.shuffle(dlist3)
 
             if len(other) >= 2:
@@ -451,28 +458,29 @@ class Knob(AbstractKnob):
 
             if len(skews) != 0:
                 ds = DoubleDeviceSet(name=self.name, members=[d[0] for d in skews])
-                ds.set([d[1] for d in skews], verbose=verbose)
+                ds.set([d[1] for d in skews], verbose=verbose, split=split)
             if len(other1) != 0:
                 ds = DoubleDeviceSet(name=self.name, members=[d[0] for d in other1])
-                ds.set([d[1] for d in other1], verbose=verbose)
+                ds.set([d[1] for d in other1], verbose=verbose, split=split)
             if len(corrV) != 0:
                 ds = DoubleDeviceSet(name=self.name, members=[d[0] for d in corrV])
-                ds.set([d[1] for d in corrV], verbose=verbose)
+                ds.set([d[1] for d in corrV], verbose=verbose, split=split)
             if len(other2) != 0:
                 ds = DoubleDeviceSet(name=self.name, members=[d[0] for d in other2])
-                ds.set([d[1] for d in other2], verbose=verbose)
+                ds.set([d[1] for d in other2], verbose=verbose, split=split)
             time.sleep(0.3)
             if len(corrH) != 0:
                 ds = DoubleDeviceSet(name=self.name, members=[d[0] for d in corrH])
-                ds.set([d[1] for d in corrH], verbose=verbose)
+                ds.set([d[1] for d in corrH], verbose=verbose, split=split)
         else:
             ds = DoubleDeviceSet(name=self.name, members=[d.acnet_var for d in self.vars.values()])
-            ds.set([d.value for d in self.vars.values()], verbose=verbose)
+            ds.set([d.value for d in self.vars.values()], verbose=verbose, split=split)
 
     def __len__(self):
         return len(self.vars)
 
     def __math(self, other, operation: Callable, opcode: str = ' ', keep_unique_values: bool = True):
+        knob = self.copy()
         if isinstance(other, Knob):
             set1 = set(self.vars.keys())
             set2 = set(other.vars.keys())
@@ -496,12 +504,12 @@ class Knob(AbstractKnob):
                 new_vars = {kv.var: KnobVariable(kind=kv.kind, var=kv.var,
                                                  value=operation(kv.value, other.vars[knob].value)
                                                  ) for knob, kv in setvars}
+            knob.name = '(' + self.name + opcode + other.name + ')'
         else:
             new_vars = {kv.var: KnobVariable(kind=kv.kind, var=kv.var,
                                              value=operation(kv.value, other)
                                              ) for knob, kv in self.vars.items()}
-        knob = self.copy()
-        knob.name = '(' + self.name + opcode + other.name + ')'
+            knob.name = '(' + self.name + opcode + str(other) + ')'
         knob.vars = new_vars
         knob.absolute = True if (self.absolute or other.absolute) else False
         return knob
@@ -546,3 +554,9 @@ class KnobVariable:
 
     def copy(self):
         return KnobVariable(self.kind, self.var, self.value, self.acnet_var,)
+
+    def __str__(self):
+        return f'KnobVar ({self.kind})|({self.var})|({self.acnet_var}) = ({self.value}) at {hex(id(self))}'
+
+    def __repr__(self):
+        return self.__str__()

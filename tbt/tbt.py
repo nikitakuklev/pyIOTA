@@ -36,13 +36,12 @@ class Kick:
         self.VG = self.BPMS_VG = [i + "V" for i in bpm_list]
         self.SG = self.BPMS_SG = [i + "S" for i in bpm_list]
         self.BPMS_ALLG = self.BPMS_HG + self.BPMS_VG + self.BPMS_SG
-        self.CG = self.BPMS_CG = [] # Calculated
+        self.CG = self.BPMS_CG = []  # Calculated
         self.bpm_families = {'H': self.BPMS_HG, 'V': self.BPMS_VG, 'S': self.BPMS_SG, 'C': self.BPMS_CG}
-
 
         self.df = df
         self.idx = kick_id
-        #if df.iloc[0].loc['idx'] == 0:
+        # if df.iloc[0].loc['idx'] == 0:
         df.loc[0, 'idx'] = kick_id
         self.collection_id = df.iloc[0].loc['idx']
         self.ks = parent_sequence
@@ -160,13 +159,34 @@ class Kick:
     def calculate_stats(self) -> dict:
         stats = {}
         bpms = self.get_bpms('A')
-        for bpm in bpms:
-            mean, std = np.mean(self.df.iloc[0].loc[bpm]), np.std(self.df.iloc[0].loc[bpm])
-            self.df['avg_' + bpm] = mean
-            self.df['sig_' + bpm] = std
+
+        averages = np.zeros(len(bpms))
+        variances = np.zeros(len(bpms))
+        for i, bpm in enumerate(bpms):
+            data = self.df.iloc[0].loc[bpm]
+            mean, std = np.mean(data), np.std(data)
+            averages[i] = mean
+            variances[i] = std
             stats[bpm] = (mean, std)
             if np.isnan(mean) or np.isnan(std):
-                raise Exception
+                raise Exception(f'NaN encountered computing stats in kick ({self.idx})')
+        columns = ['avg_' + bpm for bpm in bpms] + ['sig_' + bpm for bpm in bpms]
+        columns_extra = [c for c in columns if c not in self.df.columns]
+        if len(columns) != len(columns_extra):
+            if len(columns_extra) != 0:
+                raise Exception(f'Columns are mixed up - they should all exist or all not exist, but have ({len(columns)}) vs ({len(columns_extra)})! ({columns})({columns_extra})')
+        if columns_extra:
+            #print(f'Adding extra cols: {columns_extra}')
+            #print(np.hstack([averages, variances]).shape)
+            df_temp = pd.DataFrame(columns=columns_extra,
+                                   index=[0],
+                                   data=np.hstack([averages, variances])[np.newaxis,:])
+            #print(df_temp)
+            self.df = pd.concat([self.df, df_temp], axis=1)
+        else:
+            print(len(columns),np.hstack([averages, variances])[np.newaxis,:].shape,self.df.loc[0, columns])
+            self.df.loc[0, columns] = np.hstack([averages, variances])[np.newaxis,:]
+
         return stats
 
 

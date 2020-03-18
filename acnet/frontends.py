@@ -112,33 +112,77 @@ class StatusDevice(Device):
             raise Exception("No measurement available")
         return self.on
 
+    def is_off(self) -> bool:
+        if self.value_string is None:
+            raise Exception("No measurement available")
+        return not self.on
+
     def is_ready(self) -> bool:
         if self.value_string is None:
             raise Exception("No measurement available")
         return self.ready
 
     def read(self, adapter=None, verbose: bool = False):
-        if not self._device_set:
-            adapter = adapter or default_adapter or ACL(fallback=True)
-            StatusDeviceSet(self.name, members=[self], adapter=adapter).readonce(verbose)
+        if not self._device_set or (adapter and self._device_set.adapter != adapter):
+            adapter = adapter or default_adapter
+            if not adapter: raise Exception
+            self._device_set = StatusDeviceSet(self.name, members=[self], adapter=adapter)
+            self._device_set.readonce(verbose=verbose)
         else:
-            self._device_set.readonce()
+            self._device_set.readonce(verbose=verbose)
         return self.value_string
 
-    def set(self, value, adapter=None):
-        if not self._device_set:
-            adapter = adapter or default_adapter or ACL(fallback=True)
+    def set(self, value, adapter=None, verbose: bool = False):
+        if not self._device_set or (adapter and self._device_set.adapter != adapter):
+            adapter = adapter or default_adapter
+            if not adapter: raise Exception
             self._device_set = StatusDeviceSet(self.name, members=[self], adapter=adapter)
-        return self._device_set.set([value])
+        return self._device_set.set([value], verbose=verbose)
 
     def set_on(self):
         self.set('ON')
 
+    def set_on_and_verify(self, retries=3, delay=0.01):
+        """
+        Verifies successful setting for given number of tries, with initial and inbetween delays
+        :param retries:
+        :param delay:
+        :return:
+        """
+        self.set('ON')
+        time.sleep(delay)
+        for i in range(retries):
+            self.read()
+            if self.is_on():
+                return
+            time.sleep(delay)
+        raise Exception(f'{self.name} - ON verification failure, value {self.value_string}')
+
     def set_off(self):
         self.set('OFF')
 
+    def set_off_and_verify(self, retries=3, delay=0.01):
+        self.set('OFF')
+        time.sleep(delay)
+        for i in range(retries):
+            self.read()
+            if self.is_off():
+                return
+            time.sleep(delay)
+        raise Exception(f'{self.name} - OFF verification failure, value {self.value_string}')
+
     def reset(self):
         self.set('RESET')
+
+    def reset_and_verify(self, retries=3, delay=0.01):
+        self.set('RESET')
+        time.sleep(delay)
+        for i in range(retries):
+            self.read()
+            if self.is_ready():
+                return
+            time.sleep(delay)
+        raise Exception(f'{self.name} - OFF verification failure, value {self.value_string}')
 
 
 class BPMDevice(Device):
@@ -280,7 +324,7 @@ class DeviceSet:
         else:
             return all([c.check_acquisition_supported(method) for c in self.children])
 
-    def set(self, values: list, verbose: bool = False) -> int:
+    def set(self, values: list, verbose: bool = False, split: bool = False) -> int:
         if not self.adapter.check_setting_supported():
             raise Exception(f'Setting is not support for adapter {self.adapter.__class__}')
         if not self.check_acquisition_available(method='oneshot'):
@@ -290,7 +334,7 @@ class DeviceSet:
         if len(values) != len(self.devices):
             raise AttributeError("Value list length does not match number of devices in set")
         if self.leaf:
-            cnt = self.adapter.set(self, values, verbose)
+            cnt = self.adapter.set(self, values, verbose, split)
         else:
             raise ValueError("Tree traversing writes are not supported")
         return cnt
@@ -303,12 +347,12 @@ class DeviceSet:
         if not self.devices:
             raise AttributeError("Cannot start acquisition on an empty set")
         if self.leaf:
-            cnt = self.adapter.readonce(self, settings=settings, verbose=verbose)
+            values = self.adapter.readonce(self, settings=settings, verbose=verbose)
         else:
-            cnt = 0
+            values = []
             for c in self.children:
-                cnt += c.update(c.adapter.oneshot())
-        return cnt
+                values += c.update(c.adapter.oneshot())
+        return values
 
     def start_streaming(self):
         raise Exception('Not yet supported')
@@ -395,7 +439,7 @@ class StatusDeviceSet(DeviceSet):
     def __init__(self, name: str, members: list, adapter=None):
         if all([isinstance(d, str) for d in members]):
             members = [StatusDevice(d) for d in members]
-        elif all([isinstance(ds, StatusDevice) for ds in members]):
+        elif all([isinstance(d, StatusDevice) for d in members]):
             pass
         else:
             print([isinstance(m, StatusDevice) for m in members])
@@ -556,7 +600,7 @@ class ACL(Adapter):
         resp = self.client.get(acl)
         return resp.text
 
-    def readonce(self, ds: DeviceSet, settings: bool = False, verbose: bool = False) -> int:
+    def readonce(self, ds: DeviceSet, settings: bool = False, verbose: bool = False) -> list:
         assert ds.leaf
         device_dict = ds.devices
         if settings:
@@ -602,9 +646,11 @@ class ACL(Adapter):
                     print('Issue with acquisition - devices missing:')
                     print([dn for dn in device_dict if dn not in data.keys()])
                     raise Exception
+                values = []
                 for k, v in device_dict.items():
                     v.update(data[k], t1, self.name)
-                return len(data)
+                    values.append(v.value)
+                return values
             except Exception as e:
                 print(f'Acquisition failed, urls: {urls}')
                 print(e, sys.exc_info())
@@ -696,7 +742,7 @@ class ACNETRelay(Adapter):
     def check_available(self, devices: dict, method=None):
         return len(devices) < 500
 
-    def readonce(self, ds: DeviceSet, settings: bool = False, verbose: bool = False, retries: int = 1) -> int:
+    def readonce(self, ds: DeviceSet, settings: bool = False, verbose: bool = False, retries: int = 2) -> list:
         if verbose or self.verbose:
             verbose = True
 
@@ -707,7 +753,8 @@ class ACNETRelay(Adapter):
             # BPMS are slow to read out
             num_lists = len(ds.devices)
         else:
-            num_lists = min(len(ds.devices), 5)
+            # Always split reads
+            num_lists = min(len(ds.devices) // 25 + 1, 5) if len(ds.devices) > 25 else 1
         device_lists = [list(ll) for ll in np.array_split(list(ds.devices.values()), num_lists)]
         params = []
         for dl in device_lists:
@@ -719,7 +766,7 @@ class ACNETRelay(Adapter):
                     else:
                         request_items.append(f'{device.name}{postfix}' + '[]@I')
                 elif isinstance(device, StatusDevice):
-                    request_items.append(f'{device.name}.STATUS')
+                    request_items.append(f'{device.name}.STATUS@I')
                 elif isinstance(device, DoubleDevice):
                     request_items.append(f'{device.name + postfix}@I')
                 else:
@@ -733,12 +780,11 @@ class ACNETRelay(Adapter):
                 params.append({'requestType': 'V1_DRF2_READ_SINGLE',
                                'request': request_string})
             else:
-                print(self.comm_method)
-                raise Exception
+                raise Exception(f'{self.name} : method {self.comm_method} is not recognized!')
         if verbose: print(f'{self.name} : params {params}')
 
         try_cnt = 0
-        while try_cnt < retries + 1:
+        while True:
             try:
                 # async def get(json_lists):
                 #     results = [await c.post(self.address, json=p) for p in json_lists]
@@ -763,19 +809,23 @@ class ACNETRelay(Adapter):
                     if r.status_code == 200:
                         data.update(self._process(ds, r.json()))
                     else:
-                        return -1
+                        #return -1
+                        return []
                 assert len(data) == len(ds.devices)
+                values = []
                 for k, v in ds.devices.items():
                     v.update(data[k], t1, self.name)
-                return len(data)
+                    values.append(v.value)
+                #return len(data)
+                return values
             except Exception as e:
                 try_cnt += 1
                 if try_cnt >= retries + 1:
-                    print(f'{self.name} : FINAL EXCEPTION IN READONCE (try {try_cnt - 1}) - {e}')
+                    print(f'{self.name} : readonce FINAL EXCEPTION (try {try_cnt - 1}) - {e}')
                     # print(e, sys.exc_info())
                     raise
                 else:
-                    print(f'{self.name} : EXCEPTION IN READONCE (try {try_cnt - 1}) - {e}')
+                    print(f'{self.name} : readonce EXCEPTION (try {try_cnt - 1}) - {e}')
 
     def _process(self, ds: DeviceSet, r):
         responses = r['responseJson']
@@ -819,7 +869,7 @@ class ACNETRelay(Adapter):
                 data[k.split('.')[0]] = v
         return data
 
-    def set(self, ds: DeviceSet, values: list, verbose: bool = False) -> int:
+    def set(self, ds: DeviceSet, values: list, verbose: bool = False, split: bool = True) -> int:
         if verbose or self.verbose:
             print(f'{self.name} : SETTING : {verbose} : {self.verbose}')
             verbose = True
@@ -836,7 +886,10 @@ class ACNETRelay(Adapter):
                     return rs
 
                 params = []
-                num_lists = min(len(ds.devices), 5) if len(ds.devices) > 20 else 1
+                if split:
+                    num_lists = min(len(ds.devices) // 20 + 1, 5) if len(ds.devices) > 20 else 1
+                else:
+                    num_lists = 1
                 device_lists = [list(ll) for ll in np.array_split(list(ds.devices.values()), num_lists)]
                 val_lists = [list(ll) for ll in np.array_split(values, num_lists)]
                 for dl, vl in zip(device_lists, val_lists):
