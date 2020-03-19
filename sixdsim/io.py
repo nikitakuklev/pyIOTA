@@ -1,3 +1,4 @@
+import itertools
 import operator
 import time
 from pathlib import Path
@@ -398,9 +399,12 @@ class Knob(AbstractKnob):
         self.vars = {k: v for (k, v) in self.vars.items() if k in other.vars and other.vars[k] == v}
         return self
 
-    def copy(self):
+    def copy(self, new_vars: dict = None):
         knob = Knob(name=self.name)
-        knob.vars = {k.var: k.copy() for k in self.vars.values()}
+        if new_vars:
+            knob.vars = new_vars
+        else:
+            knob.vars = {k.var: k.copy() for k in self.vars.values()}
         knob.absolute = self.absolute
         knob.verbose = self.verbose
         return knob
@@ -429,12 +433,14 @@ class Knob(AbstractKnob):
     def is_empty(self):
         return len(self.vars) == 0
 
-    def set(self, verbose: bool = False, split_types: bool = False, split: bool = True):
+    def set(self, verbose: bool = False, split_types: bool = False, split: bool = True,
+            calculate_physical_currents=False):
         if verbose or self.verbose:
             verbose = True
         if not self.absolute:
             raise Exception('Attempt to set relative knob')
         if verbose: print(f'Setting knob {self.name}')
+
         if split_types:
             skews = [(DoubleDevice(d.acnet_var), d.value) for d in self.vars.values() if d.acnet_var in
                      pyIOTA.iota.run2.SKEWQUADS.ALL_CURRENTS]
@@ -473,8 +479,94 @@ class Knob(AbstractKnob):
                 ds = DoubleDeviceSet(name=self.name, members=[d[0] for d in corrH])
                 ds.set([d[1] for d in corrH], verbose=verbose, split=split)
         else:
-            ds = DoubleDeviceSet(name=self.name, members=[d.acnet_var for d in self.vars.values()])
-            ds.set([d.value for d in self.vars.values()], verbose=verbose, split=split)
+            if not calculate_physical_currents:
+                # ds = DoubleDeviceSet(name=self.name, members=[d.acnet_var for d in self.vars.values()])
+                # ds.set([d.value for d in self.vars.values()], verbose=verbose, split=split)
+
+                # devs1 = [d.acnet_var for d in self.vars.values() if
+                #          d.acnet_var in pyIOTA.iota.run2.CORRECTORS.VIRTUAL_H]
+                # devs2 = [d.acnet_var for d in self.vars.values() if
+                #          d.acnet_var in pyIOTA.iota.run2.CORRECTORS.VIRTUAL_V]
+                devs1 = [d.acnet_var for d in self.vars.values() if
+                         d.acnet_var in pyIOTA.iota.run2.CORRECTORS.COMBINED_COILS_I]
+                devs2 = []
+                devs3 = [d.acnet_var for d in self.vars.values() if
+                         d.acnet_var in pyIOTA.iota.run2.SKEWQUADS.ALL_CURRENTS]
+                dev_temp = devs1 + devs2 + devs3
+                devs4 = [d.acnet_var for d in self.vars.values() if d.acnet_var not in dev_temp]
+                devs = devs1 + devs2 + devs3 + devs4
+                ds = DoubleDeviceSet(name=self.name, members=devs)
+                acnet_dict = {d.acnet_var: d for d in self.vars.values()}
+                ds.set([acnet_dict[d].value for d in devs], verbose=verbose, split=split)
+            else:
+                devs_h = pyIOTA.iota.CORRECTORS.VIRTUAL_H
+                devs_v = pyIOTA.iota.CORRECTORS.VIRTUAL_V
+                devs_s = pyIOTA.iota.run2.SKEWQUADS.ALL_CURRENTS
+                coils = pyIOTA.iota.run2.CORRECTORS.COMBINED_COILS_I
+
+                def grouper(n, iterable):
+                    it = iter(iterable)
+                    while True:
+                        chunk = tuple(itertools.islice(it, n))
+                        if not chunk:
+                            return
+                        yield chunk
+
+                coil_groups = list(grouper(4, coils))
+                assert len(devs_h) == len(devs_v) == len(devs_s) == len(coils) // 4
+                devs_to_set = {d.acnet_var: d for d in self.vars.values()}
+                for h, v, s, cg in zip(devs_h, devs_v, devs_s, coil_groups):
+                    hor = devs_to_set.get(h, None)
+                    ver = devs_to_set.get(v, None)
+                    skew = devs_to_set.get(s, None)
+                    if any([hor, ver, skew]):
+                        currents = pyIOTA.iota.magnets.get_combfun_coil_currents(ch=hor, cv=ver, skew=skew)
+                        if hor: del devs_to_set[h]
+                        if ver: del devs_to_set[v]
+                        if skew: del devs_to_set[s]
+                        for i, c in enumerate(cg):
+                            devs_to_set[c] = currents[i]
+                        print(f'Recomputed virtual knobs ({hor}-{ver}-{skew}) into physical ({cg}-{currents})')
+                ds = DoubleDeviceSet(name=self.name, members=list(devs_to_set.keys()))
+                ds.set([d.value for d in devs_to_set.values()], verbose=verbose, split=split)
+
+    def convert_to_physical_devices(self, copy: bool = True):
+        devs_h = pyIOTA.iota.CORRECTORS.VIRTUAL_H
+        devs_v = pyIOTA.iota.CORRECTORS.VIRTUAL_V
+        devs_s = pyIOTA.iota.run2.SKEWQUADS.ALL_CURRENTS
+        coils = pyIOTA.iota.run2.CORRECTORS.COMBINED_COILS_I
+        #initial_len = len(self.vars)
+
+        def grouper(n, iterable):
+            it = iter(iterable)
+            while True:
+                chunk = tuple(itertools.islice(it, n))
+                if not chunk:
+                    return
+                yield chunk
+
+        coil_groups = list(grouper(4, coils))
+        assert len(devs_h) == len(devs_v) == len(devs_s) == len(coils) // 4
+        devs_to_set = {d.acnet_var: d for d in self.vars.values()}
+        for h, v, s, cg in zip(devs_h, devs_v, devs_s, coil_groups):
+            hor = devs_to_set.get(h, None)
+            ver = devs_to_set.get(v, None)
+            skew = devs_to_set.get(s, None)
+            if any([hor, ver, skew]):
+                currents = pyIOTA.iota.magnets.get_combfun_coil_currents(ch=hor, cv=ver, skew=skew)
+                if hor: del devs_to_set[h]
+                if ver: del devs_to_set[v]
+                if skew: del devs_to_set[s]
+                for i, c in enumerate(cg):
+                    devs_to_set[c] = KnobVariable(kind='$', var=c, value=currents[i])
+                print(f'Virtual knobs ({hor}|{ver}|{skew}) -> physical ({[devs_to_set[c] for c in cg]})')
+        if copy:
+            knob = self.copy()
+            knob.vars = devs_to_set
+            return knob
+        else:
+            self.vars = devs_to_set
+            return self
 
     def __len__(self):
         return len(self.vars)
@@ -535,7 +627,8 @@ class Knob(AbstractKnob):
         return self.__math(other, operator.mul, '*')
 
     def __str__(self):
-        return f'Knob (abs {self.absolute}) ({self.name}) at {hex(id(self))}:({len(self.vars)}) devices'
+
+        return f'Knob(A:{self.absolute}) ({self.name}) at {hex(id(self))}: ({len(self.vars)}) devices'
 
     def __repr__(self):
         return self.__str__()
@@ -553,10 +646,11 @@ class KnobVariable:
         self.value = value
 
     def copy(self):
-        return KnobVariable(self.kind, self.var, self.value, self.acnet_var,)
+        return KnobVariable(self.kind, self.var, self.value, self.acnet_var, )
 
     def __str__(self):
-        return f'KnobVar ({self.kind})|({self.var})|({self.acnet_var}) = ({self.value}) at {hex(id(self))}'
+        # return f'KnobVar ({self.kind})|({self.var})|({self.acnet_var}) = ({self.value}) at {hex(id(self))}'
+        return f'KV ({self.acnet_var})=({self.value:+.5f})'
 
     def __repr__(self):
         return self.__str__()

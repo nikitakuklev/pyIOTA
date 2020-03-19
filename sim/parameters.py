@@ -23,6 +23,10 @@ class Generator:
         self.parameters = parameter_spec or {}
         self.name_links = {}
 
+    def reset(self):
+        self.parameters = {}
+        self.name_links = {}
+
     def _flatten_parameters(self) -> list:
         # TODO: Reimplement with proper traversal generator
         ls = []

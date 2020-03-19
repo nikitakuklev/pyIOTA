@@ -63,7 +63,7 @@ class DIPOLES:
 
 class CORRECTORS:
     _combfun = ['A1R', 'A2R', 'B1R', 'B2R', 'C1R', 'C2R', 'D1R', 'D2R', 'E1R', 'E2R',
-                 'E2L', 'E1L', 'D2L', 'D1L', 'C2L', 'C1L', 'B2L', 'B1L', 'A2L', 'A1L']
+                'E2L', 'E1L', 'D2L', 'D1L', 'C2L', 'C1L', 'B2L', 'B1L', 'A2L', 'A1L']
 
     kHSQ = (0.1 - 0.034645) * 1.3 # calibration for current to field for panofsky magnets
 
@@ -107,9 +107,10 @@ class CORRECTORS:
 
 class QUADS:
     __quad_names = ['A1R', 'A2R', 'A3R', 'A4R', 'B1R', 'B2R', 'B3R', 'B4R', 'B5R', 'B6R',
-                    'C1R', 'C2R', 'C3R', 'D1R', 'D2R', 'D3R', 'D4R', 'E1R', 'E2R', 'E3C',
-                    'A1L', 'A2L', 'A3L', 'A4L', 'B1L', 'B2L', 'B3L', 'B4L', 'B5L', 'B6L',
-                    'C1L', 'C2L', 'C3L', 'D1L', 'D2L', 'D3L', 'D4L', 'E1L', 'E2L']
+                    'C1R', 'C2R', 'C3R', 'D1R', 'D2R', 'D3R', 'D4R', 'E1R', 'E2R',
+                    'E3C',
+                    'E2L', 'E1L', 'D4L', 'D3L', 'D2L', 'D1L', 'C3L', 'C2L', 'C1L', 'B6L',
+                    'B5L', 'B4L', 'B3L', 'B2L', 'B1L', 'A4L', 'A3L', 'A2L', 'A1L']
     ALL_CURRENTS = ['N:IQ' + str(i) + 'I' for i in __quad_names]
     ALL_VOLTAGES = ['N:IQ' + str(i) + 'V' for i in __quad_names]
     ALL = ALL_CURRENTS + ALL_VOLTAGES
@@ -117,7 +118,7 @@ class QUADS:
 
 class SKEWQUADS:
     __skew_names = ['A1R', 'A2R', 'B1R', 'B2R', 'C1R', 'C2R', 'D1R', 'D2R', 'E1R', 'E2R',
-                    'A1L', 'A2L', 'B1L', 'B2L', 'C1L', 'C2L', 'D1L', 'D2L', 'E1L', 'E2L']
+                    'E2L', 'E1L', 'D2L', 'D1L', 'C2L', 'C1L', 'B2L', 'B1L', 'A2L', 'A1L']
     ALL_CURRENTS = ['N:IK' + str(i) + 'I' for i in __skew_names]
     ALL_VOLTAGES = ['N:IK' + str(i) + 'V' for i in __skew_names]
     ALL = ALL_CURRENTS + ALL_VOLTAGES
@@ -125,7 +126,7 @@ class SKEWQUADS:
 
 class SEXTUPOLES:
     __sext_names = ['A1R', 'C1R', 'C2R', 'D1R', 'E1R', 'E2R',
-                    'A2L', 'C1L', 'C2L', 'D1L', 'E1L', 'E2L']
+                    'E2L', 'E1L', 'D1L', 'C2L', 'C1L', 'A2L']
     __sext_names_v2 = ['C1R', 'C2R', 'C1L', 'C2L']
     ALL_CURRENTS = ['N:IS' + str(i) + 'I' for i in __sext_names] + ['N:TS' + str(i) + 'I' for i in __sext_names_v2]
     ALL_VOLTAGES = ['N:IS' + str(i) + 'V' for i in __sext_names] + ['N:TS' + str(i) + 'V' for i in __sext_names_v2]
@@ -150,6 +151,7 @@ class DNMAGNET:
     ALL_VOLTAGES = ['N:INL{:02d}V'.format(i) for i in range(1, 19)]
     ALL = ALL_CURRENTS + ALL_VOLTAGES
 
+
 class CONTROLS:
     TRIGGER_A5 = 'N:EA5TRG'  # $A5 timing event on reset
     TRIGGER_A6 = 'N:EA6TRG'  # $A6 timing event on reset
@@ -172,6 +174,7 @@ class CONTROLS:
     VKICKER_TRIG = 'N:IKPSVT'
     VKICKER_ONOFF_DEVICES = [VKICKER_RESCHARGE, VKICKER_TRIG]
 
+
 class OTHER:
     RF = ['N:IRFLLF', 'N:IRFLLA', 'N:IRFMOD', 'N:IRFEAT', 'N:IRFEPC']
     KICKERS = ['N:IKPSV', 'N:IKPSH', 'N:IKPSVX', 'N:IKPSVD']
@@ -179,7 +182,7 @@ class OTHER:
     BEAM_CURRENT_AVERAGE = 'N:IBEAMA'
     WCM_PARAMS = ['N:IWCMBF', 'N:IWCMBR', 'N:IWCMI', 'N:IWCMBP', 'N:IRFEPA', 'N:IRFEPP']
     BPM_ATN = ['Z:RP2ATN']
-    AUX_DEVICES = [BEAM_CURRENT] + [BEAM_CURRENT_AVERAGE] + WCM_PARAMS + BPM_ATN + [CONTROLS.TRIGGER_A5] + [CONTROLS.TRIGGER_A6]
+    AUX_DEVICES = [BEAM_CURRENT] + [BEAM_CURRENT_AVERAGE] + WCM_PARAMS + [CONTROLS.TRIGGER_A5] + [CONTROLS.TRIGGER_A6] + BPM_ATN
 
 
 MASTER_STATUS_DEVICES = CONTROLS.VKICKER_ONOFF_DEVICES + CONTROLS.HKICKER_ONOFF_DEVICES + [CONTROLS.HKICKER] + [CONTROLS.VKICKER] + [CONTROLS.CHIP_PLC]

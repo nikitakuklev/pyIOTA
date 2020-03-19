@@ -339,7 +339,7 @@ class DeviceSet:
             raise ValueError("Tree traversing writes are not supported")
         return cnt
 
-    def readonce(self, settings: bool = False, verbose: bool = False) -> int:
+    def readonce(self, settings: bool = False, verbose: bool = False) -> list:
         if not self.check_acquisition_supported(method='oneshot'):
             raise Exception(f'Acquisition not supported - have {self.adapter.supported}')
         if not self.check_acquisition_available(method='oneshot'):
@@ -825,7 +825,7 @@ class ACNETRelay(Adapter):
                     # print(e, sys.exc_info())
                     raise
                 else:
-                    print(f'{self.name} : readonce EXCEPTION (try {try_cnt - 1}) - {e}')
+                    print(f'{self.name} : readonce EXCEPTION (try {try_cnt - 1}) | data - {e}')
 
     def _process(self, ds: DeviceSet, r):
         responses = r['responseJson']
@@ -980,7 +980,7 @@ class ACNETRelay(Adapter):
                         else:
                             ok_cnt += 1
                     else:
-                        raise Exception
+                        raise Exception(f'{self.name} : bad return - {r.status_code} {r.text}')
                         return -1
                 assert ok_cnt == len(ds.devices)
                 return ok_cnt

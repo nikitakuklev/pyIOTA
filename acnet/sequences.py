@@ -18,7 +18,7 @@ def trigger_bpms_orbit_mode(debug: bool = False):
 
 
 def check_bpm_saturation(bpm_indices: list, threshold: int = 65000, calculate_load: bool = True, turns: int = 256,
-                         load_turns:int = 128) -> dict:
+                         load_turns: int = 128) -> dict:
     bpm_index = DoubleDevice(iota.CONTROLS.BPM_RAWREAD_INDEX)
     bpm_control = StatusDevice(iota.CONTROLS.BPM_CONFIG_DEVICE)
 
@@ -34,7 +34,8 @@ def check_bpm_saturation(bpm_indices: list, threshold: int = 65000, calculate_lo
         for bpm in bpms:
             arr = np.abs(bpm.value)
             if np.abs(np.max(arr)) > threshold:
-                raise Exception(f'Plate ({bpm.name}) of ({idx}) exceeded limit ({threshold}): {bpm.value[:40]} (loads:{load})')
+                raise Exception(
+                    f'Plate ({bpm.name}) of ({idx}) exceeded limit ({threshold}): {bpm.value[:40]} (loads:{load})')
             else:
                 load[str(idx) + '-' + bpm.name] = np.mean(arr[:load_turns])
     return load
@@ -131,10 +132,11 @@ def get_bpm_data(bpm_ds=None, mode: str = 'tbt', kickv: float = np.nan, kickh: f
     return data, state, val_last_ret, saved_ok
 
 
-def transition(final_state: Knob, steps: int = 5, verbose: bool = True, extra_final_setting=False,
-               retry=True, retry_limit=10):
+def transition(final_state: Knob, steps: int = 5, verbose: bool = False, extra_final_setting=False,
+               retry=True, retry_limit=10, step_pause: float = 0.5, silent:bool=False):
     """
     Transition sequencing - moves towards knob state in uniform, smaller steps.
+    :param step_pause:
     :param retry_limit:
     :param retry:
     :param extra_final_setting:
@@ -161,13 +163,13 @@ def transition(final_state: Knob, steps: int = 5, verbose: bool = True, extra_fi
             (initial_state + final_state).set(verbose=verbose)
         if verbose: print(f'Done')
     else:
-        print(f'Transitioning to ({final_state}) in ({steps}) steps')
+        if not silent: print(f'Transitioning to ({final_state}) in ({steps}) steps')
         initial_state = final_state.copy().read_current_state()
         if verbose: print(f'\nCurrent state read OK')
-        delta_knob = ((final_state - initial_state)).prune(tol=1e-4) / steps
+        delta_knob = (final_state - initial_state).prune(tol=3e-4) / steps
         if verbose: print(f'\nTo change', delta_knob.vars)
         if delta_knob.is_empty():
-            print(f'No changes necessary!')
+            if not silent: print(f'No changes necessary!')
             return
         initial_state_pruned = initial_state.copy().only_keep_shared(delta_knob)
         for step in range(1, steps + 1):
@@ -175,7 +177,7 @@ def transition(final_state: Knob, steps: int = 5, verbose: bool = True, extra_fi
             print(f'{step}/{steps}...', end='')
             intermediate_state = initial_state_pruned + delta_knob * step
             intermediate_state.set(verbose=verbose, split_types=False, split=False)
-            time.sleep(1.0)
+            time.sleep(step_pause)
         print('done!')
 
         if extra_final_setting:
@@ -184,7 +186,7 @@ def transition(final_state: Knob, steps: int = 5, verbose: bool = True, extra_fi
             extra_state.read_current_state()
             if verbose: print('\nExtra state read:\n', [(k.var, k.value) for k in extra_state.vars.values()])
             extra_delta = final_state - extra_state
-            to_change_extra = extra_delta.prune(tol=1e-4)
+            to_change_extra = extra_delta.prune(tol=3e-4)
             if verbose: print(f'\nTo change ({to_change_extra})')
             if to_change_extra.is_empty():
                 if verbose: print(f'No changes necessary!')
@@ -195,6 +197,7 @@ def transition(final_state: Knob, steps: int = 5, verbose: bool = True, extra_fi
             extra_state_pruned.set(verbose=verbose)
 
         if retry:
+            time.sleep(0.5)
             for i in range(retry_limit):
                 extra_state = final_state.copy().read_current_state(settings=True)
                 if verbose: print('\nExtra state read:\n', [(k.var, k.value) for k in extra_state.vars.values()])
@@ -313,6 +316,7 @@ def kick(vertical_kv: float = 0.0, horizontal_kv: float = 0.0,
          restore: bool = False, debug: bool = False, silent: bool = False):
     assert 1.1 > vertical_kv >= 0.0
     assert 3.3 > horizontal_kv >= 0.0
+    t_start = time.time()
 
     plc = StatusDevice(iota.CONTROLS.CHIP_PLC)
     vkicker_status = StatusDevice(iota.CONTROLS.VKICKER)
@@ -326,6 +330,8 @@ def kick(vertical_kv: float = 0.0, horizontal_kv: float = 0.0,
     htrig = StatusDevice(iota.CONTROLS.HKICKER_TRIG)
     inj = DoubleDevice(iota.CONTROLS.FAST_LASER_INJECTOR)
     bpminj = StatusDevice(iota.CONTROLS.BPM_INJ_TRIGGER)
+
+    # status_devs = [vres, vtrig, hres, htrig]
 
     readback_tolerance_V = 0.04
     readback_tolerance_H = 0.15
@@ -342,28 +348,28 @@ def kick(vertical_kv: float = 0.0, horizontal_kv: float = 0.0,
     if vertical_kv > 0.0:
         if debug: print('>>Enabling vertical kicker')
         vkicker_status.read()
-        if not vkicker_status.on: vkicker_status.set_on_and_verify()
-        if not vkicker_status.ready: vkicker_status.reset_and_verify()
-        if not vres.on: vres.set_on_and_verify()
-        if not vtrig.on: vtrig.set_on_and_verify()
+        if not vres.on: vres.set_on_and_verify(retries=10, delay=0.05)
+        if not vtrig.on: vtrig.set_on_and_verify(retries=10, delay=0.05)
+        if not vkicker_status.on: vkicker_status.set_on_and_verify(retries=10, delay=0.05)
+        if not vkicker_status.ready: vkicker_status.reset_and_verify(retries=10, delay=0.05)
     else:
         if debug: print('>>Turning off VKICKER aux devices')
-        if vres.on: vres.set_off_and_verify()
-        if vtrig.on: vtrig.set_off_and_verify()
+        if vres.on: vres.set_off_and_verify(retries=10, delay=0.05)
+        if vtrig.on: vtrig.set_off_and_verify(retries=10, delay=0.05)
 
     hres.read()
     htrig.read()
     if horizontal_kv > 0.0:
         if debug: print('>>Enabling horizontal kicker')
         hkicker_status.read()
-        if not hkicker_status.on: hkicker_status.set_on_and_verify()
-        if not hkicker_status.ready: hkicker_status.reset_and_verify()
-        if not hres.on: hres.set_on_and_verify()
-        if not htrig.on: htrig.set_on_and_verify()
+        if not hres.on: hres.set_on_and_verify(retries=10, delay=0.05)
+        if not htrig.on: htrig.set_on_and_verify(retries=10, delay=0.05)
+        if not hkicker_status.on: hkicker_status.set_on_and_verify(retries=10, delay=0.05)
+        if not hkicker_status.ready: hkicker_status.reset_and_verify(retries=10, delay=0.05)
     else:
         if debug: print('>>Turning off HKICKER aux devices')
-        if hres.on: hres.set_off_and_verify()
-        if htrig.on: htrig.set_off_and_verify()
+        if hres.on: hres.set_off_and_verify(retries=10, delay=0.05)
+        if htrig.on: htrig.set_off_and_verify(retries=10, delay=0.05)
 
     if debug: print('>>Checking $A5')
 
@@ -376,7 +382,7 @@ def kick(vertical_kv: float = 0.0, horizontal_kv: float = 0.0,
         for i in range(100):
             delta = np.abs(vkicker.read() - vertical_kv)
             delta_setpt = np.abs(vkicker.read(setting=True) - vertical_kv)
-            if delta > readback_tolerance_V or delta_setpt > 1e-4:
+            if delta > readback_tolerance_V or delta_setpt > 1e-3:
                 vkicker.set(vertical_kv)
             else:
                 if debug: print(f'>>Kicker set ok - {vertical_kv}|{delta}|{delta_setpt}')
@@ -396,7 +402,7 @@ def kick(vertical_kv: float = 0.0, horizontal_kv: float = 0.0,
         for i in range(100):
             delta = np.abs(hkicker.read() - horizontal_kv)
             delta_setpt = np.abs(hkicker.read(setting=True) - horizontal_kv)
-            if delta > readback_tolerance_H or delta_setpt > 1e-4:
+            if delta > readback_tolerance_H or delta_setpt > 1e-3:
                 hkicker.set(horizontal_kv)
             else:
                 if debug: print(f'>>Kicker set ok - {horizontal_kv}|{delta}|{delta_setpt}')
@@ -447,7 +453,8 @@ def kick(vertical_kv: float = 0.0, horizontal_kv: float = 0.0,
     for i in range(20):
         a5_new_val = a5cnt.read()
         if a5_new_val > a5_initial_val:
-            if not silent: print(f'>>$A5 received ({a5_initial_val}->{a5_new_val}) - kick complete')
+            if not silent: print(f'>>$A5 received ({a5_initial_val}->{a5_new_val}) - kick complete'
+                                 f' in {time.time() - t_start:.2f}s')
             return
         else:
             if i > 5:
