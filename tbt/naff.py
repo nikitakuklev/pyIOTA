@@ -72,9 +72,12 @@ class NAFF:
         else:
             return np.fft.rfftfreq(n_turns)[np.argmax(fft_power)]
 
-    def fft_peaks(self, data: np.ndarray, search_peaks: bool = False, search_kwargs: dict = None):
+    def fft_peaks(self, data: np.ndarray = None, search_peaks: bool = False, search_kwargs: dict = None,
+                  fft_freq: np.ndarray = None, fft_power: np.ndarray = None):
         """
         Preliminary guess of peak frequency based on FFT
+        :param fft_freq:
+        :param fft_power:
         :param search_kwargs:
         :param data:
         :param search_peaks: whether to use scipy peak finding or just return highest bin
@@ -82,7 +85,11 @@ class NAFF:
         """
         if not search_kwargs:
             search_kwargs = {'prominence': 1 / 8, 'distance': 1 / 70}
-        fft_freq, fft_power = self.fft(data)
+        if fft_freq is None or fft_power is None:
+            if data is not None:
+                fft_freq, fft_power = self.fft(data)
+            else:
+                raise Exception('Missing required data')
         if search_peaks:
             peak_idx, peak_props = sc.signal.find_peaks(fft_power,
                                                         prominence=np.max(fft_power) * search_kwargs['prominence'],

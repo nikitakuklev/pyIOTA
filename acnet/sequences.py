@@ -350,8 +350,8 @@ def kick(vertical_kv: float = 0.0, horizontal_kv: float = 0.0,
         vkicker_status.read()
         if not vres.on: vres.set_on_and_verify(retries=10, delay=0.05)
         if not vtrig.on: vtrig.set_on_and_verify(retries=10, delay=0.05)
-        if not vkicker_status.on: vkicker_status.set_on_and_verify(retries=10, delay=0.05)
         if not vkicker_status.ready: vkicker_status.reset_and_verify(retries=10, delay=0.05)
+        if not vkicker_status.on: vkicker_status.set_on_and_verify(retries=10, delay=0.05)
     else:
         if debug: print('>>Turning off VKICKER aux devices')
         if vres.on: vres.set_off_and_verify(retries=10, delay=0.05)
@@ -364,8 +364,8 @@ def kick(vertical_kv: float = 0.0, horizontal_kv: float = 0.0,
         hkicker_status.read()
         if not hres.on: hres.set_on_and_verify(retries=10, delay=0.05)
         if not htrig.on: htrig.set_on_and_verify(retries=10, delay=0.05)
-        if not hkicker_status.on: hkicker_status.set_on_and_verify(retries=10, delay=0.05)
         if not hkicker_status.ready: hkicker_status.reset_and_verify(retries=10, delay=0.05)
+        if not hkicker_status.on: hkicker_status.set_on_and_verify(retries=10, delay=0.05)
     else:
         if debug: print('>>Turning off HKICKER aux devices')
         if hres.on: hres.set_off_and_verify(retries=10, delay=0.05)
@@ -449,12 +449,16 @@ def kick(vertical_kv: float = 0.0, horizontal_kv: float = 0.0,
     inj.set(1)
     # Await actual fire event
     t0 = time.time()
-    time.sleep(0.05)
+
     for i in range(20):
         a5_new_val = a5cnt.read()
         if a5_new_val > a5_initial_val:
             if not silent: print(f'>>$A5 received ({a5_initial_val}->{a5_new_val}) - kick complete'
                                  f' in {time.time() - t_start:.2f}s')
+            time.sleep(0.1)
+            vkicker_status.read()
+            if not vkicker_status.ready: vkicker_status.reset_and_verify(retries=10, delay=0.05)
+            if not vkicker_status.on: vkicker_status.set_on_and_verify(retries=10, delay=0.05)
             return
         else:
             if i > 5:

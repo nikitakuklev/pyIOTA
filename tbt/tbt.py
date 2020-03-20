@@ -32,12 +32,12 @@ class Kick:
             # bpm_list = set([k[:-1] for k in df.columns if k not in special_keys])
             # print(f'BPM list not specified - deducing {len(bpm_list)}: {bpm_list}')
 
-        self.HG = self.BPMS_HG = [i + "H" for i in bpm_list]
-        self.VG = self.BPMS_VG = [i + "V" for i in bpm_list]
-        self.SG = self.BPMS_SG = [i + "S" for i in bpm_list]
-        self.BPMS_ALLG = self.BPMS_HG + self.BPMS_VG + self.BPMS_SG
+        self.HG = [i + "H" for i in bpm_list]
+        self.VG = [i + "V" for i in bpm_list]
+        self.SG = [i + "S" for i in bpm_list]
+        self.ALLG = self.HG + self.VG + self.SG
         self.CG = self.BPMS_CG = []  # Calculated
-        self.bpm_families = {'H': self.BPMS_HG, 'V': self.BPMS_VG, 'S': self.BPMS_SG, 'C': self.BPMS_CG}
+        self.bpm_families = {'H': self.HG, 'V': self.VG, 'S': self.SG, 'C': self.BPMS_CG}
 
         self.df = df
         self.idx = kick_id
@@ -61,6 +61,20 @@ class Kick:
 
     def determine_active_bpms(cutoff=0.05):
         pass
+
+    def disable_bpm(self, bpm, plane: str = 'A'):
+        if plane == 'A':
+            rm_cnt = 0
+            for sp, bl in zip(['H', 'V', 'S'], [self.HG, self.VG, self.SG]):
+                if bpm + sp in bl:
+                    bl.remove(bpm + sp)
+                    rm_cnt += 1
+            if rm_cnt != 3 or rm_cnt != 0:
+                raise Exception(f'BPM {bpm} only got removed from {rm_cnt} lists, not 3 or 0')
+            self.ALLG = self.HG + self.VG + self.SG
+
+        else:
+            raise Exception(f'Removing BPM {bpm} in only 1 plane is not supported')
 
     def compute_tunes_naff(self):
         pass
@@ -94,35 +108,6 @@ class Kick:
             raise Exception(f'BPM list not supported yet')
         return datadict
 
-    def compute_tune_fft(self, naff: NAFF, selector: Callable = None, search_kwargs: Dict[str, int] = None):
-        bpms = self.get_bpms(['H', 'V'])
-        freq = {}
-        pwr = {}
-        peaks = {}
-        average_tunes = {'H': [], 'V': []}
-        for i, bpm in enumerate(bpms):
-            top_tune, peak_tunes, peak_idx, peak_props, (pf, pp) = naff.fft_peaks(self.df.iloc[0].loc[bpm],
-                                                                                  search_peaks=True,
-                                                                                  search_kwargs=search_kwargs)
-            # a, b = naff.fft(self.df.iloc[0].loc[bpm])
-            freq[bpm] = pf
-            pwr[bpm] = pp
-            peaks[bpm] = (peak_tunes, peak_props)
-            if selector:
-                nu = selector(self, peaks[bpm], bpm[-1])
-                self.df['nu_' + bpm] = nu
-            else:
-                raise
-            average_tunes[bpm[-1]].append(nu)
-        self.fft_freq = freq
-        self.fft_pwr = pwr
-        self.peaks = peaks
-        self.nux = np.mean(average_tunes['H'])
-        self.nuy = np.mean(average_tunes['V'])
-        self.df['nux'] = self.nux
-        self.df['nuy'] = self.nuy
-        return freq, pwr, peaks, self.nux, self.nuy
-
     def get_tune_data(self, bpm: str):
         return self.fft_freq[bpm], self.fft_pwr[bpm], self.peaks[bpm]
 
@@ -134,7 +119,7 @@ class Kick:
             if fam in ['H', 'V', 'S']:
                 bpms += self.bpm_families[fam]
             elif fam == 'A':
-                bpms += self.BPMS_ALLG
+                bpms += self.ALLG
             else:
                 raise Exception
         if len(bpms) == 0:
@@ -145,7 +130,67 @@ class Kick:
         bpm = self.get_bpms()[0]
         return len(self.df.iloc[0].loc[bpm])
 
+    def calculate_tune(self, naff: NAFF, selector: Callable = None, search_kwargs: Dict[str, int] = None,
+                       use_precalculated: bool = True):
+        bpms = self.get_bpms(['H', 'V'])
+        freq = {}
+        pwr = {}
+        peaks = {}
+        average_tunes = {'H': [], 'V': []}
+        for i, bpm in enumerate(bpms):
+            col_fr = 'fft_freq_' + bpm
+            col_pwr = 'fft_pwr_' + bpm
+            if use_precalculated and col_fr in self.df.columns and col_pwr in self.df.columns:
+                top_tune, peak_tunes, peak_idx, peak_props, (pf, pp) = naff.fft_peaks(data=None,
+                                                                                      search_peaks=True,
+                                                                                      search_kwargs=search_kwargs,
+                                                                                      fft_freq=self.df.iloc[0].loc[
+                                                                                          col_fr],
+                                                                                      fft_power=self.df.iloc[0].loc[
+                                                                                          col_pwr])
+            else:
+                top_tune, peak_tunes, peak_idx, peak_props, (pf, pp) = naff.fft_peaks(data=self.df.iloc[0].loc[bpm],
+                                                                                      search_peaks=True,
+                                                                                      search_kwargs=search_kwargs,
+                                                                                      )
+            # a, b = naff.fft(self.df.iloc[0].loc[bpm])
+            freq[bpm] = pf
+            pwr[bpm] = pp
+            peaks[bpm] = (peak_tunes, peak_props)
+            if selector:
+                nu = selector(self, peaks[bpm], bpm)
+                self.df['nu_' + bpm] = nu
+            else:
+                raise
+            average_tunes[bpm[-1]].append(nu)
+        self.fft_freq = freq
+        self.fft_pwr = pwr
+        self.peaks = peaks
+        self.nux = np.mean(average_tunes['H'])
+        self.nuy = np.mean(average_tunes['V'])
+        self.df['nux'] = self.nux
+        self.df['sig_nux'] = np.std(average_tunes['H'])
+        self.df['nuy'] = self.nuy
+        self.df['sig_nuy'] = np.std(average_tunes['V'])
+        return freq, pwr, peaks, self.nux, self.nuy
+
+    def calculate_fft(self, naff: NAFF):
+        """
+        Calculates FFT for each bpms and stores in dataframe
+        :param naff:
+        :return:
+        """
+        bpms = self.get_bpms(['H', 'V'])
+        for i, bpm in enumerate(bpms):
+            fft_freq, fft_power = naff.fft(self.df.iloc[0].loc[bpm])
+            self.df['fft_freq_' + bpm] = [fft_freq]
+            self.df['fft_pwr_' + bpm] = [fft_power]
+
     def calculate_sum_signal(self) -> float:
+        """
+        Calculate mean of all sum signals and place onto dataframe
+        :return:
+        """
         avg = 0
         bpms = self.get_bpms('S')
         for bpm in bpms:
@@ -157,6 +202,10 @@ class Kick:
         return avg / len(bpms)
 
     def calculate_stats(self) -> dict:
+        """
+        Calculates mean and variance of BPM signals and places them into the dataframe
+        :return:
+        """
         stats = {}
         bpms = self.get_bpms('A')
 
@@ -174,18 +223,19 @@ class Kick:
         columns_extra = [c for c in columns if c not in self.df.columns]
         if len(columns) != len(columns_extra):
             if len(columns_extra) != 0:
-                raise Exception(f'Columns are mixed up - they should all exist or all not exist, but have ({len(columns)}) vs ({len(columns_extra)})! ({columns})({columns_extra})')
+                raise Exception(
+                    f'Columns are mixed up - they should all exist or all not exist, but have ({len(columns)}) vs ({len(columns_extra)})! ({columns})({columns_extra})')
         if columns_extra:
-            #print(f'Adding extra cols: {columns_extra}')
-            #print(np.hstack([averages, variances]).shape)
+            # print(f'Adding extra cols: {columns_extra}')
+            # print(np.hstack([averages, variances]).shape)
             df_temp = pd.DataFrame(columns=columns_extra,
                                    index=[0],
-                                   data=np.hstack([averages, variances])[np.newaxis,:])
-            #print(df_temp)
+                                   data=np.hstack([averages, variances])[np.newaxis, :])
+            # print(df_temp)
             self.df = pd.concat([self.df, df_temp], axis=1)
         else:
-            print(len(columns),np.hstack([averages, variances])[np.newaxis,:].shape,self.df.loc[0, columns])
-            self.df.loc[0, columns] = np.hstack([averages, variances])[np.newaxis,:]
+            print(len(columns), np.hstack([averages, variances])[np.newaxis, :].shape, self.df.loc[0, columns])
+            self.df.loc[0, columns] = np.hstack([averages, variances])[np.newaxis, :]
 
         return stats
 
@@ -217,10 +267,6 @@ class KickSequence:
     def __len__(self):
         return len(self.df)
 
-    def calculate_sum_signal(self):
-        for k in self.kicks:
-            k.calculate_sum_signal()
-        self.update_df()
 
     def purge_kicks(self, min_intensity, max_intensity):
         bad_kicks = []
@@ -237,10 +283,20 @@ class KickSequence:
         dflist = [k.df for k in self.kicks]
         self.df = pd.concat(dflist).sort_values(['kickv', 'kickh'])
 
-    def compute_tunes_fft(self, naff: NAFF, selector: Callable, search_kwargs: Dict[str, int]):
+    def calculate_sum_signal(self):
+        for k in self.kicks:
+            k.calculate_sum_signal()
+        self.update_df()
+
+    def calculate_fft(self, naff: NAFF):
         naff = naff or self.naff
         for r in self.df.itertuples():
-            r.kick.compute_tune_fft(naff, selector, search_kwargs=search_kwargs)
+            r.kick.calculate_fft(naff)
+
+    def calculate_tune(self, naff: NAFF, selector: Callable, search_kwargs: Dict[str, int]):
+        naff = naff or self.naff
+        for r in self.df.itertuples():
+            r.kick.calculate_tune(naff, selector, search_kwargs=search_kwargs)
 
     def get_kick_magnitudes(self):
         return self.df.loc[:, 'kickV'].values
