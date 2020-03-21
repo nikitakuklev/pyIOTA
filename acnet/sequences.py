@@ -90,6 +90,7 @@ def get_bpm_data(bpm_ds=None, mode: str = 'tbt', kickv: float = np.nan, kickh: f
 
     repeat_data = False
     mixed_data = False
+    val_last_ret = last_sequence_id
     if check_sequence_id:
         if len(data) == 0:
             val_last_ret = np.nan
@@ -99,8 +100,9 @@ def get_bpm_data(bpm_ds=None, mode: str = 'tbt', kickv: float = np.nan, kickh: f
                 break
             else:
                 if int(v[0]) == last_sequence_id:
-                    print('Sequence number did not change! Skipping!')
+                    print(f'Sequence number {last_sequence_id} did not change on BPM {k}(#{i})! Skipping!')
                     repeat_data = True
+                    val_last_ret = last_sequence_id
                     break
 
         for i, (k, v) in enumerate(data.items()):
@@ -110,6 +112,7 @@ def get_bpm_data(bpm_ds=None, mode: str = 'tbt', kickv: float = np.nan, kickh: f
                 if val_seq != int(v[0]):
                     print(f'Sequence number not uniform - {val_seq} vs {int(v[0])} on BPM {k}(#{i}) (wont be saved)')
                     mixed_data = True
+                    val_last_ret = last_sequence_id
                     # raise Exception
                     break
     else:
@@ -170,7 +173,7 @@ def transition(final_state: Knob, steps: int = 5, verbose: bool = False, extra_f
         if verbose: print(f'\nTo change', delta_knob.vars)
         if delta_knob.is_empty():
             if not silent: print(f'No changes necessary!')
-            return
+            return -1
         initial_state_pruned = initial_state.copy().only_keep_shared(delta_knob)
         for step in range(1, steps + 1):
             # if verbose: print(f'{step}/{steps} ', end='')
@@ -216,6 +219,7 @@ def transition(final_state: Knob, steps: int = 5, verbose: bool = False, extra_f
                     raise Exception(
                         f'Transition FAILED - variables left: {extra_state_pruned.vars} | {extra_delta.vars}')
         print(f'Knob {final_state.name} set in {time.time() - t0:.5f}s')
+        return time.time()-t0
 
 
 def inject_until_current(arm_bpms: bool = False, debug: bool = False, current: float = 1.0, limit: int = 10):
@@ -330,6 +334,7 @@ def kick(vertical_kv: float = 0.0, horizontal_kv: float = 0.0,
     htrig = StatusDevice(iota.CONTROLS.HKICKER_TRIG)
     inj = DoubleDevice(iota.CONTROLS.FAST_LASER_INJECTOR)
     bpminj = StatusDevice(iota.CONTROLS.BPM_INJ_TRIGGER)
+    bpm_control = StatusDevice(iota.CONTROLS.BPM_CONFIG_DEVICE)
 
     # status_devs = [vres, vtrig, hres, htrig]
 
@@ -348,28 +353,34 @@ def kick(vertical_kv: float = 0.0, horizontal_kv: float = 0.0,
     if vertical_kv > 0.0:
         if debug: print('>>Enabling vertical kicker')
         vkicker_status.read()
-        if not vres.on: vres.set_on_and_verify(retries=10, delay=0.05)
-        if not vtrig.on: vtrig.set_on_and_verify(retries=10, delay=0.05)
-        if not vkicker_status.ready: vkicker_status.reset_and_verify(retries=10, delay=0.05)
-        if not vkicker_status.on: vkicker_status.set_on_and_verify(retries=10, delay=0.05)
+        if not vres.on: vres.set_on_and_verify(retries=10, delay=0.15)
+        if not vtrig.on: vtrig.set_on_and_verify(retries=10, delay=0.15)
+        if not vkicker_status.ready: vkicker_status.reset_and_verify(retries=10, delay=0.15)
+        time.sleep(0.2)
+        vkicker_status.read()
+        if not vkicker_status.on: vkicker_status.set_on_and_verify(retries=10, delay=0.15)
+        time.sleep(0.2)
     else:
         if debug: print('>>Turning off VKICKER aux devices')
-        if vres.on: vres.set_off_and_verify(retries=10, delay=0.05)
-        if vtrig.on: vtrig.set_off_and_verify(retries=10, delay=0.05)
+        if vres.on: vres.set_off_and_verify(retries=10, delay=0.15)
+        if vtrig.on: vtrig.set_off_and_verify(retries=10, delay=0.15)
 
     hres.read()
     htrig.read()
     if horizontal_kv > 0.0:
         if debug: print('>>Enabling horizontal kicker')
         hkicker_status.read()
-        if not hres.on: hres.set_on_and_verify(retries=10, delay=0.05)
-        if not htrig.on: htrig.set_on_and_verify(retries=10, delay=0.05)
-        if not hkicker_status.ready: hkicker_status.reset_and_verify(retries=10, delay=0.05)
-        if not hkicker_status.on: hkicker_status.set_on_and_verify(retries=10, delay=0.05)
+        if not hres.on: hres.set_on_and_verify(retries=10, delay=0.2)
+        if not htrig.on: htrig.set_on_and_verify(retries=10, delay=0.2)
+        if not hkicker_status.ready: hkicker_status.reset_and_verify(retries=10, delay=0.15)
+        time.sleep(0.2)
+        hkicker_status.read()
+        if not hkicker_status.on: hkicker_status.set_on_and_verify(retries=10, delay=0.15)
+        time.sleep(0.2)
     else:
         if debug: print('>>Turning off HKICKER aux devices')
-        if hres.on: hres.set_off_and_verify(retries=10, delay=0.05)
-        if htrig.on: htrig.set_off_and_verify(retries=10, delay=0.05)
+        if hres.on: hres.set_off_and_verify(retries=10, delay=0.15)
+        if htrig.on: htrig.set_off_and_verify(retries=10, delay=0.15)
 
     if debug: print('>>Checking $A5')
 
@@ -443,8 +454,9 @@ def kick(vertical_kv: float = 0.0, horizontal_kv: float = 0.0,
         raise Exception("PLCCCCCCCCCC FIX PLZ")
 
     if debug: print('>>Firing')
-    bpminj.reset()
-    # time.sleep(0.01)
+    bpm_control.set('Arm Injection')
+    #bpminj.reset()
+    time.sleep(0.01)
     a5.reset()
     inj.set(1)
     # Await actual fire event
@@ -455,10 +467,10 @@ def kick(vertical_kv: float = 0.0, horizontal_kv: float = 0.0,
         if a5_new_val > a5_initial_val:
             if not silent: print(f'>>$A5 received ({a5_initial_val}->{a5_new_val}) - kick complete'
                                  f' in {time.time() - t_start:.2f}s')
-            time.sleep(0.1)
+            time.sleep(0.3)
             vkicker_status.read()
-            if not vkicker_status.ready: vkicker_status.reset_and_verify(retries=10, delay=0.05)
             if not vkicker_status.on: vkicker_status.set_on_and_verify(retries=10, delay=0.05)
+            if not vkicker_status.ready: vkicker_status.reset_and_verify(retries=10, delay=0.05)
             return
         else:
             if i > 5:

@@ -7,7 +7,8 @@ import datetime
 special_keys = ['idx', 'kickv', 'kickh', 'state', 'custom']
 
 
-def load_data_tbt(fpath: Path, verbose: bool = True, version: int = 1, soft_fail=False, force_load=False, idx:int=None):
+def load_data_tbt(fpath: Path, verbose: bool = True, version: int = 1, soft_fail=False, force_load=False,
+                  idx: int = None):
     if version == 1:
         if fpath.is_file():
             files = [fpath]
@@ -35,7 +36,7 @@ def load_data_tbt(fpath: Path, verbose: bool = True, version: int = 1, soft_fail
                                 'kickh': h5f['state'].attrs['kickh'],
                                 'state': dict(h5f['state'].attrs),
                                 'custom': dict(h5f['custom'].attrs),
-                                #'ts': h5f.attrs['time_utcstamp'],
+                                # 'ts': h5f.attrs['time_utcstamp'],
                                 **kick_arrays})
                 # df.loc[i] = [i, h5f['state'].attrs['kickv'], h5f['state'].attrs['kickh'], kick_arrays]
 
@@ -69,11 +70,11 @@ def save_data_tbt(fpath: Path, df: pd.DataFrame, name_format: str = "iota_kicks_
 
             stategr = f.create_group('state')
             for (k, v) in df_dict['state'].items():
-                #print(k,v)
+                # print(k,v)
                 stategr.attrs[k] = v
             stategr = f.create_group('custom')
             for (k, v) in df_dict['custom'].items():
-                #print(k,v)
+                # print(k,v)
                 stategr.attrs[k] = v
 
             f.attrs['time_utcstamp'] = datetime.datetime.utcnow().timestamp();

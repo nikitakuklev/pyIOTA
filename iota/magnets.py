@@ -50,7 +50,7 @@ def calc_octupole_strengths_run1(current: float, energy: float):
     currents = current * cal_factor * scaling_arr / max(scaling_arr)
     return currents, bn
 
-def calc_octupole_strengths_run2(current: float, energy: float):
+def calc_octupole_strengths_run2(current: float, energy: float, mu0:float = 0.3):
     """
     Calculated quasi-integrable insert strenth K3 distibution for given central current and beam energy
     :param current:
@@ -59,7 +59,7 @@ def calc_octupole_strengths_run2(current: float, energy: float):
     """
     current = current / 1000 #Amps
     # ! phase advance over straight section
-    mu0 = 0.3
+    #mu0 = 0.3  # moved to parameter
     # ! length of the straight section
     l0 = 1.8
     # ! number of nonlinear elements
@@ -150,7 +150,7 @@ def calc_NL_strengths(t:float, energy: float):
     return I, k1, bn
 
 
-def NL_Current_Set(t,BR=335.26,mu0=0.3,energy=0):
+def NL_Current_Set(t,BR=335.26,mu0=0.3,energy=0,GI=None):
     if energy != 0:
         print('BR recalc')
         BR = 1000 * (energy / (scipy.constants.c * 1e-6))
@@ -173,7 +173,38 @@ def NL_Current_Set(t,BR=335.26,mu0=0.3,energy=0):
     knn = l0*t*cn**2/nn/bn
     cnn = cn*np.sqrt(bn)
     k1 = 2*knn/cnn**2
-    GI = np.array([0.078015314,0.08882103,0.100544596,0.114272161,0.127323918,0.142097491,0.156935916,0.168829748,0.176310294,0.176310294,0.168829748,0.156935916,0.142097491,0.127323918,0.114272161,0.100544596,0.08882103,0.078015314])
+    if GI is None:
+        GI = np.array([0.078015314,0.08882103,0.100544596,0.114272161,0.127323918,0.142097491,0.156935916,0.168829748,0.176310294,0.176310294,0.168829748,0.156935916,0.142097491,0.127323918,0.114272161,0.100544596,0.08882103,0.078015314])
+    I = k1/GI/L*BR/100
+    return I, k1, bn
+
+
+def NL_Current_Set_Sasha_run2(t,BR=335.26,mu0=0.3,energy=0,GI=None):
+    if energy != 0:
+        print('BR recalc')
+        BR = 1000 * (energy / (scipy.constants.c * 1e-6))
+    #
+    #Constants
+    l0 = 1.8    #Length of Straight Section`
+    #cn = 0.01   #dimentional parameter
+    cn = 0.008105461952
+    nn = 18     #Number of Magnets
+    L = 6.5     #Mag Length [cm]
+    #L = 7.5  # Mag Length [cm]
+    f0 = l0/4*(1+1/np.tan(np.pi*mu0)**2) #IOTA Focus k
+    beta_e = l0/np.sqrt(1-(1-l0/2/f0)**2) #Beta at Entrance
+    alfa_e = l0/2/f0/np.sqrt(1-(1-l0/2/f0)**2) #Alpha Function at entrance
+    beta_s = l0*(1-l0/4/f0)/np.sqrt(1-(1-l0/2/f0)**2)
+    #Array stuff
+    i = np.arange(1,19) #Create 1-18 array
+    sn = l0/nn*(i-0.5) #Magnet distance
+    bn = l0*(1-sn*(l0-sn)/l0/f0)/np.sqrt(1-(1-l0/2/f0)**2) #Beta at Magnet
+    knn = l0*t*cn**2/nn/bn
+    cnn = cn*np.sqrt(bn)
+    k1 = 2*knn/cnn**2
+    #GI = np.array([0.078015314,0.08882103,0.100544596,0.114272161,0.127323918,0.142097491,0.156935916,0.168829748,0.176310294,0.176310294,0.168829748,0.156935916,0.142097491,0.127323918,0.114272161,0.100544596,0.08882103,0.078015314])
+    if GI is None:
+        GI = np.array([0.073709845,0.085204245,0.097100624,0.113160995,0.126796624,0.149564965,0.165181409,0.18008686,0.186333717,0.18766566,0.180911434,0.171931616,0.151613288,0.134362927,0.11584934,0.101181345,0.086104099,0.076739492])
     I = k1/GI/L*BR/100
     return I, k1, bn
 

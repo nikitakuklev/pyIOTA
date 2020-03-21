@@ -50,8 +50,8 @@ class Kick:
         self.matrix_cache = {}
         self.n_turns = self.get_turns()
         self.fft_pwr = self.fft_freq = self.peaks = None
-        self.v = self.kickv = self.df.iloc[0].loc['kickv']
-        self.h = self.kickh = self.df.iloc[0].loc['kickh']
+        self.v = self.kickv = self.df.iloc[0, self.df.columns.get_loc('kickv')]
+        self.h = self.kickh = self.df.iloc[0, self.df.columns.get_loc('kickh')]
         # print('Read in kick')
         # Determine which BPMs are behaving ok using a rolling window average
 
@@ -59,7 +59,16 @@ class Kick:
         df2 = self.df.copy(deep=True)
         return Kick(df=df2, kick_id=self.idx)
 
-    def determine_active_bpms(cutoff=0.05):
+    def col(self, column: str):
+        return self.df.iloc[0, self.df.columns.get_loc(column)]
+
+    def col_fft(self, bpm: str):
+        return self.col('fft_freq_'+bpm), self.col('fft_pwr_'+bpm)
+
+    def state(self, param: str):
+        return self.df.iloc[0, self.df.columns.get_loc('state')][param]
+
+    def determine_active_bpms(self, cutoff=0.05):
         pass
 
     def disable_bpm(self, bpm, plane: str = 'A'):
@@ -85,7 +94,7 @@ class Kick:
                 data = self.matrix_cache[family]
             else:
                 bpms = self.get_bpms(family)
-                data = np.vstack(self.df.iloc[0].loc[bpms])
+                data = np.vstack(self.df.loc[self.df.index[0], bpms])
                 self.matrix_cache[family] = data
             if remove_sequence_data:
                 return data[:, 1:]
@@ -101,9 +110,9 @@ class Kick:
             for b in bpms:
                 # datadict[b] = df.loc[idx, b].values[0]
                 if trim:
-                    datadict[b] = self.df.iloc[0].loc[b][trim[0]:trim[1]]
+                    datadict[b] = self.col(b)[trim[0]:trim[1]]
                 else:
-                    datadict[b] = self.df.iloc[0].loc[b]
+                    datadict[b] = self.col(b)
         else:
             raise Exception(f'BPM list not supported yet')
         return datadict
@@ -132,6 +141,14 @@ class Kick:
 
     def calculate_tune(self, naff: NAFF, selector: Callable = None, search_kwargs: Dict[str, int] = None,
                        use_precalculated: bool = True):
+        """
+        Calculates tune by finding peaks in FFT data, optionally using precomputed data to save time
+        :param naff:
+        :param selector:
+        :param search_kwargs:
+        :param use_precalculated:
+        :return:
+        """
         bpms = self.get_bpms(['H', 'V'])
         freq = {}
         pwr = {}
@@ -163,8 +180,8 @@ class Kick:
             else:
                 raise
             average_tunes[bpm[-1]].append(nu)
-        self.fft_freq = freq
-        self.fft_pwr = pwr
+        #self.fft_freq = freq
+        #self.fft_pwr = pwr
         self.peaks = peaks
         self.nux = np.mean(average_tunes['H'])
         self.nuy = np.mean(average_tunes['V'])

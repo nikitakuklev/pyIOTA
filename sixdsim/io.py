@@ -367,8 +367,8 @@ class AbstractKnob:
 
 
 class Knob(AbstractKnob):
-    def __init__(self, name: str, vars: dict = None):
-        self.vars = vars or {}
+    def __init__(self, name: str, variables: dict = None):
+        self.vars = variables or {}
         self.absolute = True
         super().__init__(name)
 

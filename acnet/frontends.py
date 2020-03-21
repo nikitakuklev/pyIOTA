@@ -155,6 +155,8 @@ class StatusDevice(Device):
             self.read()
             if self.is_on():
                 return
+            else:
+                if i > retries/2: self.set('ON')
             time.sleep(delay)
         raise Exception(f'{self.name} - ON verification failure, value {self.value_string}')
 
@@ -168,6 +170,8 @@ class StatusDevice(Device):
             self.read()
             if self.is_off():
                 return
+            else:
+                if i > retries/2: self.set('OFF')
             time.sleep(delay)
         raise Exception(f'{self.name} - OFF verification failure, value {self.value_string}')
 
