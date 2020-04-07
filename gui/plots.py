@@ -1,8 +1,28 @@
+from typing import Tuple
+
 import matplotlib.pyplot as plt
 from matplotlib import font_manager
 from ocelot.gui.accelerator import new_plot_elems
 import pandas as pd
 import numpy as np
+
+
+def plot_simple_grid(data_dict, *args, nperrow: int = 10, sizes: Tuple = (2, 2), demean: bool=True):
+    """
+    Simple routine to plot a grid of data sharing x/y axes, with 1 plot per each dictionary key
+    :param data_dict:
+    :param nperrow:
+    :param sizes:
+    :return:
+    """
+    n_rows = len(data_dict) // nperrow + 1
+    fig, ax = plt.subplots(n_rows, nperrow, figsize=(sizes[0] * nperrow, sizes[1] * n_rows), sharex=True, sharey=True)
+    ax = ax.flatten()
+    for i, (k, v) in enumerate(data_dict.items()):
+        if demean:
+            v = v - np.mean(v)
+        ax[i].plot(v)
+        ax[i].set_title(f"{i}|{k}")
 
 
 def plot_opt_func(fig, lat, tws, top_plot=["Dx"], legend=True, fig_name=None, grid=True, font_size=12,
@@ -226,7 +246,7 @@ def plot_resonance_lines(ax, order=4):
                     # print(x,y,3)
         xyfinal = [(x, y) for (x, y) in xylist if
                    not (x[0] > 1 and x[1] > 1) and not (y[0] > 1 and y[1] > 1) and not (x[0] < 0 and x[1] < 0) and not (
-                               y[0] < 0 and y[1] < 0)]
+                           y[0] < 0 and y[1] < 0)]
         # xyfinal = xylist
         for (x, y) in xyfinal:
             if (tuple(x), tuple(y)) not in xybuffer:
