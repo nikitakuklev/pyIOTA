@@ -5,6 +5,7 @@ from typing import Union, Callable, Dict, List, Iterable, Tuple, Optional
 import numpy as np
 import pyIOTA.acnet.utils
 import pyIOTA.iota.run2
+import pyIOTA.iota.run2 as iota
 import scipy as sc
 import pandas as pd
 from scipy.signal import hilbert, chirp, butter, filtfilt
@@ -99,6 +100,28 @@ class Kick:
         :return:
         """
         return self.df.iloc[0, self.df.columns.get_loc(column)]
+
+    def state(self, param: str):
+        """
+        Returns value of specified key in state dictionary
+        """
+        return self.df.iloc[0, self.df.columns.get_loc('state')][param]
+
+    def get_full_state(self):
+        """
+        Gets a copy of full kick state
+        """
+        return self.df.iloc[0, self.df.columns.get_loc('state')].copy()
+
+    def search_state(self, search_string: str):
+        """
+        Searches state for keys matching regex expression
+        """
+        import re
+        r = re.compile(search_string)
+        state = self.col('state')
+        match_keys = list(filter(r.match, state.keys()))
+        return {k: state[k] for k in match_keys}
 
     def get_column_names(self, bpms: List = None, family: str = None, data_type: Datatype = Datatype.RAW):
         """
@@ -220,25 +243,7 @@ class Kick:
     def get_tune_data(self, bpm: str):
         return self.fft_freq[bpm], self.fft_pwr[bpm], self.peaks[bpm]
 
-    def state(self, param: str):
-        """
-        Returns value of specified key in state dictionary
-        :param param:
-        :return:
-        """
-        return self.df.iloc[0, self.df.columns.get_loc('state')][param]
 
-    def search_state(self, search_string: str):
-        """
-        Searches state for keys matching regex expression
-        :param search_string:
-        :return:
-        """
-        import re
-        r = re.compile(search_string)
-        state = self.col('state')
-        match_keys = list(filter(r.match, state.keys()))
-        return {k: state[k] for k in match_keys}
 
     # Import/export
 
@@ -401,6 +406,25 @@ class Kick:
             raise Exception(f'Method ({method}) is unrecognized')
         return results, results_data
 
+    def bpms_filter_absval(self,
+                             data: Dict,
+                             method: str = 'abs',
+                             threshold: float = 10.0,
+                            neg_threshold: float = None):
+        if method == 'abs':
+            neg_threshold = neg_threshold or -threshold
+            vals1 = {k: np.max(v) for k, v in data.items()}
+            vals2 = {k: np.min(v) for k, v in data.items()}
+
+            outliers = {k: v for k, v in vals1.items() if v > threshold}
+            outliers2 = {k: v for k, v in vals2.items() if v < neg_threshold}
+            results = {k: k not in outliers and k not in outliers2 for k, v in data.items()}
+            results_data = {k: {'method': 'abs', 'values': (threshold, neg_threshold, v, v2)} for
+                            (k, v), (k2,v2) in zip(vals1.items(), vals2.items())}
+        else:
+            raise Exception(f'Method ({method}) is unrecognized')
+        return results, results_data
+
     def bpms_filter_signal_ratio(self,
                                  data: Dict,
                                  method: str = 'std',
@@ -434,12 +458,29 @@ class Kick:
                 results_data[k] = {'test': method + '_relative', 'values': (threshold, val1 / val2, val1, val2)}
         return results, results_data
 
-    ###
+    # Helpers for state categories
 
-    def get_optics_state(self):
+    def get_optics(self):
+        """
+        Gets all relevant optics settings
+        """
         quads = [q + '.SETTING' for q in pyIOTA.iota.QUADS.ALL_CURRENTS]
         squads = [q + '.SETTING' for q in pyIOTA.iota.SKEWQUADS.ALL_CURRENTS]
         return {k: self.state(k) for k in quads + squads}
+
+    def get_correctors(self):
+        """
+        Gets all available corrector settings
+        """
+        elements = [q + '.SETTING' for q in pyIOTA.iota.CORRECTORS.ALL_VIRTUAL]
+        return {k: self.state(k) for k in elements}
+
+    def get_sextupoles(self):
+        """
+        Gets sextupoles settings
+        """
+        elements = [q + '.SETTING' for q in pyIOTA.iota.SEXTUPOLES.ALL_CURRENTS]
+        return {k: self.state(k) for k in elements}
 
     def compute_tunes_naff(self):
         pass
@@ -594,6 +635,50 @@ class KickSequence:
 
     def __len__(self):
         return len(self.df)
+
+    def check_dataset_integrity(self):
+        """
+        Checks if key state parameters are the same for all kicks, and that none are contained
+        """
+        invariant_devices = iota.DIPOLES.ALL_I + \
+                            iota.CORRECTORS.ALL + \
+                            iota.QUADS.ALL_CURRENTS +\
+                            iota.SKEWQUADS.ALL_CURRENTS + \
+                            iota.SEXTUPOLES.ALL_CURRENTS + \
+                            iota.OCTUPOLES.ALL_CURRENTS + \
+                            iota.DNMAGNET.ALL_CURRENTS + \
+                            ['N:IRFLLA', 'N:IRFMOD', 'N:IRFEAT', 'N:IRFEPC'] + \
+                            ['N:IKPSVX', 'N:IKPSVD']
+        invariant_devices = set(invariant_devices)
+        kicks = self.kicks
+        #
+        states = [k.get_optics() for k in kicks]
+        assert all(x == states[0] for x in states)
+        states = [k.get_correctors() for k in kicks]
+        assert all(x == states[0] for x in states)
+        states = [k.get_sextupoles() for k in kicks]
+        assert all(x == states[0] for x in states)
+
+        times = [k.state('aq_timestamp') for k in kicks]
+        assert all(np.diff(times) > 0)
+        times = [k.state('N:EA5TRG.READING') for k in kicks]
+        assert all(np.diff(times) > 0)
+
+        states = [k.get_full_state() for k in kicks]
+        keys = [set(s.keys()) for s in states]
+        shared_keys = set.intersection(*keys)
+        assert all(len(shared_keys) == len(k) for k in keys)
+        kvtuples = [set(s.items()) for s in states]
+        shared_keys = set.intersection(*kvtuples)
+        outliers = set()
+        for kvt in kvtuples:
+            outliers.update(kvt - shared_keys)
+        outlier_keys = set()
+        for e in outliers:
+            outlier_keys.update((e[0],))
+        outlier_devs = set([x.split('.')[0] for x in outlier_keys])
+        assert len(invariant_devices.intersection(outlier_devs)) == 0
+        return outlier_devs
 
     def purge_kicks(self, min_intensity, max_intensity):
         bad_kicks = []

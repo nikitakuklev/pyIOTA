@@ -2,32 +2,34 @@ import itertools
 import operator
 import time
 from pathlib import Path
-import random
-from typing import Callable
+from typing import Callable, Dict
 
 import numpy as np
 
 import pyIOTA
-from ocelot import Monitor, Vcor, Hcor, Solenoid, SBend, Cavity, Edge, Quadrupole, Drift, Element, Sextupole, Multipole
+from ocelot import Monitor, Vcor, Hcor, Solenoid, SBend, Cavity, Edge,\
+    Quadrupole, Drift, Element, Sextupole, Multipole
 from pyIOTA.acnet.frontends import DoubleDevice, DoubleDeviceSet
 import pyIOTA.iota.run2
 
+# Static methods to parse files from 6Dsim format
 
-def __replace_vars(assign: str, variables: dict):
+
+def __replace_vars(assign: str, variables: Dict) -> str:
     """
-    Replaces all possible variables with their stored values
+    Replaces all variables with their stored values, adding brackets to maintain eval order.
     :param assign:
     :param variables:
-    :return:
+    :return: Processed string
     """
     for k, v in variables.items():
         assign = assign.replace(k, '(' + v + ')', 1)
     return assign
 
 
-def __resolve_vars(assign: str, variables: dict, recursion_limit: int = 100):
+def __resolve_vars(assign: str, variables: Dict, recursion_limit: int = 100) -> str:
     """
-    Recursively resolved variables until none are left
+    Recursively resolves variables and replaces with values, until none are left
     :param assign:
     :param variables:
     :return:
@@ -43,7 +45,15 @@ def __resolve_vars(assign: str, variables: dict, recursion_limit: int = 100):
     return assign
 
 
-def __parse_id_line(line: str, output_dict: dict, resolve_against: dict, verbose: bool = False):
+def __parse_id_line(line: str, output_dict: Dict, resolve_against: Dict, verbose: bool = False) -> None:
+    """
+    Parse single element definition line. WARNING - this uses eval(), and is VERY VERY UNSAFE.
+    :param line: Line to parse
+    :param output_dict: Dictionary into which to place the result
+    :param resolve_against: Dictionary of variable values
+    :param verbose:
+    :return: None
+    """
     if not line.startswith('ID:'):
         return
     line = line[4:].strip()
@@ -70,6 +80,15 @@ def __parse_id_line(line: str, output_dict: dict, resolve_against: dict, verbose
 
 
 def parse_lattice(fpath: Path, verbose: bool = False):
+    """
+    Parses 6Dsim lattice into native OCELOT object, preserving all compatible elements. All variables
+    are resolved to their final numeric values, and evaluated - this is an UNSAFE operation for unstrusted
+    input, so make sure your lattice files are not corrupted.
+    :param fpath: Full file path to parse
+    :param verbose:
+    :return: lattice_ocelot, correctors_ocelot, monitors_ocelot, info_dict, var_dict - latter 2 are dicts
+    of parsing information and of all present KnobVariables
+    """
     # returned objects
     lattice_list = []
     correctors_ocelot = []
@@ -303,10 +322,10 @@ def parse_lattice(fpath: Path, verbose: bool = False):
     return lattice_ocelot, correctors_ocelot, monitors_ocelot, info_dict, var_dict
 
 
-def parse_knobs(fpath: Path, verbose: bool = False):
+def parse_knobs(fpath: Path, verbose: bool = False) -> Dict:
     """
-    Parses knob files in sixdsim format. All are assumed absolute unless explicitly specified.
-    :param fpath:
+    Parses knob files in 6DSim format. All values are assumed absolute unless explicitly specified.
+    :param fpath: Full knob file path
     :param verbose:
     :return:
     """
@@ -361,18 +380,25 @@ def parse_knobs(fpath: Path, verbose: bool = False):
 
 
 class AbstractKnob:
+    """
+    Superclass of all knobs, which are collections of KnobVariables representing setpoints of devices
+    """
     def __init__(self, name: str):
         self.name = name
         self.verbose = False
 
 
 class Knob(AbstractKnob):
+    """
+    Experimental, ACNET-based implementation of a knob
+    """
     def __init__(self, name: str, variables: dict = None):
         self.vars = variables or {}
         self.absolute = True
         super().__init__(name)
 
     def make_absolute(self):
+        raise Exception("Not implemented yet")
         assert not self.absolute
         ds = DoubleDeviceSet(name=self.name, members=[DoubleDevice(d.acnet_var) for d in self.vars.values()])
         ds.readonce()
@@ -392,7 +418,7 @@ class Knob(AbstractKnob):
 
     def union(self, other: 'Knob'):
         """
-        Returns knob with only variables contained in the other one
+        Returns knob with only variables contained in both and their values match
         :param other:
         :return:
         """
@@ -400,6 +426,11 @@ class Knob(AbstractKnob):
         return self
 
     def copy(self, new_vars: dict = None):
+        """
+        Make a deep copy of knob, optionally with new knobvaribles
+        :param new_vars:
+        :return:
+        """
         knob = Knob(name=self.name)
         if new_vars:
             knob.vars = new_vars
@@ -434,7 +465,15 @@ class Knob(AbstractKnob):
         return len(self.vars) == 0
 
     def set(self, verbose: bool = False, split_types: bool = False, split: bool = True,
-            calculate_physical_currents=False):
+            calculate_physical_currents: bool = False):
+        """
+        Sets the current knob value in actual machine
+        :param verbose:
+        :param split_types: Whether to split settings by device type
+        :param split:
+        :param calculate_physical_currents:
+        :return:
+        """
         if verbose or self.verbose:
             verbose = True
         if not self.absolute:
@@ -531,6 +570,13 @@ class Knob(AbstractKnob):
                 ds.set([d.value for d in devs_to_set.values()], verbose=verbose, split=split)
 
     def convert_to_physical_devices(self, copy: bool = True):
+        """
+        Converts any virtual ACNET devices into physical devices. This is so far only used for combined
+        function magnets to go from (H,V,Skew) -> (4 currents), which makes settings faster and reduces
+        beam losses. #justACNETthings
+        :param copy: Whether to return a copy of the knob
+        :return:
+        """
         devs_h = pyIOTA.iota.CORRECTORS.VIRTUAL_H
         devs_v = pyIOTA.iota.CORRECTORS.VIRTUAL_V
         devs_s = pyIOTA.iota.run2.SKEWQUADS.ALL_CURRENTS
@@ -572,6 +618,14 @@ class Knob(AbstractKnob):
         return len(self.vars)
 
     def __math(self, other, operation: Callable, opcode: str = ' ', keep_unique_values: bool = True):
+        """
+        General math operation method, that takes care of relative/absolute knob complexities
+        :param other:
+        :param operation:
+        :param opcode:
+        :param keep_unique_values:
+        :return:
+        """
         knob = self.copy()
         if isinstance(other, Knob):
             set1 = set(self.vars.keys())
@@ -636,7 +690,7 @@ class Knob(AbstractKnob):
 
 class KnobVariable:
     """
-    A single variable in a knob. Should be extended to provide tool-specific methods.
+    A single variable knob, with ACNET name storage as well as native name
     """
 
     def __init__(self, kind: str, var: str, value: float, acnet_var: str = None):

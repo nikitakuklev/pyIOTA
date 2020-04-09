@@ -7,7 +7,8 @@ import pandas as pd
 import numpy as np
 
 
-def plot_simple_grid(data_dict, *args, nperrow: int = 10, sizes: Tuple = (2, 2), demean: bool=True):
+def plot_simple_grid(*args, nperrow: int = 11, sizes: Tuple = (2, 2),
+                     demean: bool=True, paired_bpm_mode:bool=False):
     """
     Simple routine to plot a grid of data sharing x/y axes, with 1 plot per each dictionary key
     :param data_dict:
@@ -15,23 +16,49 @@ def plot_simple_grid(data_dict, *args, nperrow: int = 10, sizes: Tuple = (2, 2),
     :param sizes:
     :return:
     """
-    n_rows = len(data_dict) // nperrow + 1
-    fig, ax = plt.subplots(n_rows, nperrow, figsize=(sizes[0] * nperrow, sizes[1] * n_rows), sharex=True, sharey=True)
-    ax = ax.flatten()
-    for i, (k, v) in enumerate(data_dict.items()):
-        if demean:
-            v = v - np.mean(v)
-        ax[i].plot(v)
-        ax[i].set_title(f"{i}|{k}")
+    for data_dict in args:
+        if isinstance(data_dict, list):
+            data_dict = {k: v for d in data_dict for k, v in d.items()}
+        if not isinstance(data_dict, dict):
+            raise Exception(f'Supplied argument is not a dict: {data_dict.__class__}')
+        if len(data_dict) == 0:
+            print('Skipping empty plot')
+            continue
+        n_rows = len(data_dict) // nperrow + 1
+        fig, ax = plt.subplots(n_rows, nperrow, figsize=(sizes[0] * nperrow, sizes[1] * n_rows), sharex=True, sharey=True)
+        if paired_bpm_mode:
+            keys = [k for k in data_dict.keys()]
+            roots = [k[:-2] for k in keys]
+            seen = set()
+            roots = [x for x in roots if not (x in seen or seen.add(x))]
+            if not nperrow >= len(roots):
+                raise Exception(f'Not enough columns ({nperrow}) to fit all pairs ({len(roots)})')
+            for j, root in enumerate(roots):
+                i = 0
+                for z, (k, v) in enumerate(data_dict.items()):
+                    if root in k:
+                        if demean:
+                            v = v - np.mean(v)
+                        ax[i,j].plot(v, lw=0.5)
+                        ax[i,j].set_title(f"{z}|{k}")
+                        i += 1
+        else:
+            ax = ax.flatten()
+            for i, (k, v) in enumerate(data_dict.items()):
+                if demean:
+                    v = v - np.mean(v)
+                ax[i].plot(v)
+                ax[i].set_title(f"{i}|{k}")
 
 
-def plot_opt_func(fig, lat, tws, top_plot=["Dx"], legend=True, fig_name=None, grid=True, font_size=12,
+def plot_opt_func(fig, lat, tws, top_plot=["Dx"], legend=False, fig_name=None, grid=True, font_size=12,
                   excld_legend=None):
     """
     Modified from OCELOT
 
     function for plotting: lattice (bottom section), vertical and horizontal beta-functions (middle section),
     other parameters (top section) such as "Dx", "Dy", "E", "mux", "muy", "alpha_x", "alpha_y", "gamma_x", "gamma_y"
+    :param fig: Figure to use
     :param lat: MagneticLattice,
     :param tws: list if Twiss objects,
     :param top_plot:  ["Dx"] - parameters which displayed in top section. Can be any attribute of Twiss class, e.g. top_plot=["Dx", "Dy", "alpha_x"]
@@ -96,7 +123,7 @@ def plot_betas(ax, S, beta_x, beta_y, font_size):
     """
     ax.set_ylabel(r"$\beta_{x,y}$ [m]", fontsize=font_size)
     ax.plot(S, beta_x, 'b', lw=2, label=r"$\beta_{x}$")
-    ax.plot(S, beta_y, 'r', lw=2, label=r"$\beta_{y}$")
+    ax.plot(S, beta_y, 'r--', lw=2, label=r"$\beta_{y}$")
     ax.tick_params(axis='both', labelsize=font_size)
     leg = ax.legend(loc='upper left', shadow=False, fancybox=True, prop=font_manager.FontProperties(size=font_size))
     leg.get_frame().set_alpha(0.2)

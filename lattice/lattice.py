@@ -1,9 +1,8 @@
-import requests, os, time, sys, datetime, collections, re, socket, math, pathlib, functools
+import functools
+import pathlib
+import sys
 import numpy as np
 import pandas as pd
-import scipy as sc
-if pathlib.Path.home().as_posix() not in sys.path: sys.path.insert(1, pathlib.Path.home().as_posix())
-import pymadx
 
 """
 Holds information about the lattice, mostly optics
@@ -26,6 +25,8 @@ class Lattice:
         self.bpm_beta = None
         self.bpm_phase = None
         self.bpm_alpha = None
+        if pathlib.Path.home().as_posix() not in sys.path: sys.path.insert(1, pathlib.Path.home().as_posix())
+        import pymadx
 
     def load_optics(self, lattice_file):
         iota = pymadx.Data.Tfs(lattice_file)
