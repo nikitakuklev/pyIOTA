@@ -1,3 +1,5 @@
+__all__ = ['Generator']
+
 import itertools
 import random
 import collections

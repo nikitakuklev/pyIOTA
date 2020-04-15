@@ -1,4 +1,6 @@
 import logging
+from pathlib import Path
+
 import numpy as np
 from typing import Union, List, Dict
 from ocelot import Element, Sextupole, MagneticLattice, Octupole, Drift, Monitor, \
@@ -308,13 +310,58 @@ class LatticeContainer:
         """
         return [el for el in self.lattice.sequence if fun(el)]
 
-    def filter_by_id(self, id_list, loose_match=True):
+    def filter_by_id(self, id_list: List[str], loose_match=True):
+        """
+        Filters by trying to match element id to any string in the list
+        :param id_list: List of strings
+        :param loose_match: Whether to consider partial matches as ok
+        :return:
+        """
         if isinstance(id_list, str):
             id_list = [id_list]
         if loose_match:
             return [el for el in self.lattice.sequence if any([el.id in item for item in id_list])]
         else:
             return [el for el in self.lattice.sequence if el.id in id_list]
+
+    # Convenience utils
+
+    class OneTimeView:
+        """
+        Utility class that mirrors current sequence on creation and then removes elements anytime they
+        are accessed, as if popping things from stack. Used to make sure all elements are processed during
+        conversions.
+        """
+        def __init__(self, sequence):
+            # Shallow copy only
+            self.seq = sequence.copy()
+
+        def get_elements(self, el_type):
+            if isinstance(el_type, str):
+                matches = [el for el in self.seq if el.__class__.__name__ in el_type]
+            else:
+                matches = [el for el in self.seq if isinstance(el, el_type)]
+            for m in matches:
+                self.seq.remove(m)
+            return matches
+
+        def get_sequence(self):
+            return self.seq
+
+    def get_onetimeview(self):
+        return self.OneTimeView(self.lattice.sequence)
+
+    # Conversion functions
+
+    def to_elegant(self, lattice_options: Dict, lattice_path_abs: Path, dry_run: bool = False):
+        """
+        Calls elegant submodule library to produce elegant lattice.
+        Should fail-fast if incompatible features are found.
+        :return:
+        """
+        import pyIOTA.elegant.latticefile
+        wr = pyIOTA.elegant.latticefile.Writer(options=lattice_options)
+        return wr.write_lattice_ng(fpath=lattice_path_abs, box=self, save=not dry_run)
 
 
 class NLLens(Element):
@@ -399,11 +446,11 @@ class OctupoleInsert:
 
             if otype == 1:
                 seq.append(Drift(l=oqSpacing / 2, eid=f'oQI{i:02}l'))
-                seq.append(Octupole(l=olen, k3=k3scaled / olen, eid=f'oQI{i:02}'))
+                seq.append(Octupole(l=olen, k3=k3scaled / olen, eid=f'QI{i:02}'))
                 seq.append(Drift(l=oqSpacing / 2, eid=f'oQI{i:02}r'))
             elif otype == 0:
                 seq.append(Drift(l=oqSpacing / 2 + olen / 2, eid=f'oQI{i:02}l'))
-                seq.append(Multipole(kn=[0., 0., 0., k3scaled], eid=f'oQI{i:02}'))
+                seq.append(Multipole(kn=[0., 0., 0., k3scaled], eid=f'QI{i:02}'))
                 seq.append(Drift(l=oqSpacing / 2 + olen / 2, eid=f'oQI{i:02}r'))
             # value, i, bn, sn, k3, k3scaled, (betas ^ 3 / bn ^ 3);
         seq.append(Drift(l=margin, eid='oQImargin'))

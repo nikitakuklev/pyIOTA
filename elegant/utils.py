@@ -1,8 +1,12 @@
+__all__ = ['load_data_tbt']
+
 import gc
 __import__('tables')  # <-- import PyTables; __import__ so that linters don't complain
 import h5py
-import numpy as np, pandas as pd
+import numpy as np
+import pandas as pd
 
+# This is a legacy function, deprecated
 
 def load_data_tbt(fpath, root_name='test', watchpoint='CHRG', observation_number=1, silent=False):
     storeinfo = '{}-trackall-{}-info-obs{:04d}.hdf5'.format(root_name, watchpoint, observation_number)

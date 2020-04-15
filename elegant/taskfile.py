@@ -1,9 +1,6 @@
-import sys
+__all__ = ['Task', 'Optimizer', 'IOTAOptimizer']
+
 import io
-import os
-import textwrap
-from pathlib import Path
-from types import SimpleNamespace
 import functools
 import inspect
 import datetime
@@ -198,6 +195,32 @@ class Task:
             pass
         else:
             raise ValueError('Orbit mode must be specified!')
+        return strings
+
+    @task(name='frequency_map')
+    def action_frequency_map(self, *args, silent=False, quadratic_spacing=False, full_grid_output=True,
+                             include_changes=False, x=None, nX=None, y=None, nY=None, d=None, nD=None, **kwargs):
+        strings = [f'output = {self.rf}/%s.fma,',
+                   f'xmin = 1e-6,',
+                   f'ymin = 1e-6,',]
+        if silent:  # default 1
+            strings.append('verbosity = 0,')
+        if quadratic_spacing:
+            strings.append('quadratic_spacing = 1,')
+        if full_grid_output:
+            strings.append('full_grid_output = 1,')
+        if include_changes:
+            strings.append('include_changes = 1,')
+        if x:
+            strings.append(f'xmax={x},')
+            strings.append(f'nx = {nX},')
+        if y:
+            strings.append(f'ymax={y},')
+            strings.append(f'ny = {nY},')
+        if d:
+            strings.append(f'delta_max={d},')
+            strings.append(f'delta_min={-d},')
+            strings.append(f'ndelta = {nD},')
         return strings
 
     @task(name='chromaticity')
