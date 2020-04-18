@@ -1,4 +1,4 @@
-__all__ = ['SDDS', 'read_parameters_to_df', 'write_df_to_parameter_file', 'prepare_folders']
+__all__ = ['SDDS', 'read_parameters_to_df', 'write_df_to_parameter_file', 'prepare_folders', 'prepare_folder_structure']
 
 """
 Collection of IO-related functions for elegant and SDDS file formats
@@ -120,7 +120,8 @@ def read_parameters_to_df(knob: Path,
     df = pd.DataFrame(data=data, index=[data['ElementName'], data['ElementType'], data['ElementParameter']])
     if enforce_unique_index:
         df = df[df.ElementType != 'MARK']
-        assert df.index.is_unique
+        if not df.index.is_unique:
+            raise Exception(f'Duplicate non-marker elements found: {df.index.values[df.index.duplicated()]}')
     del sd2
     return df.sort_index()
 
@@ -280,7 +281,7 @@ def prepare_folder_structure(work_folder: Path,
                              wipe: bool = True):
     """
     Wipes and recreates folder structure for elegant simulation run
-    :param work_dirs_to_wipe: Subdirectories to wipe
+    :param work_dirs_to_wipe: Subdirectories to wipe - by default, lattices+tasks+parameters
     :param work_dirs_to_create: Subdirectories to create
     :param data_dirs_to_wipe:
     :param data_dirs_to_create:
@@ -296,7 +297,7 @@ def prepare_folder_structure(work_folder: Path,
         work_dirs_to_wipe = [Path('lattices/'), Path('tasks/'), Path('parameters/')]
 
     if data_dirs_to_wipe is None:
-        data_dirs_to_wipe = []
+        data_dirs_to_wipe = [Path('.')]
 
     if work_dirs_to_create is None:
         work_dirs_to_create = work_dirs_to_wipe.copy()
@@ -305,12 +306,12 @@ def prepare_folder_structure(work_folder: Path,
         data_dirs_to_create = data_dirs_to_wipe.copy()
 
     for path in work_dirs_to_wipe + work_dirs_to_create + data_dirs_to_wipe + data_dirs_to_create:
-        if path.is_absolute() or (path.exists() and not path.is_dir()):
+        if not isinstance(path, Path) or path.is_absolute() or (path.exists() and not path.is_dir()):
             raise Exception(f'Path {path} is not a valid subdirectory')
 
     for path in [work_folder / p for p in work_dirs_to_wipe] + [data_folder / p for p in data_dirs_to_wipe]:
         n = __wipe_directory(path, wipe)
-        print(f'Wiping: {path:<60s} deleted {n} objects')
+        print(f'Wiping: {str(path):<60s} deleted {n} objects')
 
     for path in [work_folder / p for p in work_dirs_to_create] + [data_folder / p for p in data_dirs_to_create]:
         if not path.is_dir():

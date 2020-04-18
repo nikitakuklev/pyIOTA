@@ -9,12 +9,12 @@ class BPMS:
 
     @staticmethod
     def to_sixdsim(names: list) -> list:
-        assert [n[:3] == 'N:I' for n in names] # acnet names
+        assert [n[:3] == 'N:I' for n in names]  # acnet names
         return [n[3:] for n in names]
 
     @staticmethod
     def from_sixdsim(names: list) -> list:
-        assert [len(n) == 4 or len(n) == 5 for n in names] # i.e. BC2L or BC2LH
+        assert [len(n) == 4 or len(n) == 5 for n in names]  # i.e. BC2L or BC2LH
         return ['N:I' + n for n in names]
 
     @staticmethod
@@ -47,15 +47,15 @@ class BPMS:
     RAW_B = 'N:IBPMRB'
     RAW_C = 'N:IBPMRB'
     RAW_D = 'N:IBPMRB'
-    RAW_ALL = [RAW_A+RAW_B+RAW_C+RAW_D]
+    RAW_ALL = [RAW_A + RAW_B + RAW_C + RAW_D]
 
 
 class DIPOLES:
     MAIN_BEND_I = ['N:IBEND']
     MAIN_BEND_V = ['N:IBENDV']
 
-    FLUX_COMPENSATORS_I = [f'N:IBT{i}{s}I' for (i,s) in itertools.product(range(1, 5), ['R', 'L'])] #15
-    FLUX_COMPENSATORS_V = [f'N:IBT{i}{s}V' for (i,s) in itertools.product(range(1, 5), ['R', 'L'])] #15
+    FLUX_COMPENSATORS_I = [f'N:IBT{i}{s}I' for (i, s) in itertools.product(range(1, 5), ['R', 'L'])]  # 15
+    FLUX_COMPENSATORS_V = [f'N:IBT{i}{s}V' for (i, s) in itertools.product(range(1, 5), ['R', 'L'])]  # 15
 
     ALL_I = MAIN_BEND_I + FLUX_COMPENSATORS_I
     ALL_V = MAIN_BEND_V + FLUX_COMPENSATORS_V
@@ -65,11 +65,11 @@ class CORRECTORS:
     _combfun = ['A1R', 'A2R', 'B1R', 'B2R', 'C1R', 'C2R', 'D1R', 'D2R', 'E1R', 'E2R',
                 'E2L', 'E1L', 'D2L', 'D1L', 'C2L', 'C1L', 'B2L', 'B1L', 'A2L', 'A1L']
 
-    kHSQ = (0.1 - 0.034645) * 1.3 # calibration for current to field for panofsky magnets
+    kHSQ = (0.1 - 0.034645) * 1.3  # calibration for current to field for panofsky magnets
 
     DIPOLE_TRIMS_I = ['N:IHM' + str(i) + 'LI' for i in range(1, 5)] + ['N:IHM' + str(i) + 'RI' for i in range(1, 5)]
     DIPOLE_TRIMS_V = ['N:IHM' + str(i) + 'LV' for i in range(1, 5)] + ['N:IHM' + str(i) + 'RV' for i in range(1, 5)]
-    DIPOLE_TRIMS_ALL = DIPOLE_TRIMS_I + DIPOLE_TRIMS_V # 4000
+    DIPOLE_TRIMS_ALL = DIPOLE_TRIMS_I + DIPOLE_TRIMS_V  # 4000
 
     COMBINED_COILS_I = [i for sl in
                         [['N:I1' + k + 'I', 'N:I2' + k + 'I', 'N:I3' + k + 'I', 'N:I4' + k + 'I'] for k in _combfun] for
@@ -77,20 +77,20 @@ class CORRECTORS:
     COMBINED_COILS_V = [i for sl in
                         [['N:I1' + k + 'V', 'N:I2' + k + 'V', 'N:I3' + k + 'V', 'N:I4' + k + 'V'] for k in _combfun] for
                         i in sl]
-    COMBINED_COILS_ALL = COMBINED_COILS_I + COMBINED_COILS_V #4000
+    COMBINED_COILS_ALL = COMBINED_COILS_I + COMBINED_COILS_V  # 4000
 
     VIRTUAL_H = [i for sl in [['N:IH' + k + 'I'] for k in _combfun] for i in sl]
     VIRTUAL_V = [i for sl in [['N:IV' + k + 'I'] for k in _combfun] for i in sl]
     COMBINED_VIRTUAL = [i for sl in [['N:IV' + k + 'I', 'N:IH' + k + 'I'] for k in _combfun] for i in sl]
 
-    OTHER_CORRECTORS_I = ['N:IBMPLI', 'N:IBMPRI'] #4000
-    OTHER_CORRECTORS_V = ['N:IBMPLV', 'N:IBMPRV'] #4000
+    OTHER_CORRECTORS_I = ['N:IBMPLI', 'N:IBMPRI']  # 4000
+    OTHER_CORRECTORS_V = ['N:IBMPLV', 'N:IBMPRV']  # 4000
 
-    LAMBERTSON_I = ['N:ILAM'] #15
-    LAMBERTSON_V = ['N:ILAMV'] #15
+    LAMBERTSON_I = ['N:ILAM']  # 15
+    LAMBERTSON_V = ['N:ILAMV']  # 15
 
-    LAMBERTSON_HCORR_I = ['N:IHLAMI'] #4000
-    LAMBERTSON_HCORR_V = ['N:IHLAMV'] #4000
+    LAMBERTSON_HCORR_I = ['N:IHLAMI']  # 4000
+    LAMBERTSON_HCORR_V = ['N:IHLAMV']  # 4000
 
     COMBINED_COILS_AND_DIPOLE_SHIMS_I = COMBINED_COILS_I + DIPOLE_TRIMS_I
     COMBINED_COILS_AND_DIPOLE_SHIMS_AND_OTHER_I = COMBINED_COILS_AND_DIPOLE_SHIMS_I + OTHER_CORRECTORS_I
@@ -139,9 +139,9 @@ class OCTUPOLES:
     ALL_CURRENTS_ACTIVE = ['N:IO' + str(i) + 'LI' for i in range(1, 18)]
     ALL_VOLTAGES_ACTIVE = ['N:IO' + str(i) + 'LV' for i in range(1, 18)]
     # Mar 10 - switched out to regular PS
-    #ALL_CURRENTS_ACTIVE = ['N:IO' + str(i) + 'LI' for i in range(1, 9)] + ['N:OB9L6I'] + \
+    # ALL_CURRENTS_ACTIVE = ['N:IO' + str(i) + 'LI' for i in range(1, 9)] + ['N:OB9L6I'] + \
     #                      ['N:IO' + str(i) + 'LI' for i in range(10, 18)]
-    #ALL_VOLTAGES_ACTIVE = ['N:IO' + str(i) + 'LV' for i in range(1, 9)] + ['N:OB9L6V'] + \
+    # ALL_VOLTAGES_ACTIVE = ['N:IO' + str(i) + 'LV' for i in range(1, 9)] + ['N:OB9L6V'] + \
     #                      ['N:IO' + str(i) + 'LV' for i in range(10, 18)]
     ALL = ALL_CURRENTS + ALL_VOLTAGES
 
@@ -182,11 +182,12 @@ class OTHER:
     BEAM_CURRENT_AVERAGE = 'N:IBEAMA'
     WCM_PARAMS = ['N:IWCMBF', 'N:IWCMBR', 'N:IWCMI', 'N:IWCMBP', 'N:IRFEPA', 'N:IRFEPP']
     BPM_ATN = ['Z:RP2ATN']
-    AUX_DEVICES = [BEAM_CURRENT] + [BEAM_CURRENT_AVERAGE] + WCM_PARAMS + [CONTROLS.TRIGGER_A5] + [CONTROLS.TRIGGER_A6] + BPM_ATN
+    AUX_DEVICES = [BEAM_CURRENT] + [BEAM_CURRENT_AVERAGE] + WCM_PARAMS + [CONTROLS.TRIGGER_A5] + [
+        CONTROLS.TRIGGER_A6] + BPM_ATN
 
 
-MASTER_STATUS_DEVICES = CONTROLS.VKICKER_ONOFF_DEVICES + CONTROLS.HKICKER_ONOFF_DEVICES + [CONTROLS.HKICKER] + [CONTROLS.VKICKER] + [CONTROLS.CHIP_PLC]
-
+MASTER_STATUS_DEVICES = CONTROLS.VKICKER_ONOFF_DEVICES + CONTROLS.HKICKER_ONOFF_DEVICES + [CONTROLS.HKICKER] + [
+    CONTROLS.VKICKER] + [CONTROLS.CHIP_PLC]
 
 MASTER_STATE_CURRENTS = DIPOLES.ALL_I + CORRECTORS.ALL + QUADS.ALL_CURRENTS + SKEWQUADS.ALL_CURRENTS + SEXTUPOLES.ALL_CURRENTS + \
                         OCTUPOLES.ALL_CURRENTS + DNMAGNET.ALL_CURRENTS + OTHER.RF + OTHER.KICKERS

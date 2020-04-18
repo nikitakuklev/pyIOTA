@@ -1,17 +1,20 @@
-from typing import Tuple
-
+import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
+from typing import Tuple
 from matplotlib import font_manager
 from ocelot.gui.accelerator import new_plot_elems
-import pandas as pd
-import numpy as np
 
 
-def plot_simple_grid(*args, nperrow: int = 11, sizes: Tuple = (2, 2),
-                     demean: bool=True, paired_bpm_mode:bool=False):
+def plot_simple_grid(*args,
+                     nperrow: int = 11,
+                     sizes: Tuple = (2, 2),
+                     demean: bool = True,
+                     paired_bpm_mode: bool = False):
     """
     Simple routine to plot a grid of data sharing x/y axes, with 1 plot per each dictionary key
-    :param data_dict:
+    :param demean:
+    :param paired_bpm_mode:
     :param nperrow:
     :param sizes:
     :return:
@@ -25,7 +28,8 @@ def plot_simple_grid(*args, nperrow: int = 11, sizes: Tuple = (2, 2),
             print('Skipping empty plot')
             continue
         n_rows = len(data_dict) // nperrow + 1
-        fig, ax = plt.subplots(n_rows, nperrow, figsize=(sizes[0] * nperrow, sizes[1] * n_rows), sharex=True, sharey=True)
+        fig, ax = plt.subplots(n_rows, nperrow, figsize=(sizes[0] * nperrow, sizes[1] * n_rows),
+                               sharex=True, sharey=True)
         if paired_bpm_mode:
             keys = [k for k in data_dict.keys()]
             roots = [k[:-2] for k in keys]
@@ -39,8 +43,8 @@ def plot_simple_grid(*args, nperrow: int = 11, sizes: Tuple = (2, 2),
                     if root in k:
                         if demean:
                             v = v - np.mean(v)
-                        ax[i,j].plot(v, lw=0.5)
-                        ax[i,j].set_title(f"{z}|{k}")
+                        ax[i, j].plot(v, lw=0.5)
+                        ax[i, j].set_title(f"{z}|{k}")
                         i += 1
         else:
             ax = ax.flatten()
@@ -49,6 +53,7 @@ def plot_simple_grid(*args, nperrow: int = 11, sizes: Tuple = (2, 2),
                     v = v - np.mean(v)
                 ax[i].plot(v)
                 ax[i].set_title(f"{i}|{k}")
+    return fig, ax
 
 
 def plot_opt_func(fig, lat, tws, top_plot=["Dx"], legend=False, fig_name=None, grid=True, font_size=12,

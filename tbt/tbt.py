@@ -1,9 +1,9 @@
 import copy
 import enum
-from typing import Union, Callable, Dict, List, Iterable, Tuple, Optional
+from typing import Union, Callable, Dict, List, Iterable, Tuple, Optional, Any
 
 import numpy as np
-import pyIOTA.acnet.utils
+import pyIOTA.acnet
 import pyIOTA.iota.run2
 import pyIOTA.iota.run2 as iota
 import scipy as sc
@@ -13,7 +13,9 @@ from scipy.signal import hilbert, chirp, butter, filtfilt
 # special_keys = ['idx', 'kickv', 'kickh', 'state', 'custom']
 from pyIOTA.tbt.naff import NAFF
 
-special_keys = pyIOTA.acnet.utils.special_keys.copy()
+import pyIOTA.acnet.utils as acutils
+
+special_keys = acutils.special_keys.copy()
 
 critical_keys = ['kickv', 'kickh', 'idx']
 
@@ -87,10 +89,20 @@ class Kick:
 
     # These are wrapper methods
 
-    def set(self, column: str, value):
+    def set(self, column: str, value: Any):
+        """
+        Direct column setter
+        :param column:
+        :param value:
+        """
         self.df.iloc[0, self.df.columns.get_loc(column)] = value
 
     def get(self, column: str):
+        """
+        Direct column getter
+        :param column:
+        :return:
+        """
         return self.df.iloc[0, self.df.columns.get_loc(column)]
 
     def col(self, column: str):
@@ -112,6 +124,10 @@ class Kick:
         Gets a copy of full kick state
         """
         return self.df.iloc[0, self.df.columns.get_loc('state')].copy()
+
+    def summarize(self):
+        print(f'Kick {self.idx}: ({self.get_turns()}) turns at ({self.kickh:.5f})H ({self.kickv:.5f})V')
+        self.bpms_summarize_status()
 
     def search_state(self, search_string: str):
         """
@@ -150,9 +166,14 @@ class Kick:
         matrix = np.vstack(data_list)
         return matrix
 
-    def get_bpm_data(self, columns: List = None, bpms: List = None, family: str = 'A',
-                     data_type: Datatype = Datatype.RAW, return_type: str = 'dict',
-                     use_cache: bool = True, add_to_cache: bool = True):
+    def get_bpm_data(self,
+                     columns: List[str] = None,
+                     bpms: List[str] = None,
+                     family: str = 'A',
+                     data_type: Datatype = Datatype.RAW,
+                     return_type: str = 'dict',
+                     use_cache: bool = True,
+                     add_to_cache: bool = True):
         """
         General data retrieval method for data that is per-bpm
         :param add_to_cache:
@@ -243,8 +264,6 @@ class Kick:
     def get_tune_data(self, bpm: str):
         return self.fft_freq[bpm], self.fft_pwr[bpm], self.peaks[bpm]
 
-
-
     # Import/export
 
     def to_csv(self, columns: List) -> str:
@@ -324,6 +343,15 @@ class Kick:
                            data_type: Datatype = Datatype.RAW,
                            delete_on_fail: bool = False,
                            debug: bool = True):
+        """
+        Applies the provided methods with the parameter tuples, and determines which BPMs failed the tests
+        :param plane:
+        :param methods:
+        :param data_type:
+        :param delete_on_fail:
+        :param debug:
+        :return:
+        """
         r = []
         r_data = []
         data = self.get_bpm_data(family=plane, data_type=data_type)
@@ -407,10 +435,10 @@ class Kick:
         return results, results_data
 
     def bpms_filter_absval(self,
-                             data: Dict,
-                             method: str = 'abs',
-                             threshold: float = 10.0,
-                            neg_threshold: float = None):
+                           data: Dict,
+                           method: str = 'abs',
+                           threshold: float = 10.0,
+                           neg_threshold: float = None):
         if method == 'abs':
             neg_threshold = neg_threshold or -threshold
             vals1 = {k: np.max(v) for k, v in data.items()}
@@ -420,7 +448,7 @@ class Kick:
             outliers2 = {k: v for k, v in vals2.items() if v < neg_threshold}
             results = {k: k not in outliers and k not in outliers2 for k, v in data.items()}
             results_data = {k: {'method': 'abs', 'values': (threshold, neg_threshold, v, v2)} for
-                            (k, v), (k2,v2) in zip(vals1.items(), vals2.items())}
+                            (k, v), (k2, v2) in zip(vals1.items(), vals2.items())}
         else:
             raise Exception(f'Method ({method}) is unrecognized')
         return results, results_data
@@ -581,7 +609,9 @@ class Kick:
         averages = np.zeros(len(bpms))
         variances = np.zeros(len(bpms))
         for i, bpm in enumerate(bpms):
-            data = self.df.iloc[0].loc[bpm]
+            data = self.get_bpm_data(bpms=[bpm], return_type='list')[0]
+            # print(data)
+            # data = self.df.iloc[0].loc[bpm]
             mean, std = np.mean(data), np.std(data)
             averages[i] = mean
             variances[i] = std
@@ -636,19 +666,21 @@ class KickSequence:
     def __len__(self):
         return len(self.df)
 
-    def check_dataset_integrity(self):
+    def check_dataset_integrity(self, include_octupoles: bool = True, include_nl: bool = True):
         """
         Checks if key state parameters are the same for all kicks, and that none are contained
         """
         invariant_devices = iota.DIPOLES.ALL_I + \
                             iota.CORRECTORS.ALL + \
-                            iota.QUADS.ALL_CURRENTS +\
+                            iota.QUADS.ALL_CURRENTS + \
                             iota.SKEWQUADS.ALL_CURRENTS + \
                             iota.SEXTUPOLES.ALL_CURRENTS + \
-                            iota.OCTUPOLES.ALL_CURRENTS + \
-                            iota.DNMAGNET.ALL_CURRENTS + \
                             ['N:IRFLLA', 'N:IRFMOD', 'N:IRFEAT', 'N:IRFEPC'] + \
                             ['N:IKPSVX', 'N:IKPSVD']
+        if include_octupoles:
+            invariant_devices += iota.OCTUPOLES.ALL_CURRENTS
+        if include_nl:
+            invariant_devices += iota.DNMAGNET.ALL_CURRENTS
         invariant_devices = set(invariant_devices)
         kicks = self.kicks
         #
@@ -677,7 +709,8 @@ class KickSequence:
         for e in outliers:
             outlier_keys.update((e[0],))
         outlier_devs = set([x.split('.')[0] for x in outlier_keys])
-        assert len(invariant_devices.intersection(outlier_devs)) == 0
+        if len(invariant_devices.intersection(outlier_devs)) != 0:
+            raise Exception(f'Found invariants in outlier devices: {invariant_devices.intersection(outlier_devs)}')
         return outlier_devs
 
     def purge_kicks(self, min_intensity, max_intensity):

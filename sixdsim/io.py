@@ -6,7 +6,6 @@ from typing import Callable, Dict
 
 import numpy as np
 
-import pyIOTA
 from ocelot import Monitor, Vcor, Hcor, Solenoid, SBend, Cavity, Edge,\
     Quadrupole, Drift, Element, Sextupole, Multipole
 from pyIOTA.acnet.frontends import DoubleDevice, DoubleDeviceSet

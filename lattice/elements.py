@@ -1,10 +1,11 @@
+__all__ = ['LatticeContainer', 'NLLens', 'HKPoly', 'OctupoleInsert']
+
 import logging
 from pathlib import Path
 
-import numpy as np
 from typing import Union, List, Dict
-from ocelot import Element, Sextupole, MagneticLattice, Octupole, Drift, Monitor, \
-    Marker, Edge, SBend, twiss, Vcor, Hcor, Multipole
+from ocelot.cpbd.elements import *
+from ocelot import MagneticLattice, twiss
 
 logger = logging.getLogger(__name__)
 
@@ -268,6 +269,58 @@ class LatticeContainer:
                     c += 1
         print(f'Inserted ({a}) cleanly, ({b}) with drift splitting, ({c}) rejected: {rejected}')
 
+    def merge_drifts(self, verbose: bool = True):
+        seq = self.lattice.sequence
+        seq_new = []
+        l_new = 0
+        cnt = 0
+        name_new = ''
+        drift_mode = False
+        for el in self.lattice.sequence:
+            if isinstance(el, Drift):
+                if drift_mode:
+                    l_new += el.l
+                    name_new += '_' + el.id
+                    if verbose: print(f'Found consecutive drift ({el.id}) - length {el.l}')
+                else:
+                    drift_mode = True
+                    l_new += el.l
+                    name_new += el.id
+                    if verbose: print(f'Found first drift ({el.id}) - length {el.l}')
+            else:
+                if drift_mode:
+                    seq_new.append(Drift(l=l_new, eid=name_new))
+                    if verbose: print(f'Consecutive drifts ended - creating ({name_new}) of length ({l_new}')
+                    name_new = ''
+                    l_new = 0
+                    drift_mode = False
+                    cnt += 1
+                seq_new.append(el)
+        print(f'Reduced element count from ({len(seq)}) to ({len(seq_new)}), ({cnt}) drifts remaining')
+        self.lattice.sequence = seq_new
+
+    def split_element(self, el: Element, parts: int = 2):
+        """
+        Splits an element into several parts, scaling parameters appropriately
+        :param el:
+        :param parts:
+        :return:
+        """
+        scaled_parameters = ['l', 'k1', 'k2', 'k3']
+        from copy import deepcopy
+        el_list = [deepcopy(el) for i in range(parts)]
+        for i, e in enumerate(el_list):
+            for s in scaled_parameters:
+                if hasattr(e, s):
+                    setattr(e, s, getattr(e, s)/parts)
+            e.id = el.id + f'_{i}'
+        seq = self.lattice.sequence
+        idx = seq.index(el)
+        seq_new = seq.copy()
+        seq_new.remove(el)
+        seq_new[idx:idx] = el_list
+        self.lattice.sequence = seq_new
+
     def get_elements(self, el_type: Union[str, type] = None):
         """
         Gets all elements of type in current sequence
@@ -332,6 +385,7 @@ class LatticeContainer:
         are accessed, as if popping things from stack. Used to make sure all elements are processed during
         conversions.
         """
+
         def __init__(self, sequence):
             # Shallow copy only
             self.seq = sequence.copy()
@@ -353,15 +407,16 @@ class LatticeContainer:
 
     # Conversion functions
 
-    def to_elegant(self, lattice_options: Dict, lattice_path_abs: Path, dry_run: bool = False):
+    def to_elegant(self, fpath: Path, lattice_options: Dict, dry_run: bool = False):
         """
         Calls elegant submodule library to produce elegant lattice.
         Should fail-fast if incompatible features are found.
         :return:
         """
+        assert isinstance(fpath, Path) and isinstance(lattice_options, dict)
         import pyIOTA.elegant.latticefile
         wr = pyIOTA.elegant.latticefile.Writer(options=lattice_options)
-        return wr.write_lattice_ng(fpath=lattice_path_abs, box=self, save=not dry_run)
+        return wr.write_lattice_ng(fpath=fpath, box=self, save=not dry_run)
 
 
 class NLLens(Element):

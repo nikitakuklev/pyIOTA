@@ -50,7 +50,7 @@ def calc_octupole_strengths_run1(current: float, energy: float):
     currents = current * cal_factor * scaling_arr / max(scaling_arr)
     return currents, bn
 
-def calc_octupole_strengths_run2(current: float, energy: float, mu0:float = 0.3):
+def calc_octupole_strengths_run2(current: float, energy: float, mu0: float = 0.3):
     """
     Calculated quasi-integrable insert strenth K3 distibution for given central current and beam energy
     :param current:
