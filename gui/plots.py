@@ -1,9 +1,76 @@
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-from typing import Tuple
+from typing import Tuple, List, Dict, Union
 from matplotlib import font_manager
 from ocelot.gui.accelerator import new_plot_elems
+
+
+def plot_simple(*args,
+                x: Union[List,np.ndarray] = None,
+                fmt: str = None,
+                xlabel: str = None,
+                ylabel: str = None,
+                sizes: Tuple = (12, 5),
+                demean: bool = True,
+                twiny_args: Union[List,Dict,np.ndarray] = None,
+                **kwargs):
+    """
+    Simple routine to plot a grid of data sharing x/y axes, with 1 plot per each dictionary key
+    :param demean:
+    :param sizes:
+    :return:
+    """
+    arrays = []
+    arrays_twiny = []
+    twiny_args = twiny_args or []
+    fmt = fmt or '-'
+    if len(twiny_args) == 1:
+        twiny_args = [twiny_args]
+    for inputs, arrs in zip([args, twiny_args], [arrays, arrays_twiny]):
+        for i, data_dict in enumerate(inputs):
+            if isinstance(data_dict, list):
+                for v in data_dict:
+                    arrs.append((str(i), v))
+            elif isinstance(data_dict, np.ndarray):
+                arrs.append((str(i), data_dict))
+            elif isinstance(data_dict, dict):
+                for k, v in data_dict.items():
+                    arrs.append((k, v))
+            else:
+                raise Exception(f'Supplied argument is not supported: {data_dict.__class__.__name__}')
+
+    fig, ax = plt.subplots(1, 1, figsize=(sizes[0], sizes[1]))
+    for z, (i, v) in enumerate(arrays):
+        if demean:
+            v = v - np.mean(v)
+        if x:
+            ax.plot(x, v, fmt, label=i, zorder=z+100, **kwargs)
+        else:
+            ax.plot(v, fmt, label=i, zorder=z+100, **kwargs)
+        # ax.set_title(f"{i}|{k}")
+    ax.legend(loc=1)
+    if xlabel:
+        ax.set_xlabel(xlabel)
+    if ylabel:
+        ax.set_ylabel(ylabel)
+    if arrays_twiny:
+        axy = ax.twinx()
+        axy.grid(False)
+        axy._get_lines.prop_cycler = ax._get_lines.prop_cycler
+        for z, (i, v) in enumerate(arrays_twiny):
+            if demean:
+                v = v - np.mean(v)
+            if x:
+                axy.plot(x, v, fmt, label=i, zorder=z, **kwargs)
+            else:
+                axy.plot(v, fmt, label=i, zorder=z, **kwargs)
+            # ax.set_title(f"{i}|{k}")
+        axy.legend(loc=5)
+    ax.set_zorder(axy.get_zorder() + 1)
+    ax.patch.set_visible(False)
+    fig.tight_layout()
+    return fig, ax
 
 
 def plot_simple_grid(*args,
@@ -42,7 +109,7 @@ def plot_simple_grid(*args,
                 for z, (k, v) in enumerate(data_dict.items()):
                     if root in k:
                         if demean:
-                            v = v - np.mean(v)
+                            v = v - np.nanmean(v)
                         ax[i, j].plot(v, lw=0.5)
                         ax[i, j].set_title(f"{z}|{k}")
                         i += 1
@@ -50,7 +117,7 @@ def plot_simple_grid(*args,
             ax = ax.flatten()
             for i, (k, v) in enumerate(data_dict.items()):
                 if demean:
-                    v = v - np.mean(v)
+                    v = v - np.nanmean(v)
                 ax[i].plot(v)
                 ax[i].set_title(f"{i}|{k}")
     return fig, ax
@@ -297,8 +364,8 @@ def plot_fft(ax, freq, power, grid=True, font_size=12):
     ax.grid(grid)
     # ax.set_yticks([])
     ax.tick_params(axis='both', labelsize=font_size)
-    ax.plot(freq, power, lw=0.5)
-    return ax
+    h = ax.plot(freq, power, lw=0.5)
+    return ax, h
 
 
 def plot_fft_semilog(ax, freq, power, grid=True, font_size=12):

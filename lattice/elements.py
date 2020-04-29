@@ -3,7 +3,7 @@ __all__ = ['LatticeContainer', 'NLLens', 'HKPoly', 'OctupoleInsert']
 import logging
 from pathlib import Path
 
-from typing import Union, List, Dict
+from typing import Union, List, Dict, Type
 from ocelot.cpbd.elements import *
 from ocelot import MagneticLattice, twiss
 
@@ -98,6 +98,27 @@ class LatticeContainer:
             seq[i] = new_el
             print(f'Inserted at ({i}) - element is now ({seq[i].id})')
 
+    def transmute_element(self, el: Element, new_type: Type[Element]):
+        """
+        Transmutes element type to new one. Only length and id are preserved.
+        :param new_type: New element type
+        :param el: element
+        :return: None
+        """
+        seq = self.lattice.sequence
+        if el not in seq:
+            raise Exception(f'Element ({el.id}) not in current lattice')
+        elif len([e for e in seq if e == el]) > 1:
+            raise Exception(f'Too many element matches ({len([e for e in seq if e == el])}) to ({el.id})')
+        else:
+            if hasattr(el, 'l'):
+                new_el = new_type(eid=el.id, l=el.l)
+            else:
+                new_el = new_type(eid=el.id)
+            i = seq.index(el)
+            seq[i] = new_el
+            print(f'Transmuted at pos ({i}) - element ({new_el.id}) is now ({seq[i].__class__.__name__})')
+
     def get_response_matrix(self):
         """
         Calculates standard RM
@@ -125,8 +146,8 @@ class LatticeContainer:
             slist.append(el.s_mid)
         return slist
 
-    def update_twiss(self):
-        return twiss(self.lattice)
+    def update_twiss(self, n_points: int = None):
+        return twiss(self.lattice, nPoints=n_points)
 
     def remove_markers(self):
         """
@@ -273,6 +294,7 @@ class LatticeContainer:
         seq = self.lattice.sequence
         seq_new = []
         l_new = 0
+        l_total = sum([el.l for el in self.lattice.sequence])
         cnt = 0
         name_new = ''
         drift_mode = False
@@ -281,7 +303,7 @@ class LatticeContainer:
                 if drift_mode:
                     l_new += el.l
                     name_new += '_' + el.id
-                    if verbose: print(f'Found consecutive drift ({el.id}) - length {el.l}')
+                    if verbose: print(f'Found consecutive drift ({el.id}) - length ({el.l})')
                 else:
                     drift_mode = True
                     l_new += el.l
@@ -290,13 +312,19 @@ class LatticeContainer:
             else:
                 if drift_mode:
                     seq_new.append(Drift(l=l_new, eid=name_new))
-                    if verbose: print(f'Consecutive drifts ended - creating ({name_new}) of length ({l_new}')
+                    if verbose: print(f'Consecutive drifts ended - creating ({name_new}) of length ({l_new})')
                     name_new = ''
                     l_new = 0
                     drift_mode = False
                     cnt += 1
                 seq_new.append(el)
+        if l_new != 0:
+            if verbose: print(f'Sequence ended - creating ({name_new}) of length ({l_new})')
+            seq_new.append(Drift(l=l_new, eid=name_new))
+
         print(f'Reduced element count from ({len(seq)}) to ({len(seq_new)}), ({cnt}) drifts remaining')
+        if not np.isclose(l_total, sum([el.l for el in seq_new])):
+            raise Exception(f'New sequence length ({sum([el.l for el in seq_new])} different from old ({l_total})!!!')
         self.lattice.sequence = seq_new
 
     def split_element(self, el: Element, parts: int = 2):
@@ -312,7 +340,7 @@ class LatticeContainer:
         for i, e in enumerate(el_list):
             for s in scaled_parameters:
                 if hasattr(e, s):
-                    setattr(e, s, getattr(e, s)/parts)
+                    setattr(e, s, getattr(e, s) / parts)
             e.id = el.id + f'_{i}'
         seq = self.lattice.sequence
         idx = seq.index(el)
@@ -362,6 +390,27 @@ class LatticeContainer:
         :return:
         """
         return [el for el in self.lattice.sequence if fun(el)]
+
+    def filter_elements(self, el_name: str = None, el_type: Union[str, type] = None, ):
+        """
+        Filter elements by type and regex
+        :return:
+        """
+        el_list = self.lattice.sequence
+        if el_type:
+            if isinstance(el_type, str):
+                el_list = [el for el in self.lattice.sequence if el.__class__.__name__ in el_type]
+            else:
+                el_list = [el for el in self.lattice.sequence if isinstance(el, el_type)]
+        if el_name:
+            import re
+            r = re.compile(el_name.upper())
+            new_list = []
+            for el in el_list:
+                if r.match(el.id):
+                    new_list.append(el)
+            el_list = new_list
+        return el_list
 
     def filter_by_id(self, id_list: List[str], loose_match=True):
         """
@@ -425,7 +474,7 @@ class NLLens(Element):
     l - length of drift in [m]
     """
 
-    def __init__(self, l=0., eid=None):
+    def __init__(self, l: float = 0.0, eid: str = None):
         Element.__init__(self, eid)
         self.l = l
 
@@ -435,10 +484,21 @@ class HKPoly(Element):
     Arbitrary Hamiltonian element for ELEGANT
     """
 
-    def __init__(self, l=0., eid=None, **kwargs):
+    def __init__(self, l: float = 0.0, eid: str = None, **kwargs: float):
         Element.__init__(self, eid)
         self.l = l
         self.hkpoly_args = kwargs
+
+
+class ILMatrix(Element):
+    """
+    ILMATRIX element for ELEGANT
+    """
+
+    def __init__(self, l: float = 0.0, eid: str = None, **kwargs: float):
+        Element.__init__(self, eid)
+        self.l = l
+        self.extra_args = kwargs
 
 
 class OctupoleInsert:

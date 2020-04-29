@@ -1,6 +1,7 @@
+from typing import Tuple
+
 import numpy as np
 from pyIOTA.tbt.tbt import Kick
-import numba
 from numba import jit
 from scipy.optimize import curve_fit
 from scipy.signal import hilbert
@@ -169,34 +170,116 @@ class Envelope:
 
 class SVD:
 
-    def __init__(self, data_trim=None, output_trim=None):
+    def __init__(self, data_trim: Tuple = None, output_trim: Tuple = None):
         self.data_trim = data_trim
         self.output_trim = output_trim
 
-    def decompose2D(self, data: Kick, plane: str):
+    def decompose2D(self, data: Kick, plane: str = None, use_kick_trim: bool = True):
+        """
+        Decompose any matrix-castable object using SVD
+        :param data:
+        :param plane:
+        :param use_kick_trim:
+        :return:
+        """
         if isinstance(data, Kick):
-            matrix = data.get_bpm_matrix(plane)
+            #matrix = data.get_bpm_matrix(plane)
+            matrix = data.get_bpm_data(family=plane, return_type='matrix')
+            if self.data_trim and not use_kick_trim:
+                matrix = matrix[:, self.data_trim]
         elif isinstance(data, np.ndarray):
             matrix = data
+            if self.data_trim:
+                matrix = matrix[:, self.data_trim]
         else:
             raise Exception(f'Unknown data type: {data}')
-
-        if self.data_trim:
-            matrix = matrix[:, self.data_trim]
 
         matrix -= np.mean(matrix, axis=1)[:, np.newaxis]
         U, S, vh = np.linalg.svd(matrix, full_matrices=False)
         V = vh.T  # transpose it back to conventional U @ S @ V.T
         return U, S, V, vh
 
-    def decompose_kick_2D(self, kick: Kick, tag: str = 'SVD'):
+    def decompose_kick_2D(self, kick: Kick, tag: str = 'SVD', use_kick_trim: bool = True, add_virtual_bpms: bool = True):
+        """
+        Decompose kick using SVD and store results
+        :param kick:
+        :param tag:
+        :return:
+        """
         assert isinstance(kick, Kick)
         for plane in ['H', 'V']:
-            matrix = kick.get_bpm_matrix(plane)
-            U, S, V, vh = self.decompose2D(matrix)
-            kick.df[f'{tag}_{plane}_M0'] = vh[0, :]
-            kick.df[f'{tag}_{plane}_M1'] = vh[1, :]
+            #matrix = kick.get_bpm_matrix(plane)
+            U, S, V, vh = self.decompose2D(kick, plane=plane, use_kick_trim=use_kick_trim)
+            #kick.df[f'{tag}_{plane}_M0'] = vh[0, :]
+            #kick.df[f'{tag}_{plane}_M1'] = vh[1, :]
+            kick.df[f'{tag}_{plane}_S'] = [S]
+            kick.df[f'{tag}_{plane}_U'] = [U]
+            kick.df[f'{tag}_{plane}_vh'] = [vh]
+            if add_virtual_bpms:
+                kick.bpms_add([f'SVD2D_{plane}_1C', f'SVD2D_{plane}_2C'])
+                kick.df[f'SVD2D_{plane}_1C'] = [vh[0, :]]
+                kick.df[f'SVD2D_{plane}_2C'] = [vh[1, :]]
         return U, S, V, vh
+
+    def decompose4D(self, data: Kick, use_kick_trim: bool = True):
+        """
+        Decompose any matrix-castable object using SVD
+        :param data:
+        :param plane:
+        :param use_kick_trim:
+        :return:
+        """
+        if isinstance(data, Kick):
+            #matrix = data.get_bpm_matrix(plane)
+            matrix1 = data.get_bpm_data(family='H', return_type='matrix')
+            matrix2 = data.get_bpm_data(family='V', return_type='matrix')
+            matrix = np.vstack([matrix1, matrix2])
+            if self.data_trim and not use_kick_trim:
+                matrix = matrix[:, self.data_trim]
+        elif isinstance(data, np.ndarray):
+            matrix = data
+            if self.data_trim:
+                matrix = matrix[:, self.data_trim]
+        else:
+            raise Exception(f'Unknown data type: {data}')
+
+        matrix -= np.mean(matrix, axis=1)[:, np.newaxis]
+        U, S, vh = np.linalg.svd(matrix, full_matrices=False)
+        V = vh.T  # transpose it back to conventional U @ S @ V.T
+        return U, S, V, vh
+
+    def decompose_kick_4D(self, kick: Kick,
+                          tag: str = 'SVD4D',
+                          use_kick_trim: bool = True,
+                          add_virtual_bpms: bool = True):
+        """
+        Decompose kick using SVD and store results
+        :param kick:
+        :param tag:
+        :return:
+        """
+        assert isinstance(kick, Kick)
+        plane = 'HV'
+        U, S, V, vh = self.decompose4D(kick, use_kick_trim=use_kick_trim)
+        #kick.df[f'{tag}_{plane}_M0'] = [vh[0, :]]
+        #kick.df[f'{tag}_{plane}_M1'] = [vh[1, :]]
+        kick.df[f'{tag}_{plane}_S'] = [S]
+        kick.df[f'{tag}_{plane}_U'] = [U]
+        kick.df[f'{tag}_{plane}_vh'] = [vh]
+        if add_virtual_bpms:
+            kick.bpms_add(['SVD4D_1C', 'SVD4D_2C', 'SVD4D_3C', 'SVD4D_4C'])
+            kick.df['SVD4D_1C'] = [vh[0, :]]
+            kick.df['SVD4D_2C'] = [vh[1, :]]
+            kick.df['SVD4D_3C'] = [vh[2, :]]
+            kick.df['SVD4D_4C'] = [vh[3, :]]
+        return U, S, V, vh
+
+    def get_4D(self, kick: Kick, tag: str = 'SVD4D'):
+        plane = 'HV'
+        S = kick.df[f'{tag}_{plane}_S']
+        U = kick.df[f'{tag}_{plane}_U']
+        vh = kick.df[f'{tag}_{plane}_vh']
+        return U, S, vh.T, vh
 
     def decompose2D_into_kicks(self, kick: Kick, plane: str):
         assert isinstance(kick, Kick)
