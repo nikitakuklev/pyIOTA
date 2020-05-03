@@ -1,9 +1,11 @@
-__all__ = ['LatticeContainer', 'NLLens', 'HKPoly', 'OctupoleInsert']
+from __future__ import annotations
+
+__all__ = ['LatticeContainer', 'NLLens', 'HKPoly', 'ILMatrix', 'OctupoleInsert']
 
 import logging
 from pathlib import Path
 
-from typing import Union, List, Dict, Type
+from typing import Union, List, Dict, Type, Iterable, Callable
 from ocelot.cpbd.elements import *
 from ocelot import MagneticLattice, twiss
 
@@ -19,7 +21,8 @@ class LatticeContainer:
                  reset_elements_to_defaults: bool = True,
                  info: Dict = None,
                  variables: Dict = None,
-                 method=None):
+                 method=None,
+                 silent: bool = True):
         if not info:
             info = {'source_file': 'unknown', 'source': 'unknown', 'pc': 0.0}
         self.name = name
@@ -30,6 +33,7 @@ class LatticeContainer:
         self.source = info['source']
         self.pc = info['pc']
         self.variables = variables
+        self.silent = silent
 
         if reset_elements_to_defaults:
             print(f'WARN - resetting any nonlinear elements to 0')
@@ -46,7 +50,7 @@ class LatticeContainer:
         else:
             self.lattice = MagneticLattice(tuple(self.lattice_list), method=method)
 
-        print(f'Lattice ({self.name}) initialized')
+        if not silent: print(f'Lattice ({self.name}) initialized')
         # self.twiss = twiss(self.lattice)
 
     def insert_correctors(self, destroy_skew_quads: bool = True):
@@ -58,10 +62,12 @@ class LatticeContainer:
         raise Exception('Thick correctors on top of other elements cannot be integrated, however they are added'
                         'upon export when possible (i.e. KQUAD has VKICK/HKICK set in elegant export)')
 
-    def rotate_lattice(self, new_start: Element):
+    # Lattice manipulation methods
+
+    def rotate_lattice(self, new_start: Element) -> LatticeContainer:
         """
         Changes lattice origin, moving entries to the end, by analogy to a circular buffer.
-        :param new_start: Element name
+        :param new_start: New starting element
         :return: None
         """
         seq = self.lattice.sequence
@@ -76,48 +82,107 @@ class LatticeContainer:
         else:
             i = seq.index(new_start)
             self.lattice.sequence = seq[i:] + seq[:i]
-            print(
-                f'Rotated by ({i}) - starting element is now ({self.lattice.sequence[0].id}) and ending element is ({self.lattice.sequence[-1].id})')
+            if not self.silent:
+                print(f'Rotated by ({i}) - starting element is now ({self.lattice.sequence[0].id}) and ending'
+                      f' element is ({self.lattice.sequence[-1].id})')
+        return self
 
-    def replace_element(self, old_el: Element, new_el: Element):
+    def replace_elements(self, old_el: Union[Element, Iterable], new_el: Union[Element, Iterable]) -> LatticeContainer:
         """
         Swaps out elements. Throws exception if more than one match found.
-        :param old_el: Old element
-        :param new_el: New element
+        :param old_el: Old element, or list of elements
+        :param new_el: New element, or list of elements
         :return: None
         """
         seq = self.lattice.sequence
-        if old_el not in seq:
-            raise Exception(f'Element ({old_el.id}) not in current lattice')
-        elif len([el for el in seq if el == old_el]) > 1:
-            raise Exception(f'Too many element matches ({len([el for el in seq if el == old_el])}) to ({old_el.id})')
+        if isinstance(old_el, List) and isinstance(new_el, List):
+            assert all(isinstance(e, Element) for e in old_el)
+            assert all(isinstance(e, Element) for e in new_el)
+            assert len(old_el) == len(new_el)
+        elif isinstance(old_el, Element) and isinstance(new_el, Element):
+            old_el = [old_el]
+            new_el = [new_el]
         else:
-            if new_el.l != old_el.l:
-                print(f'New length ({new_el.l}) does not match old one ({old_el.l}) - careful!')
-            i = seq.index(old_el)
-            seq[i] = new_el
-            print(f'Inserted at ({i}) - element is now ({seq[i].id})')
+            raise Exception(f'Both new and old parameters must be lists or Element')
 
-    def transmute_element(self, el: Element, new_type: Type[Element]):
+        for oel, nel in zip(old_el, new_el):
+            matches = [el for el in seq if el == oel]
+            if len(matches) == 0:
+                raise Exception(f'Element ({oel.id}) not in current lattice')
+            elif len(matches) > 1:
+                raise Exception(f'Too many matches ({len(matches)}) for ({oel.id})')
+            else:
+                if nel.l != oel.l:
+                    print(f'New length ({nel.l}) does not match old one ({oel.l}) - careful!')
+                i = seq.index(old_el)
+                seq[i] = new_el
+                if not self.silent:
+                    print(f'Inserted at ({i}) - element is now ({seq[i].id})')
+        return self
+
+    def transmute_elements(self, elements: Union[Element, Iterable[Element]], new_type: Type[Element]) -> LatticeContainer:
         """
         Transmutes element type to new one. Only length and id are preserved.
+        :param elements: Elements to transmute
         :param new_type: New element type
-        :param el: element
         :return: None
         """
         seq = self.lattice.sequence
-        if el not in seq:
-            raise Exception(f'Element ({el.id}) not in current lattice')
-        elif len([e for e in seq if e == el]) > 1:
-            raise Exception(f'Too many element matches ({len([e for e in seq if e == el])}) to ({el.id})')
+        if isinstance(elements, List) and isinstance(elements, List):
+            assert all(isinstance(e, Element) for e in elements)
+        elif isinstance(elements, Element):
+            elements = [elements]
         else:
-            if hasattr(el, 'l'):
-                new_el = new_type(eid=el.id, l=el.l)
+            raise Exception(f'Both new and old parameters must be lists or Element')
+
+        for target in elements:
+            matches = [el for el in seq if el == target]
+            if len(matches) == 0:
+                raise Exception(f'Element ({target.id}) not in current lattice')
+            elif len(matches) > 1:
+                raise Exception(f'Too many matches ({len(matches)}) for ({target.id})')
             else:
-                new_el = new_type(eid=el.id)
-            i = seq.index(el)
-            seq[i] = new_el
-            print(f'Transmuted at pos ({i}) - element ({new_el.id}) is now ({seq[i].__class__.__name__})')
+                new_el = new_type(eid=target.id)
+                if hasattr(target, 'l'):
+                    new_type.l = target.l
+                i = seq.index(target)
+                seq[i] = new_el
+                print(f'Transmuted ({new_el.id}) at pos ({i}) from ({matches[0].__class__.__name__}) '
+                      f'to ({seq[i].__class__.__name__})')
+        return self
+
+    def split_elements(self, elements: Union[Element, Iterable[Element]], n_parts: int = 2) -> LatticeContainer:
+        """
+        Splits elements into several parts, scaling parameters appropriately
+        :param elements: Element or list of elements to be split
+        :param n_parts: Number of parts to split into
+        :return:
+        """
+        from copy import deepcopy
+        seq = self.lattice.sequence
+        if isinstance(elements, List) and isinstance(elements, List):
+            assert all(isinstance(e, Element) for e in elements)
+        elif isinstance(elements, Element):
+            elements = [elements]
+        else:
+            raise Exception(f'Both new and old parameters must be lists or Element')
+
+        scaled_parameters = ['l', 'k1', 'k2', 'k3', 'k4']
+        seq_new = seq.copy()
+        for el in elements:
+            el_list = [deepcopy(el) for i in range(n_parts)]
+            for i, e in enumerate(el_list):
+                for s in scaled_parameters:
+                    if hasattr(e, s):
+                        setattr(e, s, getattr(e, s) / n_parts)
+                e.id = el.id + f'_{i}'
+            idx = seq_new.index(el)
+            seq_new.remove(el)
+            seq_new[idx:idx] = el_list  # means insert here
+        print(f'Split elements ({[el.id for el in elements]}) into ({n_parts}) parts - seq length'
+              f' ({len(seq)}) -> ({len(seq_new)})')
+        self.lattice.sequence = seq_new
+        return self
 
     def get_response_matrix(self):
         """
@@ -290,8 +355,18 @@ class LatticeContainer:
                     c += 1
         print(f'Inserted ({a}) cleanly, ({b}) with drift splitting, ({c}) rejected: {rejected}')
 
-    def merge_drifts(self, verbose: bool = True):
+    def merge_drifts(self, exclusions: List[Drift] = None, verbose: bool = True):
+        """
+        Merges consecutive drifts in the lattice, except those in exclusions list
+        :param exclusions:
+        :param verbose:
+        :return:
+        """
         seq = self.lattice.sequence
+        if exclusions:
+            assert all(isinstance(el, Drift) for el in exclusions)
+        else:
+            exclusions = []
         seq_new = []
         l_new = 0
         l_total = sum([el.l for el in self.lattice.sequence])
@@ -299,7 +374,8 @@ class LatticeContainer:
         name_new = ''
         drift_mode = False
         for el in self.lattice.sequence:
-            if isinstance(el, Drift):
+            is_exclusion = el in exclusions
+            if isinstance(el, Drift) and not is_exclusion:
                 if drift_mode:
                     l_new += el.l
                     name_new += '_' + el.id
@@ -308,8 +384,10 @@ class LatticeContainer:
                     drift_mode = True
                     l_new += el.l
                     name_new += el.id
-                    if verbose: print(f'Found first drift ({el.id}) - length {el.l}')
+                    if verbose: print(f'Found first drift ({el.id}) - length ({el.l})')
             else:
+                if is_exclusion:
+                    print(f'Skipping drift ({el.id}) since it is excluded')
                 if drift_mode:
                     seq_new.append(Drift(l=l_new, eid=name_new))
                     if verbose: print(f'Consecutive drifts ended - creating ({name_new}) of length ({l_new})')
@@ -327,28 +405,6 @@ class LatticeContainer:
             raise Exception(f'New sequence length ({sum([el.l for el in seq_new])} different from old ({l_total})!!!')
         self.lattice.sequence = seq_new
 
-    def split_element(self, el: Element, parts: int = 2):
-        """
-        Splits an element into several parts, scaling parameters appropriately
-        :param el:
-        :param parts:
-        :return:
-        """
-        scaled_parameters = ['l', 'k1', 'k2', 'k3']
-        from copy import deepcopy
-        el_list = [deepcopy(el) for i in range(parts)]
-        for i, e in enumerate(el_list):
-            for s in scaled_parameters:
-                if hasattr(e, s):
-                    setattr(e, s, getattr(e, s) / parts)
-            e.id = el.id + f'_{i}'
-        seq = self.lattice.sequence
-        idx = seq.index(el)
-        seq_new = seq.copy()
-        seq_new.remove(el)
-        seq_new[idx:idx] = el_list
-        self.lattice.sequence = seq_new
-
     def get_elements(self, el_type: Union[str, type] = None):
         """
         Gets all elements of type in current sequence
@@ -360,7 +416,7 @@ class LatticeContainer:
         else:
             return [el for el in self.lattice.sequence if isinstance(el, el_type)]
 
-    def get_first(self, el_name: str = None, el_type: Union[str, type] = None):
+    def get_first(self, el_name: str = None, el_type: Union[str, type] = None) -> Element:
         """
         Gets first element matching any non-None conditions
         :param el_name: Element name string
@@ -370,7 +426,7 @@ class LatticeContainer:
         seq = self.lattice.sequence.copy()
         if el_name:
             el_name = el_name.upper()
-            seq = [el for el in seq if el_name in el.id]
+            seq = [el for el in seq if el_name in el.id.upper()]
 
         if el_type:
             if isinstance(el_type, str):
@@ -383,19 +439,20 @@ class LatticeContainer:
         else:
             raise Exception(f'No matches found for {el_name}|{el_type}')
 
-    def filter(self, fun):
+    def filter(self, fun: Callable) -> List[Element]:
         """
-        Filter by supplied function and return those that are True
-        :param fun:
+        Filter elements by supplied function and return those that are True
+        :param fun: Function to call
         :return:
         """
         return [el for el in self.lattice.sequence if fun(el)]
 
-    def filter_elements(self, el_name: str = None, el_type: Union[str, type] = None, ):
+    def filter_elements(self, el_name: str = None, el_type: Union[str, type] = None) -> List[Element]:
         """
         Filter elements by type and regex
         :return:
         """
+        import re
         el_list = self.lattice.sequence
         if el_type:
             if isinstance(el_type, str):
@@ -403,8 +460,7 @@ class LatticeContainer:
             else:
                 el_list = [el for el in self.lattice.sequence if isinstance(el, el_type)]
         if el_name:
-            import re
-            r = re.compile(el_name.upper())
+            r = re.compile(el_name.upper(), re.IGNORECASE)
             new_list = []
             for el in el_list:
                 if r.match(el.id):
@@ -439,11 +495,13 @@ class LatticeContainer:
             # Shallow copy only
             self.seq = sequence.copy()
 
-        def get_elements(self, el_type):
+        def get_elements(self, el_type: Element):
             if isinstance(el_type, str):
-                matches = [el for el in self.seq if el.__class__.__name__ in el_type]
+                raise Exception() # this is deprecated since had to do OCELOT classname bypasses
+                #matches = [el for el in self.seq if el.__class__.__name__ in el_type]
             else:
-                matches = [el for el in self.seq if isinstance(el, el_type)]
+                matches = [el for el in self.seq if type(el) == el_type]  # match type exactly, no inheritance
+                #print(el_type, len(matches), [m.id for m in matches], type(self.seq[0]))
             for m in matches:
                 self.seq.remove(m)
             return matches
@@ -490,15 +548,40 @@ class HKPoly(Element):
         self.hkpoly_args = kwargs
 
 
-class ILMatrix(Element):
+class ILMatrix(Matrix):
     """
     ILMATRIX element for ELEGANT
     """
 
+    @property
+    def __class__(self):
+        """
+        OCELOT uses a stupid way to check objects by class name, so we have to fake ourselves to be the superclass
+        :return:
+        """
+        return Matrix
+
     def __init__(self, l: float = 0.0, eid: str = None, **kwargs: float):
-        Element.__init__(self, eid)
         self.l = l
+        self.id = eid
         self.extra_args = kwargs
+        mdict = {}
+        for i, plane in enumerate(['x', 'y']):
+            offset = i*2+1
+            sin_phi = np.sin(kwargs['nux']*2*np.pi)
+            #if np.isclose(sin_phi, 0, rtol=1.e-12, atol=1.e-12):
+            #    sin_phi = 0.0
+            cos_phi = np.cos(kwargs['nux']*2*np.pi)
+            alpha1 = kwargs.get('alphax', 0.0)
+            alpha2 = -alpha1 # Tinsert
+            beta1 = kwargs.get('betax', 0.0)
+            mdict[f'r{offset}{offset}'] = cos_phi + alpha1 * sin_phi
+            mdict[f'r{offset+1}{offset+1}'] = cos_phi - alpha1 * sin_phi
+            mdict[f'r{offset}{offset+1}'] = beta1 * sin_phi
+            mdict[f'r{offset+1}{offset}'] = -((1+alpha1*alpha2)/beta1) * sin_phi + ((alpha1-alpha2)/beta1) * cos_phi
+        mdict['r55'] = 1.0
+        mdict['r66'] = 1.0
+        super().__init__(eid=eid, l=l, **mdict)
 
 
 class OctupoleInsert:

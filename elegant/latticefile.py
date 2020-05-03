@@ -10,7 +10,8 @@ import numpy as np
 
 import pyIOTA
 from pyIOTA.lattice.elements import LatticeContainer, NLLens, HKPoly, ILMatrix
-from ocelot import Sextupole, Hcor, Vcor, Element, Edge, Marker, Octupole, Matrix
+from ocelot import Sextupole, Hcor, Vcor, Element, Edge, Marker, Octupole, Matrix, Quadrupole, SBend, Drift, Solenoid, \
+    Cavity, Monitor
 
 
 class Writer:
@@ -290,16 +291,16 @@ class Writer:
         # Get a view that removes elements whenever they are looked at
         view = box.get_onetimeview()
 
-        dipoles = view.get_elements('SBend')
+        dipoles = view.get_elements(SBend)
         edges = view.get_elements(Edge)
-        quads = view.get_elements('Quadrupole')
+        quads = view.get_elements(Quadrupole)
         sextupoles = view.get_elements(Sextupole)
         octupoles = view.get_elements(Octupole)
-        drifts = view.get_elements("Drift")
-        solenoids = view.get_elements('Solenoid')
+        drifts = view.get_elements(Drift)
+        solenoids = view.get_elements(Solenoid)
         # vkickers = iota.GetElementsOfType('VKICKER')
-        cavities = view.get_elements("Cavity")
-        monitors = view.get_elements("Monitor")
+        cavities = view.get_elements(Cavity)
+        monitors = view.get_elements(Monitor)
         markers = view.get_elements(Marker)
         nllenses = view.get_elements(NLLens)
         matrices = view.get_elements(Matrix)
@@ -542,7 +543,7 @@ class Writer:
 
         remainder = view.get_sequence()
         if remainder:
-            raise Exception(f'Have leftover elements at end: {[(e.id, e.__class__.__name__) for e in remainder]}')
+            raise Exception(f'Have leftover elements at end: {[(e.id, type(e), e.__class__.__name__) for e in remainder]}')
 
         if save:
             if not fpath:

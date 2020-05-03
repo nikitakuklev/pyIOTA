@@ -97,7 +97,7 @@ def calc_octupole_strengths_run2(current: float, energy: float, mu0: float = 0.3
     currents = current * cal_factor * scaling_arr / max(scaling_arr)
     return currents, bn, scaling_arr / max(scaling_arr)
 
-def calc_octupole_strengths_run2b(current: float, energy: float, mu0: float = 0.3):
+def calc_octupole_strengths_run2b(current: float, energy: float, mu0: float = 0.3, nn = 17):
     """
     Calculated quasi-integrable insert strenth K3 distibution for given central current and beam energy
     :param current:
@@ -110,7 +110,7 @@ def calc_octupole_strengths_run2b(current: float, energy: float, mu0: float = 0.
     # ! length of the straight section
     l0 = 1.8
     # ! number of nonlinear elements
-    nn = 17
+    #nn = 17
     # ! (m^-1) strength parameter of octupole potential (for 1A/150MeV strength by default)
     alpha = 10000
     # ! dimentional parameter of nonlinear lens

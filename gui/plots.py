@@ -1,19 +1,24 @@
+import copy
+
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from typing import Tuple, List, Dict, Union
+
+from pyIOTA.lattice.elements import ILMatrix
 from matplotlib import font_manager
-from ocelot.gui.accelerator import new_plot_elems
+from ocelot import Quadrupole, Bend, SBend, RBend, Vcor, Hcor, Sextupole, Undulator, \
+    Cavity, Multipole, Marker, Edge, Octupole, Matrix, Monitor, Drift, Solenoid, UnknownElement, TDCavity, TWCavity
 
 
 def plot_simple(*args,
-                x: Union[List,np.ndarray] = None,
+                x: Union[List, np.ndarray] = None,
                 fmt: str = None,
                 xlabel: str = None,
                 ylabel: str = None,
                 sizes: Tuple = (12, 5),
                 demean: bool = True,
-                twiny_args: Union[List,Dict,np.ndarray] = None,
+                twiny_args: Union[List, Dict, np.ndarray] = None,
                 **kwargs):
     """
     Simple routine to plot a grid of data sharing x/y axes, with 1 plot per each dictionary key
@@ -45,9 +50,9 @@ def plot_simple(*args,
         if demean:
             v = v - np.mean(v)
         if x:
-            ax.plot(x, v, fmt, label=i, zorder=z+100, **kwargs)
+            ax.plot(x, v, fmt, label=i, zorder=z + 100, **kwargs)
         else:
-            ax.plot(v, fmt, label=i, zorder=z+100, **kwargs)
+            ax.plot(v, fmt, label=i, zorder=z + 100, **kwargs)
         # ax.set_title(f"{i}|{k}")
     ax.legend(loc=1)
     if xlabel:
@@ -178,9 +183,10 @@ def plot_opt_func(fig, lat, tws, top_plot=["Dx"], legend=False, fig_name=None, g
     plot_disp(ax_top, tws, top_plot, font_size)
 
     plot_betas(ax_b, S, beta_x, beta_y, font_size)
-    # plot_elems(ax_el, lat, s_point = S[0], legend = legend, y_scale=0.8) # plot elements
-    new_plot_elems(fig, ax_el, lat, s_point=S[0], legend=legend, y_scale=0.8, font_size=font_size,
+    #new_plot_elems(ax_el, lat, s_point = S[0], legend = legend, y_scale=0.8)  # plot elements
+    plot_elems(fig, ax_el, lat, s_point=S[0], legend=legend, y_scale=0.8, font_size=font_size,
                    excld_legend=excld_legend)
+    return fig, ax_top, ax_b, ax_el
 
 
 def plot_betas(ax, S, beta_x, beta_y, font_size):
@@ -196,6 +202,15 @@ def plot_betas(ax, S, beta_x, beta_y, font_size):
     ax.set_ylabel(r"$\beta_{x,y}$ [m]", fontsize=font_size)
     ax.plot(S, beta_x, 'b', lw=2, label=r"$\beta_{x}$")
     ax.plot(S, beta_y, 'r--', lw=2, label=r"$\beta_{y}$")
+    ax.tick_params(axis='both', labelsize=font_size)
+    leg = ax.legend(loc='upper left', shadow=False, fancybox=True, prop=font_manager.FontProperties(size=font_size))
+    leg.get_frame().set_alpha(0.2)
+
+
+def plot_alphas(ax, S, x, y, font_size):
+    #ax.set_ylabel(r"$\beta_{x,y}$ [m]", fontsize=font_size)
+    ax.plot(S, x, 'b', lw=2, label=r"$\alpha_{x}$")
+    ax.plot(S, y, 'r--', lw=2, label=r"$\alpha_{y}$")
     ax.tick_params(axis='both', labelsize=font_size)
     leg = ax.legend(loc='upper left', shadow=False, fancybox=True, prop=font_manager.FontProperties(size=font_size))
     leg.get_frame().set_alpha(0.2)
@@ -246,7 +261,7 @@ def plot_disp(ax, tws, top_plot, font_size):
     leg2.get_frame().set_alpha(0.2)
 
 
-def plot_API(lat, fig=None, legend=True, fig_name=1, grid=True, font_size=12):
+def plot_API(lat, fig=None, legend=False, fig_name=1, grid=True, font_size=12):
     """
     Function creates a picture with lattice on the bottom part of the picture and top part of the picture can be
     plot arbitrary lines.
@@ -289,7 +304,7 @@ def plot_API(lat, fig=None, legend=True, fig_name=1, grid=True, font_size=12):
 
     # plot_elems(ax_el, lat, nturns = 1, legend = True) # plot elements
     # new_plot_elems(fig, ax_el, lat, nturns = 1, legend = legend)
-    new_plot_elems(fig, ax_el, lat, legend=legend, y_scale=0.8, font_size=font_size)
+    plot_elems(fig, ax_el, lat, legend=legend, y_scale=0.8, font_size=font_size)
 
     return fig, ax_xy
 
@@ -376,3 +391,324 @@ def plot_fft_semilog(ax, freq, power, grid=True, font_size=12):
     ax.tick_params(axis='both', labelsize=font_size)
     ax.semilogy(freq, power, lw=0.5)
     return ax
+
+
+# @formatter:off
+dict_plot = {Quadrupole:    {"scale": 0.7, "color": "r",            "edgecolor": "r",          "label": "quad"},
+             Sextupole:     {"scale": 0.5, "color": "g",            "edgecolor": "g",          "label": "sext"},
+             Octupole:      {"scale": 0.5, "color": "g",            "edgecolor": "g",          "label": "sext"},
+             Cavity:        {"scale": 0.7, "color": "orange",       "edgecolor": "lightgreen", "label": "cav"},
+             Bend:          {"scale": 0.7, "color": "lightskyblue", "edgecolor": "k",          "label": "bend"},
+             RBend:         {"scale": 0.7, "color": "lightskyblue", "edgecolor": "k",          "label": "bend"},
+             SBend:         {"scale": 0.7, "color": "lightskyblue", "edgecolor": "k",          "label": "bend"},
+             Matrix:        {"scale": 0.7, "color": "pink",         "edgecolor": "k",          "label": "mat"},
+             Multipole:     {"scale": 0.7, "color": "g",            "edgecolor": "k",          "label": "mult"},
+             Undulator:     {"scale": 0.7, "color": "pink",         "edgecolor": "k",          "label": "und"},
+             Monitor:       {"scale": 0.5, "color": "orange",       "edgecolor": "orange",     "label": "mon"},
+             Hcor:          {"scale": 0.7, "color": "c",            "edgecolor": "c",          "label": "cor"},
+             Vcor:          {"scale": 0.7, "color": "c",            "edgecolor": "c",          "label": "cor"},
+             Drift:         {"scale": 0.,  "color": "k",            "edgecolor": "k",          "label": ""},
+             Marker:        {"scale": 0.,  "color": "k",            "edgecolor": "k",          "label": "mark"},
+             Edge:          {"scale": 0.,  "color": "k",            "edgecolor": "k",          "label": ""},
+             Solenoid:      {"scale": 0.7, "color": "g",            "edgecolor": "g",          "label": "sol"},
+             UnknownElement:{"scale": 0.7, "color": "g",            "edgecolor": "g",          "label": "unk"},
+             }
+
+dict_plot.update({ILMatrix:     {"scale": 0.7, "color": "pink",         "edgecolor": "k",          "label": "mat"}})
+# @formatter:on
+
+
+# def new_plot_elems(fig, ax, lat, s_point=0, nturns=1, y_lim=None, y_scale=1, legend=True):
+#     dict_copy = copy.deepcopy(dict_plot)
+#     alpha = 1
+#     ax.set_ylim((-1, 1.5))
+#     if y_lim != None:
+#         ax.set_ylim(y_lim)
+#     points_with_annotation = []
+#     L = 0.
+#     q = []
+#     b = []
+#     c = []
+#     s = []
+#     u = []
+#     rf = []
+#     m = []
+#     for elem in lat.sequence:
+#         if elem.__class__ == Quadrupole:
+#             q.append(elem.k1)
+#         elif elem.__class__ in [Bend, RBend, SBend]:
+#             b.append(elem.angle)
+#         elif elem.__class__ in [Hcor, Vcor]:
+#             c.append(elem.angle)
+#         elif elem.__class__ == Sextupole:
+#             s.append(elem.k2)
+#         elif elem.__class__ == Undulator:
+#             u.append(elem.Kx + elem.Ky)
+#         elif elem.__class__ == Cavity:
+#             rf.append(elem.v)
+#         elif elem.__class__ == Multipole:
+#             m.append(sum(np.abs(elem.kn)))
+#     q_max = np.max(np.abs(q)) if len(q) != 0 else 0
+#     b_max = np.max(np.abs(b)) if len(b) != 0 else 0
+#     s_max = np.max(np.abs(s)) if len(s) != 0 else 0
+#     c_max = np.max(np.abs(c)) if len(c) != 0 else 0
+#     u_max = np.max(np.abs(u)) if len(u) != 0 else 0
+#     rf_max = np.max(np.abs(rf)) if len(rf) != 0 else 0
+#     m_max = np.max(m) if len(m) != 0 else 0
+#     ncols = np.sign(len(q)) + np.sign(len(b)) + np.sign(len(s)) + np.sign(len(c)) + np.sign(len(u)) + np.sign(
+#         len(rf)) + np.sign(len(m))
+#
+#     labels_dict = {}
+#     for elem in dict_copy.keys():
+#         labels_dict[elem] = dict_copy[elem]["label"]
+#     for elem in lat.sequence:
+#         if elem.__class__ in [Marker, Edge]:
+#             L += elem.l
+#             continue
+#         l = elem.l
+#         if l == 0:
+#             l = 0.03
+#         # type = elem.type
+#         scale = dict_copy[elem.__class__]["scale"]
+#         color = dict_copy[elem.__class__]["color"]
+#         label = dict_copy[elem.__class__]["label"]
+#         ecolor = dict_copy[elem.__class__]["edgecolor"]
+#         ampl = 1
+#         s_coord = np.array(
+#             [L + elem.l / 2. - l / 2., L + elem.l / 2. - l / 2., L + elem.l / 2. + l / 2., L + elem.l / 2. + l / 2.,
+#              L + elem.l / 2. - l / 2.]) + s_point
+#         if elem.__class__ == Quadrupole:
+#             ampl = elem.k1 / q_max if q_max != 0 else 1
+#             point, = ax.fill(s_coord, (np.array([-1, 1, 1, -1, -1]) + 1) * ampl * scale * y_scale, color,
+#                              edgecolor=ecolor,
+#                              alpha=alpha, label=dict_copy[elem.__class__]["label"])
+#             dict_copy[elem.__class__]["label"] = ""
+#
+#         elif elem.__class__ in [Bend, RBend, SBend]:
+#             ampl = elem.angle / b_max if b_max != 0 else 1
+#             point, = ax.fill(s_coord, (np.array([-1, 1, 1, -1, -1]) + 1) * ampl * scale * y_scale, color,
+#                              alpha=alpha, label=dict_copy[elem.__class__]["label"])
+#             dict_copy[elem.__class__]["label"] = ""
+#
+#         elif elem.__class__ in [Hcor, Vcor]:
+#
+#             ampl = elem.angle / c_max if c_max != 0 else 0.5
+#             # print c_max, elem.angle, ampl
+#             if elem.angle == 0:
+#                 ampl = 0.5
+#                 point, = ax.fill(s_coord, (np.array([-1, 1, 1, -1, -1])) * ampl * scale * y_scale, "lightcyan",
+#                                  edgecolor="k",
+#                                  alpha=0.5, label=dict_copy[elem.__class__]["label"])
+#             else:
+#                 point, = ax.fill(s_coord, (np.array([-1, 1, 1, -1, -1]) + 1) * ampl * scale * y_scale, color,
+#                                  edgecolor=ecolor,
+#                                  alpha=alpha, label=dict_copy[elem.__class__]["label"])
+#             dict_copy[Hcor]["label"] = ""
+#             dict_copy[Vcor]["label"] = ""
+#
+#         elif elem.__class__ == Sextupole:
+#             ampl = (elem.k2) / s_max if s_max != 0 else 1
+#             point, = ax.fill(s_coord, (np.array([-1, 1, 1, -1, -1]) + 1) * ampl * scale * y_scale, color,
+#                              alpha=alpha, label=dict_copy[elem.__class__]["label"])
+#             dict_copy[elem.__class__]["label"] = ""
+#
+#         elif elem.__class__ == Cavity:
+#             ampl = 1  # elem.v/rf_max if rf_max != 0 else 0.5
+#             point, = ax.fill(s_coord, np.array([-1, 1, 1, -1, -1]) * ampl * scale * y_scale, color,
+#                              alpha=alpha, edgecolor="lightgreen", label=dict_copy[elem.__class__]["label"])
+#             dict_copy[elem.__class__]["label"] = ""
+#
+#         elif elem.__class__ == Undulator:
+#             ampl = elem.Kx / u_max if u_max != 0 else 0.5
+#             point, = ax.fill(s_coord, np.array([-1, 1, 1, -1, -1]) * ampl * scale * y_scale, color,
+#                              alpha=alpha, label=dict_copy[elem.__class__]["label"])
+#             dict_copy[elem.__class__]["label"] = ""
+#
+#         elif elem.__class__ == Multipole:
+#             ampl = sum(elem.kn) / m_max if u_max != 0 else 0.5
+#             point, = ax.fill(s_coord, np.array([-1, 1, 1, -1, -1]) * ampl * scale * y_scale, color,
+#                              alpha=alpha, label=dict_copy[elem.__class__]["label"])
+#             dict_copy[elem.__class__]["label"] = ""
+#
+#         else:
+#             point, = ax.fill(s_coord, np.array([-1, 1, 1, -1, -1]) * ampl * scale * y_scale, color, edgecolor=ecolor,
+#                              alpha=alpha)
+#         annotation = ax.annotate(elem.__class__.__name__ + ": " + elem.id,
+#                                  xy=(L + l / 2., 0),  # xycoords='data',
+#                                  # xytext=(i + 1, i), textcoords='data',
+#                                  horizontalalignment="left",
+#                                  arrowprops=dict(arrowstyle="simple", connectionstyle="arc3,rad=+0.2"),
+#                                  bbox=dict(boxstyle="round", facecolor="w", edgecolor="0.5", alpha=0.9),
+#                                  fontsize=16
+#                                  )
+#         # by default, disable the annotation visibility
+#         annotation.set_visible(False)
+#         L += elem.l
+#         points_with_annotation.append([point, annotation])
+
+def plot_elems(fig, ax, lat, s_point=0, nturns=1, y_lim=None, y_scale=1, legend=True, font_size=18, excld_legend=None):
+    legend_font_size = font_size
+
+    if excld_legend is None:
+        excld_legend = []
+
+    dict_copy=copy.deepcopy(dict_plot)
+    alpha = 1
+    ax.set_ylim((-1, 1.5))
+    ax.tick_params(axis='both', labelsize=font_size)
+    if y_lim != None:
+        ax.set_ylim(y_lim)
+    points_with_annotation = []
+    L = 0.
+    q = []
+    b = []
+    c = []
+    s = []
+    u = []
+    rf = []
+    m = []
+    sol = []
+    for elem in lat.sequence:
+        if elem.__class__ == Quadrupole:
+            q.append(elem.k1)
+        elif elem.__class__ in [Bend, RBend, SBend]:
+            b.append(elem.angle)
+        elif elem.__class__ in [Hcor, Vcor]:
+            c.append(elem.angle)
+        elif elem.__class__ == Sextupole:
+            s.append(elem.k2)
+        elif elem.__class__ == Solenoid:
+            sol.append(elem.k)
+        elif elem.__class__ == Undulator:
+            u.append(elem.Kx + elem.Ky)
+        elif elem.__class__ in [Cavity, TWCavity, TDCavity]:
+            rf.append(elem.v)
+        elif elem.__class__ == Multipole:
+            m.append(sum(np.abs(elem.kn)))
+
+    q_max = np.max(np.abs(q)) if len(q) != 0 else 0
+    b_max = np.max(np.abs(b)) if len(b) != 0 else 0
+    s_max = np.max(np.abs(s)) if len(s) != 0 else 0
+    c_max = np.max(np.abs(c)) if len(c) != 0 else 0
+    u_max = np.max(np.abs(u)) if len(u) != 0 else 0
+    sol_max = np.max(np.abs(sol)) if len(sol) != 0 else 0
+    rf_max = np.max(np.abs(rf)) if len(rf) != 0 else 0
+    m_max = np.max(m) if len(m) !=0 else 0
+    ncols = np.sign(len(q)) + np.sign(len(b)) + np.sign(len(s)) + np.sign(len(c)) + np.sign(len(u)) + np.sign(len(rf))+ np.sign(len(m))
+
+    labels_dict = {}
+    for elem in dict_copy.keys():
+        labels_dict[elem] = dict_copy[elem]["label"]
+    for elem in lat.sequence:
+        if elem.__class__ in excld_legend:
+            L += elem.l
+            continue
+
+        if elem.__class__ in [Marker, Edge]:
+            L += elem.l
+            continue
+        l = elem.l
+        if l == 0:
+            l = 0.03
+        #type = elem.type
+        if elem.__class__ in dict_copy:
+            scale = dict_copy[elem.__class__]["scale"]
+            color = dict_copy[elem.__class__]["color"]
+            label = dict_copy[elem.__class__]["label"]
+            ecolor = dict_copy[elem.__class__]["edgecolor"]
+        else:
+            scale = dict_copy[UnknownElement]["scale"]
+            color = dict_copy[UnknownElement]["color"]
+            label = dict_copy[UnknownElement]["label"]
+            ecolor = dict_copy[UnknownElement]["edgecolor"]
+        ampl = 1
+        s_coord = np.array([L + elem.l/2. - l/2., L + elem.l/2. - l/2., L + elem.l/2. +l/2., L + elem.l/2. +l/2., L + elem.l/2.- l/2.]) + s_point
+
+        rect = np.array([-1, 1, 1, -1, -1])
+
+        if elem.__class__ == Quadrupole:
+            ampl = elem.k1/q_max if q_max != 0 else 1
+            point, = ax.fill(s_coord,  (rect + 1)*ampl*scale*y_scale, color, edgecolor=ecolor,
+                             alpha=alpha, label=dict_copy[elem.__class__]["label"])
+            dict_copy[elem.__class__]["label"] = ""
+
+        elif elem.__class__ == Solenoid:
+            ampl = elem.k/sol_max if sol_max != 0 else 1
+            point, = ax.fill(s_coord,  (rect + 1)*ampl*scale*y_scale, color, edgecolor=ecolor,
+                             alpha=alpha, label=dict_copy[elem.__class__]["label"])
+            dict_copy[elem.__class__]["label"] = ""
+
+        elif elem.__class__ in [Bend, RBend, SBend]:
+            ampl = elem.angle/b_max if b_max != 0 else 1
+            point, = ax.fill(s_coord, (rect+1)*ampl*scale*y_scale, color,
+                             alpha=alpha, label=dict_copy[elem.__class__]["label"])
+            dict_copy[elem.__class__]["label"] = ""
+
+        elif elem.__class__ in [Hcor, Vcor]:
+            ampl = elem.angle/c_max if c_max != 0 else 0.5
+            if elem.angle == 0:
+                ampl = 0.5
+                point, = ax.fill(s_coord, rect*ampl*scale*y_scale, "lightcyan",  edgecolor="k",
+                             alpha=0.5, label=dict_copy[elem.__class__]["label"])
+            else:
+                point, = ax.fill(s_coord, (rect+1)*ampl*scale*y_scale, color,  edgecolor=ecolor,
+                             alpha=alpha, label=dict_copy[elem.__class__]["label"])
+            dict_copy[Hcor]["label"] = ""
+            dict_copy[Vcor]["label"] = ""
+
+        elif elem.__class__ == Sextupole:
+            ampl = elem.k2/s_max if s_max != 0 else 1
+            point, = ax.fill(s_coord, (rect+1)*ampl*scale*y_scale, color,
+                             alpha=alpha, label=dict_copy[elem.__class__]["label"])
+            dict_copy[elem.__class__]["label"] = ""
+
+        elif elem.__class__ in [Cavity, TWCavity, TDCavity]:
+            ampl = 1
+            point, = ax.fill(s_coord, rect*ampl*scale*y_scale, color,
+                             alpha=alpha, edgecolor="lightgreen", label=dict_copy[elem.__class__]["label"])
+            dict_copy[elem.__class__]["label"] = ""
+
+        elif elem.__class__ == Undulator:
+            ampl = elem.Kx/u_max if u_max != 0 else 0.5
+            point, = ax.fill(s_coord, rect*ampl*scale*y_scale, color,
+                             alpha=alpha, label=dict_copy[elem.__class__]["label"])
+            dict_copy[elem.__class__]["label"] = ""
+
+        elif elem.__class__ == Multipole:
+            ampl = sum(elem.kn)/m_max if u_max != 0 else 0.5
+            point, = ax.fill(s_coord, rect*ampl*scale*y_scale, color,
+                             alpha=alpha, label=dict_copy[elem.__class__]["label"])
+            dict_copy[elem.__class__]["label"] = ""
+
+        else:
+            point, = ax.fill(s_coord, rect*ampl*scale*y_scale, color, edgecolor=ecolor,
+                             alpha=alpha)
+
+        annotation = ax.annotate(elem.__class__.__name__+": " + elem.id,
+            xy=(L+l/2., 0), #xycoords='data',
+            #xytext=(i + 1, i), textcoords='data',
+            horizontalalignment="left",
+            arrowprops=dict(arrowstyle="simple", connectionstyle="arc3,rad=+0.2"),
+            bbox=dict(boxstyle="round", facecolor="w", edgecolor="0.5", alpha=0.9),
+                                 fontsize=legend_font_size
+            )
+        # by default, disable the annotation visibility
+        annotation.set_visible(False)
+        L += elem.l
+        points_with_annotation.append([point, annotation])
+        ax.set_xlabel("s [m]", fontsize=font_size)
+
+    def on_move(event):
+        visibility_changed = False
+        for point, annotation in points_with_annotation:
+            should_be_visible = (point.contains(event)[0] == True)
+            if should_be_visible != annotation.get_visible():
+                visibility_changed = True
+                annotation.set_visible(should_be_visible)
+
+        if visibility_changed:
+            plt.draw()
+
+    on_move_id = fig.canvas.mpl_connect('motion_notify_event', on_move)
+    if legend:
+        ax.legend(loc='upper center', ncol=ncols, shadow=False, prop=font_manager.FontProperties(size=legend_font_size))
