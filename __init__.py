@@ -2,7 +2,8 @@
 pyIOTA accelerator control and analysis framework
 """
 
-__version__ = '0.6.0'
+__version__ = '0.6.1'
+__author__  = "Nikita Kuklev"
 
 # General imports - without these, most things will not work
 import numpy as np
