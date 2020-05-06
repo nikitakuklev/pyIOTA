@@ -120,14 +120,19 @@ class LatticeContainer:
                     print(f'Inserted at ({i}) - element is now ({seq[i].id})')
         return self
 
-    def transmute_elements(self, elements: Union[Element, Iterable[Element]], new_type: Type[Element]) -> LatticeContainer:
+    def transmute_elements(self,
+                           elements: Union[Element, Iterable[Element]],
+                           new_type: Type[Element],
+                           verbose: bool = False) -> LatticeContainer:
         """
         Transmutes element type to new one. Only length and id are preserved.
         :param elements: Elements to transmute
         :param new_type: New element type
+        :param verbose:
         :return: None
         """
         seq = self.lattice.sequence
+        l_seq = len(seq)
         if isinstance(elements, List) and isinstance(elements, List):
             assert all(isinstance(e, Element) for e in elements)
         elif isinstance(elements, Element):
@@ -144,11 +149,15 @@ class LatticeContainer:
             else:
                 new_el = new_type(eid=target.id)
                 if hasattr(target, 'l'):
-                    new_type.l = target.l
+                    new_el.l = target.l
+                else:
+                    raise Exception(f'Target ({target.id}) has no length attribute - is it an Element?')
                 i = seq.index(target)
                 seq[i] = new_el
-                print(f'Transmuted ({new_el.id}) at pos ({i}) from ({matches[0].__class__.__name__}) '
-                      f'to ({seq[i].__class__.__name__})')
+                if verbose: print(f'Transmuted ({new_el.id}) at pos ({i}) from ({matches[0].__class__.__name__}) '
+                                  f'to ({seq[i].__class__.__name__})')
+        assert l_seq == len(seq)
+        if not self.silent: print(f'Transmuted ({len(elements)}) elements')
         return self
 
     def split_elements(self, elements: Union[Element, Iterable[Element]], n_parts: int = 2) -> LatticeContainer:
@@ -179,8 +188,8 @@ class LatticeContainer:
             idx = seq_new.index(el)
             seq_new.remove(el)
             seq_new[idx:idx] = el_list  # means insert here
-        print(f'Split elements ({[el.id for el in elements]}) into ({n_parts}) parts - seq length'
-              f' ({len(seq)}) -> ({len(seq_new)})')
+        if not self.silent: print(f'Split elements ({[el.id for el in elements]}) into ({n_parts}) parts - seq length'
+                                  f' ({len(seq)}) -> ({len(seq_new)})')
         self.lattice.sequence = seq_new
         return self
 
@@ -355,7 +364,7 @@ class LatticeContainer:
                     c += 1
         print(f'Inserted ({a}) cleanly, ({b}) with drift splitting, ({c}) rejected: {rejected}')
 
-    def merge_drifts(self, exclusions: List[Drift] = None, verbose: bool = True):
+    def merge_drifts(self, exclusions: List[Drift] = None, verbose: bool = False, silent: bool = False):
         """
         Merges consecutive drifts in the lattice, except those in exclusions list
         :param exclusions:
@@ -379,18 +388,18 @@ class LatticeContainer:
                 if drift_mode:
                     l_new += el.l
                     name_new += '_' + el.id
-                    if verbose: print(f'Found consecutive drift ({el.id}) - length ({el.l})')
+                    if verbose: print(f'Found consecutive drift ({el.id}) - length ({el.l:.5f})')
                 else:
                     drift_mode = True
                     l_new += el.l
                     name_new += el.id
-                    if verbose: print(f'Found first drift ({el.id}) - length ({el.l})')
+                    if verbose: print(f'Found first drift ({el.id}) - length ({el.l:.5f})')
             else:
                 if is_exclusion:
                     print(f'Skipping drift ({el.id}) since it is excluded')
                 if drift_mode:
                     seq_new.append(Drift(l=l_new, eid=name_new))
-                    if verbose: print(f'Consecutive drifts ended - creating ({name_new}) of length ({l_new})')
+                    if verbose: print(f'Consecutive drifts ended - creating ({name_new}) of length ({l_new:.5f})')
                     name_new = ''
                     l_new = 0
                     drift_mode = False
@@ -400,7 +409,7 @@ class LatticeContainer:
             if verbose: print(f'Sequence ended - creating ({name_new}) of length ({l_new})')
             seq_new.append(Drift(l=l_new, eid=name_new))
 
-        print(f'Reduced element count from ({len(seq)}) to ({len(seq_new)}), ({cnt}) drifts remaining')
+        if not self.silent: print(f'Reduced element count from ({len(seq)}) to ({len(seq_new)}), ({cnt}) drifts remaining')
         if not np.isclose(l_total, sum([el.l for el in seq_new])):
             raise Exception(f'New sequence length ({sum([el.l for el in seq_new])} different from old ({l_total})!!!')
         self.lattice.sequence = seq_new
@@ -416,7 +425,16 @@ class LatticeContainer:
         else:
             return [el for el in self.lattice.sequence if isinstance(el, el_type)]
 
-    def get_first(self, el_name: str = None, el_type: Union[str, type] = None) -> Element:
+    def __getitem__(self, item) -> Element:
+        """
+        Gets element by id
+        :param item: Element name string
+        :return: Element
+        """
+        return self.get_first(el_name=item, exact=True, singleton_only=True)
+
+    def get_first(self, el_name: str = None, el_type: Union[str, type] = None,
+                  exact: bool = False, singleton_only: bool = False) -> Element:
         """
         Gets first element matching any non-None conditions
         :param el_name: Element name string
@@ -426,7 +444,10 @@ class LatticeContainer:
         seq = self.lattice.sequence.copy()
         if el_name:
             el_name = el_name.upper()
-            seq = [el for el in seq if el_name in el.id.upper()]
+            if exact:
+                seq = [el for el in seq if el_name == el.id.upper()]
+            else:
+                seq = [el for el in seq if el_name in el.id.upper()]
 
         if el_type:
             if isinstance(el_type, str):
@@ -435,9 +456,12 @@ class LatticeContainer:
                 seq = [el for el in seq if isinstance(el, el_type)]
 
         if len(seq) > 0:
+            if singleton_only:
+                if len(seq) > 1:
+                    raise Exception(f'Multiple matches found for (name:{el_name}|type:{el_type})')
             return seq[0]
         else:
-            raise Exception(f'No matches found for {el_name}|{el_type}')
+            raise Exception(f'No matches found for (name:{el_name}|type:{el_type})')
 
     def filter(self, fun: Callable) -> List[Element]:
         """
@@ -497,11 +521,11 @@ class LatticeContainer:
 
         def get_elements(self, el_type: Element):
             if isinstance(el_type, str):
-                raise Exception() # this is deprecated since had to do OCELOT classname bypasses
-                #matches = [el for el in self.seq if el.__class__.__name__ in el_type]
+                raise Exception()  # this is deprecated since had to do OCELOT classname bypasses
+                # matches = [el for el in self.seq if el.__class__.__name__ in el_type]
             else:
                 matches = [el for el in self.seq if type(el) == el_type]  # match type exactly, no inheritance
-                #print(el_type, len(matches), [m.id for m in matches], type(self.seq[0]))
+                # print(el_type, len(matches), [m.id for m in matches], type(self.seq[0]))
             for m in matches:
                 self.seq.remove(m)
             return matches
@@ -567,18 +591,19 @@ class ILMatrix(Matrix):
         self.extra_args = kwargs
         mdict = {}
         for i, plane in enumerate(['x', 'y']):
-            offset = i*2+1
-            sin_phi = np.sin(kwargs['nux']*2*np.pi)
-            #if np.isclose(sin_phi, 0, rtol=1.e-12, atol=1.e-12):
+            offset = i * 2 + 1
+            sin_phi = np.sin(kwargs['nux'] * 2 * np.pi)
+            # if np.isclose(sin_phi, 0, rtol=1.e-12, atol=1.e-12):
             #    sin_phi = 0.0
-            cos_phi = np.cos(kwargs['nux']*2*np.pi)
+            cos_phi = np.cos(kwargs['nux'] * 2 * np.pi)
             alpha1 = kwargs.get('alphax', 0.0)
-            alpha2 = -alpha1 # Tinsert
+            alpha2 = -alpha1  # Tinsert
             beta1 = kwargs.get('betax', 0.0)
             mdict[f'r{offset}{offset}'] = cos_phi + alpha1 * sin_phi
-            mdict[f'r{offset+1}{offset+1}'] = cos_phi - alpha1 * sin_phi
-            mdict[f'r{offset}{offset+1}'] = beta1 * sin_phi
-            mdict[f'r{offset+1}{offset}'] = -((1+alpha1*alpha2)/beta1) * sin_phi + ((alpha1-alpha2)/beta1) * cos_phi
+            mdict[f'r{offset + 1}{offset + 1}'] = cos_phi - alpha1 * sin_phi
+            mdict[f'r{offset}{offset + 1}'] = beta1 * sin_phi
+            mdict[f'r{offset + 1}{offset}'] = -((1 + alpha1 * alpha2) / beta1) * sin_phi + (
+                    (alpha1 - alpha2) / beta1) * cos_phi
         mdict['r55'] = 1.0
         mdict['r66'] = 1.0
         super().__init__(eid=eid, l=l, **mdict)
