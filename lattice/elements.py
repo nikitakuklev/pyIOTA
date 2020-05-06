@@ -409,7 +409,8 @@ class LatticeContainer:
             if verbose: print(f'Sequence ended - creating ({name_new}) of length ({l_new})')
             seq_new.append(Drift(l=l_new, eid=name_new))
 
-        if not self.silent: print(f'Reduced element count from ({len(seq)}) to ({len(seq_new)}), ({cnt}) drifts remaining')
+        if not self.silent: print(
+            f'Reduced element count from ({len(seq)}) to ({len(seq_new)}), ({cnt}) drifts remaining')
         if not np.isclose(l_total, sum([el.l for el in seq_new])):
             raise Exception(f'New sequence length ({sum([el.l for el in seq_new])} different from old ({l_total})!!!')
         self.lattice.sequence = seq_new
@@ -433,8 +434,12 @@ class LatticeContainer:
         """
         return self.get_first(el_name=item, exact=True, singleton_only=True)
 
-    def get_first(self, el_name: str = None, el_type: Union[str, type] = None,
-                  exact: bool = False, singleton_only: bool = False) -> Element:
+    def get_first(self,
+                  el_name: str = None,
+                  el_type: Union[str, type] = None,
+                  exact: bool = False,
+                  singleton_only: bool = False,
+                  last: bool = False) -> Element:
         """
         Gets first element matching any non-None conditions
         :param el_name: Element name string
@@ -459,9 +464,19 @@ class LatticeContainer:
             if singleton_only:
                 if len(seq) > 1:
                     raise Exception(f'Multiple matches found for (name:{el_name}|type:{el_type})')
-            return seq[0]
+            if last:
+                return seq[-1]
+            else:
+                return seq[0]
         else:
             raise Exception(f'No matches found for (name:{el_name}|type:{el_type})')
+
+    def get_last(self,
+                 el_name: str = None,
+                 el_type: Union[str, type] = None,
+                 exact: bool = False,
+                 singleton_only: bool = False):
+        return self.get_first(el_name, el_type, exact, singleton_only, last=True)
 
     def filter(self, fun: Callable) -> List[Element]:
         """
@@ -544,9 +559,9 @@ class LatticeContainer:
         Should fail-fast if incompatible features are found.
         :return:
         """
+        import pyIOTA.elegant as elegant
         assert isinstance(fpath, Path) and isinstance(lattice_options, dict)
-        import pyIOTA.elegant.latticefile
-        wr = pyIOTA.elegant.latticefile.Writer(options=lattice_options)
+        wr = elegant.Writer(options=lattice_options)
         return wr.write_lattice_ng(fpath=fpath, box=self, save=not dry_run)
 
 

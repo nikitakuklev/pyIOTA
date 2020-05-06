@@ -1,18 +1,45 @@
-__all__ = ['Generator']
+__all__ = ['Generator', 'Parser']
 
 import itertools
 import random
 import collections
+from pathlib import Path
+from typing import Union, Any, Iterable, Tuple
+
 import numpy as np
 import pandas as pd
 
 
 class Parser:
-    def __init__(self, ):
+    def __init__(self):
         pass
 
-    def parse(self, name):
-        pass
+    def parse(self, file: Path):
+        roots = str(file.name).split('__')
+        assert len(roots) == 2
+        sim_name = roots[0]
+        param_string = roots[1].rsplit('.', 1)[0]
+        param_string = param_string.strip('_')
+        param_splits = param_string.split('_')
+        if not len(param_splits) % 2 == 0:
+            raise Exception(f'Parse issue: {param_splits}')
+        keys = param_splits[::2]
+        values_temp = param_splits[1::2]
+        values = []
+        for v in values_temp:
+            try:
+                values.append(float(v))
+            except ValueError:
+                values.append(v)
+        d = {k: v for (k, v) in zip(keys, values)}
+        d['name'] = sim_name
+        return d
+
+    def parse_list(self, name_list):
+        data_dicts = []
+        for name in name_list:
+            data_dicts.append(self.parse(name))
+        return pd.DataFrame(data=data_dicts)
 
 
 class Generator:
@@ -35,9 +62,15 @@ class Generator:
         [ls.append(sublist) if isinstance(sublist, str) else ls.extend(sublist) for sublist in self.parameters]
         return ls
 
-    def add_parameter(self, parameter, values, override=False) -> None:
+    def add_parameter(self,
+                      parameter: Union[str, Tuple[str]],
+                      values: Union[Any, Iterable[Any]],
+                      override: bool = False):
         """
-        Add a parameter.
+        Add a parameter to list. Acceptable syntax:
+            'param',value or list of values
+            ('param1','param2',...),value or list of values
+            ('param1','param2',...),[('value1','value2',...),('value1','value2',...)]
         :param override: Whether value replacement is allowed
         :param parameter: Either string or tuple of strings. If tuple, parameters are treated as linked (have same value)
         :param values: List or array of values
@@ -45,8 +78,13 @@ class Generator:
         """
         assert not self.name_links
         if not override: assert parameter not in self.parameters
-        assert isinstance(parameter, str) or (
-                    isinstance(parameter, tuple) and all((isinstance(ps, str) for ps in parameter)))
+        is_single_param = isinstance(parameter, str)
+        is_multiple_param = (isinstance(parameter, tuple) and all((isinstance(ps, str) for ps in parameter)))
+        assert is_single_param or is_multiple_param
+        if is_multiple_param and isinstance(values, (collections.Sequence, np.ndarray)):
+            assert all(len(v) == len(parameter) for v in values)
+        if is_multiple_param and isinstance(values, tuple):
+            assert len(values) == len(parameter)
         if isinstance(values, (collections.Sequence, np.ndarray)) and not isinstance(values, str):
             values = list(values)
         else:
@@ -72,7 +110,7 @@ class Generator:
         assert all([l in self._flatten_parameters() for l in links])
         self.name_links[link_name] = links.copy()
 
-    def generate_sets(self, downsample_to=None, generate_labels=True) -> pd.DataFrame:
+    def generate_sets(self, downsample_to: int = None, generate_labels: bool = True) -> pd.DataFrame:
         """
         Use all current parameters to generate permutations, and output resulting set as DataFrame.
         :param generate_labels:
@@ -103,7 +141,7 @@ class Generator:
                         df_data[sub_p] = np.array([v[p_idx] for v in permutations])
                     # print(sub_p, df_data[sub_p][0])
                 p_idx += 1
-        #print(df_data)
+        # print(df_data)
         df = pd.DataFrame(data=df_data)
         if generate_labels:
             self.name_links['label'] = df.columns
