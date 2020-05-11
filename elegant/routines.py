@@ -31,7 +31,7 @@ def template_fma_setup(box: LatticeContainer,
 
     if 'chrom' in kwargs:
         chrom = kwargs['chrom']
-        if chrom[1] != np.nan:
+        if not np.isnan(chrom[1]):
             t.setup_chromaticity(families=chrom[0], dnux_dp=chrom[1], dnuy_dp=chrom[2],
                                  change_defined_values=1, n_iterations=10, exit_on_failure=1)
 
@@ -50,3 +50,7 @@ def template_fma_setup(box: LatticeContainer,
         raise Exception('RF mode MUST be specified')
 
     t.setup_bunched_beam()
+
+
+def fma_read_results():
+    pass

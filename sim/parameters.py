@@ -80,12 +80,17 @@ class Generator:
         if not override: assert parameter not in self.parameters
         is_single_param = isinstance(parameter, str)
         is_multiple_param = (isinstance(parameter, tuple) and all((isinstance(ps, str) for ps in parameter)))
+        is_value_list = isinstance(values, (collections.Sequence, np.ndarray, tuple))
         assert is_single_param or is_multiple_param
-        if is_multiple_param and isinstance(values, (collections.Sequence, np.ndarray)):
-            assert all(len(v) == len(parameter) for v in values)
-        if is_multiple_param and isinstance(values, tuple):
-            assert len(values) == len(parameter)
-        if isinstance(values, (collections.Sequence, np.ndarray)) and not isinstance(values, str):
+        if is_multiple_param:
+            if is_value_list:
+                if all(isinstance(v, tuple) for v in values):
+                    # tuple of values, 1 for each parameter
+                    assert all(len(v) == len(parameter) for v in values)
+                else:
+                    # parameters share same value
+                    pass
+        if is_value_list and not isinstance(values, str):
             values = list(values)
         else:
             values = [values]

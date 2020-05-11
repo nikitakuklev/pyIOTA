@@ -212,9 +212,13 @@ class Task:
     @task(name='frequency_map')
     def action_frequency_map(self, *args, silent=False, quadratic_spacing=False, full_grid_output=True,
                              include_changes=False, x=None, nX=None, y=None, nY=None, d=None, nD=None, **kwargs):
-        strings = [f'output = {self.rf}/%s.fma',
-                   f'xmin = 1e-6',
-                   f'ymin = 1e-6',]
+        strings = [f'output = {self.rf}/%s.fma']
+        # If in kwargs, they will get auto-placed by annotating method
+        if 'xmin' not in kwargs:
+            strings.append('xmin = 1e-6')
+        if 'ymin' not in kwargs:
+            strings.append('ymin = 1e-6')
+
         if silent:  # default 1
             strings.append('verbosity = 0')
         if quadratic_spacing:

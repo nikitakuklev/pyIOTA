@@ -72,7 +72,7 @@ def plot_simple(*args,
                 axy.plot(v, fmt, label=i, zorder=z, **kwargs)
             # ax.set_title(f"{i}|{k}")
         axy.legend(loc=5)
-    ax.set_zorder(axy.get_zorder() + 1)
+        ax.set_zorder(axy.get_zorder() + 1)
     ax.patch.set_visible(False)
     fig.tight_layout()
     return fig, ax
@@ -129,7 +129,7 @@ def plot_simple_grid(*args,
 
 
 def plot_opt_func(fig, lat, tws, top_plot=["Dx"], legend=False, fig_name=None, grid=True, font_size=12,
-                  excld_legend=None):
+                  excld_legend=None, ontop:bool = False):
     """
     Modified from OCELOT
 
@@ -174,22 +174,27 @@ def plot_opt_func(fig, lat, tws, top_plot=["Dx"], legend=False, fig_name=None, g
     ax_el.grid(grid)
 
     fig.subplots_adjust(hspace=0)
-    beta_x = [p.beta_x for p in tws]
-    beta_y = [p.beta_y for p in tws]
-    S = [p.s for p in tws]
+    if not isinstance(tws[0], list):
+        tws_list = [tws]
+    else:
+        tws_list = tws
 
-    plt.xlim(S[0], S[-1])
+    for i, tws in enumerate(tws_list):
+        beta_x = [p.beta_x for p in tws]
+        beta_y = [p.beta_y for p in tws]
+        S = [p.s for p in tws]
 
-    plot_disp(ax_top, tws, top_plot, font_size)
-
-    plot_betas(ax_b, S, beta_x, beta_y, font_size)
+        plt.xlim(S[0], S[-1])
+        label = str(i+1) if i > 0 else ''
+        plot_disp(ax_top, tws, top_plot, font_size)
+        plot_betas(ax_b, S, beta_x, beta_y, font_size, label)
     #new_plot_elems(ax_el, lat, s_point = S[0], legend = legend, y_scale=0.8)  # plot elements
     plot_elems(fig, ax_el, lat, s_point=S[0], legend=legend, y_scale=0.8, font_size=font_size,
                    excld_legend=excld_legend)
     return fig, ax_top, ax_b, ax_el
 
 
-def plot_betas(ax, S, beta_x, beta_y, font_size):
+def plot_betas(ax, S, beta_x, beta_y, font_size, label=''):
     """
     From OCELOT
     :param ax:
@@ -200,8 +205,8 @@ def plot_betas(ax, S, beta_x, beta_y, font_size):
     :return:
     """
     ax.set_ylabel(r"$\beta_{x,y}$ [m]", fontsize=font_size)
-    ax.plot(S, beta_x, 'b', lw=2, label=r"$\beta_{x}$")
-    ax.plot(S, beta_y, 'r--', lw=2, label=r"$\beta_{y}$")
+    ax.plot(S, beta_x, 'b', lw=2, label=r"$\beta_{x}$" + f" {label}")
+    ax.plot(S, beta_y, 'r--', lw=2, label=r"$\beta_{y}$" + f" {label}")
     ax.tick_params(axis='both', labelsize=font_size)
     leg = ax.legend(loc='upper left', shadow=False, fancybox=True, prop=font_manager.FontProperties(size=font_size))
     leg.get_frame().set_alpha(0.2)
