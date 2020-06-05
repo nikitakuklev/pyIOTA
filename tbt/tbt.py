@@ -45,6 +45,16 @@ class Kick:
                  parent_sequence: Optional['KickSequence'] = None,
                  file_name: str = None,
                  trim: Tuple = None):
+        """
+        Represents a single kick (continuous TBT time series) measured by multiple BPMs
+
+        :param df: DataFrame row with all data
+        :param kick_id: Integer kick id, will be used to sort
+        :param bpm_list: Optional sequence of good BPMs
+        :param parent_sequence: Optional parent KickSequence
+        :param file_name:
+        :param trim:
+        """
         for ck in critical_keys:
             if ck not in df.columns:
                 raise Exception(f'Missing critical key ({ck})')

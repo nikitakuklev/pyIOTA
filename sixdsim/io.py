@@ -1,6 +1,7 @@
 __all__ = ['Knob', 'KnobVariable', 'parse_knobs', 'parse_lattice']
 
 import itertools
+import logging
 import operator
 import time
 from pathlib import Path
@@ -12,6 +13,8 @@ from ocelot import Monitor, Vcor, Hcor, Solenoid, SBend, Cavity, Edge,\
     Quadrupole, Drift, Element, Sextupole, Multipole
 from pyIOTA.acnet.frontends import DoubleDevice, DoubleDeviceSet
 import pyIOTA.iota.run2
+
+logger = logging.getLogger(__name__)
 
 # Static methods to parse files from 6Dsim format
 
@@ -315,8 +318,9 @@ def parse_lattice(fpath: Path, verbose: bool = False):
         oel.shift = props['Shift'] / 100.0
         monitors_ocelot.append(oel)
 
-    print(f'Parsed OK - {len(lattice_ocelot)} objects, '
-          f'{len(correctors_ocelot)} correctors, {len(monitors_ocelot)} monitors')
+    logger.info(f'Parsed {len(lattice_ocelot)} objects, {len(correctors_ocelot)} correctors, {len(monitors_ocelot)} monitors')
+    #print(f'Parsed OK - {len(lattice_ocelot)} objects, '
+    #      f'{len(correctors_ocelot)} correctors, {len(monitors_ocelot)} monitors')
 
     info_dict = {'source_file': str(fpath), 'source': '6dsim', 'pc': pc, 'N': N}
     var_dict = {k: KnobVariable(kind='$', var='$' + k, value=v) for k, v in lattice_vars.items()}

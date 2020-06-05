@@ -13,6 +13,8 @@ logger = logging.getLogger(__name__)
 
 
 class LatticeContainer:
+    logger = logging.getLogger('LatticeContainer')
+
     def __init__(self,
                  name: str,
                  lattice: List,
@@ -36,7 +38,8 @@ class LatticeContainer:
         self.silent = silent
 
         if reset_elements_to_defaults:
-            print(f'WARN - resetting any nonlinear elements to 0')
+            logger.warning(f'Resetting any nonlinear elements to 0')
+            # print(f'WARN - resetting any nonlinear elements to 0')
             elems = [l for l in self.lattice_list if isinstance(l, Sextupole)]
             for el in elems:
                 el.k2 = 0
@@ -50,7 +53,8 @@ class LatticeContainer:
         else:
             self.lattice = MagneticLattice(tuple(self.lattice_list), method=method)
 
-        if not silent: print(f'Lattice ({self.name}) initialized')
+        # if not silent: print(f'Lattice ({self.name}) initialized')
+        if not silent: logger.info(f'Lattice ({self.name}) initialized')
         # self.twiss = twiss(self.lattice)
 
     def insert_correctors(self, destroy_skew_quads: bool = True):
@@ -83,8 +87,9 @@ class LatticeContainer:
             i = seq.index(new_start)
             self.lattice.sequence = seq[i:] + seq[:i]
             if not self.silent:
-                print(f'Rotated by ({i}) - starting element is now ({self.lattice.sequence[0].id}) and ending'
-                      f' element is ({self.lattice.sequence[-1].id})')
+                logger.info(f'Rotated by ({i}) - starting element is ({self.lattice.sequence[0].id}) and ending'
+                            f' is ({self.lattice.sequence[-1].id})')
+        assert len(seq) == len(self.lattice.sequence)
         return self
 
     def replace_elements(self, old_el: Union[Element, Iterable], new_el: Union[Element, Iterable]) -> LatticeContainer:
@@ -157,7 +162,8 @@ class LatticeContainer:
                 if verbose: print(f'Transmuted ({new_el.id}) at pos ({i}) from ({matches[0].__class__.__name__}) '
                                   f'to ({seq[i].__class__.__name__})')
         assert l_seq == len(seq)
-        if not self.silent: print(f'Transmuted ({len(elements)}) elements')
+        # if not self.silent: print(f'Transmuted ({len(elements)}) elements')
+        if not self.silent: logger.info(f'Transmuted ({len(elements)}) elements')
         return self
 
     def split_elements(self, elements: Union[Element, Iterable[Element]], n_parts: int = 2) -> LatticeContainer:
@@ -188,10 +194,34 @@ class LatticeContainer:
             idx = seq_new.index(el)
             seq_new.remove(el)
             seq_new[idx:idx] = el_list  # means insert here
-        if not self.silent: print(f'Split elements ({[el.id for el in elements]}) into ({n_parts}) parts - seq length'
-                                  f' ({len(seq)}) -> ({len(seq_new)})')
+        assert len(seq_new) == len(seq) + len(elements) * (n_parts - 1)
+        if not self.silent:
+            logger.info(f'Split elements ({[el.id for el in elements]}) into ({n_parts}) parts - seq length'
+                        f' ({len(seq)}) -> ({len(seq_new)})')
         self.lattice.sequence = seq_new
         return self
+
+    def insert_elements(self, new_element: Element, before: Element = None, after: Element = None):
+        """
+        Inserts element before or after another element
+        """
+        seq = self.lattice.sequence
+        seq_new = []
+        assert before or after
+        assert not (before and after)
+        target = before or after
+        for i, el in enumerate(seq):
+            if el == target:
+                if before:
+                    seq_new.append(new_element)
+                    seq_new.append(el)
+                else:
+                    seq_new.append(el)
+                    seq_new.append(new_element)
+            else:
+                seq_new.append(el)
+        logger.info(f'Inserted ({len(seq_new) - len(seq)}) markers')
+        self.lattice.sequence = seq_new
 
     def get_response_matrix(self):
         """
@@ -220,7 +250,8 @@ class LatticeContainer:
             slist.append(el.s_mid)
         return slist
 
-    def update_twiss(self, n_points: int = None):
+    def update_twiss(self, n_points: int = None, update_maps: bool = True):
+        self.lattice.update_transfer_maps()
         return twiss(self.lattice, nPoints=n_points)
 
     def remove_markers(self):
@@ -362,7 +393,8 @@ class LatticeContainer:
                         f'{occupant.id} - length {occupant.l}m, closest edges ({np.max(s[s < m.s_mid])}|{np.min(s[s > m.s_mid])})')
                     rejected.append(m.id)
                     c += 1
-        print(f'Inserted ({a}) cleanly, ({b}) with drift splitting, ({c}) rejected: {rejected}')
+        # print(f'Inserted ({a}) cleanly, ({b}) with drift splitting, ({c}) rejected: {rejected}')
+        logger.info(f'Inserted ({a}) cleanly, ({b}) with drift splitting, ({c}) rejected: {rejected}')
 
     def merge_drifts(self, exclusions: List[Drift] = None, verbose: bool = False, silent: bool = False):
         """

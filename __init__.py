@@ -10,5 +10,7 @@ import numpy as np
 import pandas as pd
 import logging
 
-logging.basicConfig()
+logging.basicConfig(format='[%(asctime)s] {%(name)s:%(funcName)s:%(lineno)d} %(levelname)s - %(message)s', level=logging.INFO)
 
+#%(module)s
+#%(pathname)s
