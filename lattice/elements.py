@@ -5,9 +5,9 @@ __all__ = ['LatticeContainer', 'NLLens', 'HKPoly', 'ILMatrix', 'OctupoleInsert']
 import logging
 from pathlib import Path
 
-from typing import Union, List, Dict, Type, Iterable, Callable
+from typing import Union, List, Dict, Type, Iterable, Callable, Optional
 from ocelot.cpbd.elements import *
-from ocelot import MagneticLattice, twiss
+from ocelot import MagneticLattice, twiss, MethodTM
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +23,7 @@ class LatticeContainer:
                  reset_elements_to_defaults: bool = True,
                  info: Dict = None,
                  variables: Dict = None,
-                 method=None,
+                 method: MethodTM = None,
                  silent: bool = True):
         if not info:
             info = {'source_file': 'unknown', 'source': 'unknown', 'pc': 0.0}
@@ -72,7 +72,7 @@ class LatticeContainer:
         """
         Changes lattice origin, moving entries to the end, by analogy to a circular buffer.
         :param new_start: New starting element
-        :return: None
+        :return: LatticeContainer
         """
         seq = self.lattice.sequence
         self.lattice.sequence_original = seq
@@ -97,7 +97,7 @@ class LatticeContainer:
         Swaps out elements. Throws exception if more than one match found.
         :param old_el: Old element, or list of elements
         :param new_el: New element, or list of elements
-        :return: None
+        :return: LatticeContainer
         """
         seq = self.lattice.sequence
         if isinstance(old_el, List) and isinstance(new_el, List):
@@ -134,7 +134,7 @@ class LatticeContainer:
         :param elements: Elements to transmute
         :param new_type: New element type
         :param verbose:
-        :return: None
+        :return: LatticeContainer
         """
         seq = self.lattice.sequence
         l_seq = len(seq)
@@ -171,7 +171,7 @@ class LatticeContainer:
         Splits elements into several parts, scaling parameters appropriately
         :param elements: Element or list of elements to be split
         :param n_parts: Number of parts to split into
-        :return:
+        :return: LatticeContainer
         """
         from copy import deepcopy
         seq = self.lattice.sequence
@@ -201,27 +201,57 @@ class LatticeContainer:
         self.lattice.sequence = seq_new
         return self
 
-    def insert_elements(self, new_element: Element, before: Element = None, after: Element = None):
+    def insert_elements(self,
+                        elements: Union[Element, Iterable[Element]],
+                        before: Element = None,
+                        after: Element = None) -> LatticeContainer:
         """
         Inserts element before or after another element
+        :param elements: Elements to insert
+        :param before: Insert before this element
+        :param after: Insert after this element (if before is not specified)
         """
         seq = self.lattice.sequence
         seq_new = []
         assert before or after
         assert not (before and after)
         target = before or after
+        if not isinstance(elements, list):
+            elements = [elements]
         for i, el in enumerate(seq):
             if el == target:
                 if before:
-                    seq_new.append(new_element)
+                    seq_new.extend(elements)
                     seq_new.append(el)
                 else:
                     seq_new.append(el)
-                    seq_new.append(new_element)
+                    seq_new.extend(elements)
             else:
                 seq_new.append(el)
         logger.info(f'Inserted ({len(seq_new) - len(seq)}) markers')
         self.lattice.sequence = seq_new
+        return self
+
+    def remove_markers(self):
+        """
+        Remove all markers
+        :return: LatticeContainer
+        """
+        len_old = len(self.lattice.sequence)
+        self.lattice.sequence = [s for s in self.lattice.sequence if not isinstance(s, Marker)]
+        logger.info(f'Removed ({len_old - len(self.lattice.sequence)}) markers')
+        return self
+
+    def remove_monitors(self):
+        """
+        Remove all monitors from sequence. Note that this WILL BREAK THINGS, since monitors are referenced
+        to drifts before insertion splitting. Will be resolved...eventually.
+        :return: None
+        """
+        len_old = len(self.lattice.sequence)
+        print([s.id for s in self.lattice.sequence if isinstance(s, Monitor)])
+        self.lattice.sequence = [s for s in self.lattice.sequence if not isinstance(s, Monitor)]
+        logger.info(f'Removed ({len_old - len(self.lattice.sequence)}) monitors')
 
     def get_response_matrix(self):
         """
@@ -237,7 +267,7 @@ class LatticeContainer:
 
     def update_element_positions(self):
         """
-        Updates the s-values of all elements
+        Updates the s-values of all elements. Does not overwrite default ocelot 's' parameter - use 's_mid' instead
         :return: None
         """
         l = 0.0
@@ -251,28 +281,9 @@ class LatticeContainer:
         return slist
 
     def update_twiss(self, n_points: int = None, update_maps: bool = True):
-        self.lattice.update_transfer_maps()
+        if update_maps:
+            self.lattice.update_transfer_maps()
         return twiss(self.lattice, nPoints=n_points)
-
-    def remove_markers(self):
-        """
-        Remove all markers from sequence.
-        :return: None
-        """
-        len_old = len(self.lattice.sequence)
-        self.lattice.sequence = [s for s in self.lattice.sequence if not isinstance(s, Marker)]
-        print(f'Removed ({len_old - len(self.lattice.sequence)}) markers')
-
-    def remove_monitors(self):
-        """
-        Remove all monitors from sequence. Note that this WILL BREAK THINGS, since monitors are referenced
-        to drifts before insertion splitting. Will be resolved...eventually.
-        :return: None
-        """
-        len_old = len(self.lattice.sequence)
-        print([s.id for s in self.lattice.sequence if isinstance(s, Monitor)])
-        self.lattice.sequence = [s for s in self.lattice.sequence if not isinstance(s, Monitor)]
-        print(f'Removed ({len_old - len(self.lattice.sequence)}) monitors')
 
     def insert_extra_markers(self, spacing: float = 1.0):
         """
@@ -447,24 +458,7 @@ class LatticeContainer:
             raise Exception(f'New sequence length ({sum([el.l for el in seq_new])} different from old ({l_total})!!!')
         self.lattice.sequence = seq_new
 
-    def get_elements(self, el_type: Union[str, type] = None):
-        """
-        Gets all elements of type in current sequence
-        :param el_type:
-        :return:
-        """
-        if isinstance(el_type, str):
-            return [el for el in self.lattice.sequence if el.__class__.__name__ in el_type]
-        else:
-            return [el for el in self.lattice.sequence if isinstance(el, el_type)]
-
-    def __getitem__(self, item) -> Element:
-        """
-        Gets element by id
-        :param item: Element name string
-        :return: Element
-        """
-        return self.get_first(el_name=item, exact=True, singleton_only=True)
+    # Getters/setters
 
     def get_first(self,
                   el_name: str = None,
@@ -474,6 +468,9 @@ class LatticeContainer:
                   last: bool = False) -> Element:
         """
         Gets first element matching any non-None conditions
+        :param last:
+        :param singleton_only:
+        :param exact:
         :param el_name: Element name string
         :param el_type: Class object or name string
         :return: Element
@@ -509,6 +506,28 @@ class LatticeContainer:
                  exact: bool = False,
                  singleton_only: bool = False):
         return self.get_first(el_name, el_type, exact, singleton_only, last=True)
+
+    def get_elements(self, el_type: Union[str, type] = None) -> List[Optional[type]]:
+        """
+        Gets all elements of type in sequence
+        :param el_type:
+        :return: List of elements
+        """
+        if isinstance(el_type, str):
+            return [el for el in self.lattice.sequence if el.__class__.__name__ in el_type]
+        else:
+            return [el for el in self.lattice.sequence if isinstance(el, el_type)]
+
+    def get_all(self, el_type: Union[str, type] = None) -> List[Optional[type]]:
+        return self.get_elements(el_type)
+
+    def __getitem__(self, item) -> Element:
+        """
+        Gets element by id
+        :param item: Element name string
+        :return: Element
+        """
+        return self.get_first(el_name=item, exact=True, singleton_only=True)
 
     def filter(self, fun: Callable) -> List[Element]:
         """

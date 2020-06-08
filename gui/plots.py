@@ -1,5 +1,7 @@
 import copy
+import logging
 
+import math
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -9,6 +11,8 @@ from pyIOTA.lattice.elements import ILMatrix
 from matplotlib import font_manager
 from ocelot import Quadrupole, Bend, SBend, RBend, Vcor, Hcor, Sextupole, Undulator, \
     Cavity, Multipole, Marker, Edge, Octupole, Matrix, Monitor, Drift, Solenoid, UnknownElement, TDCavity, TWCavity
+
+logger = logging.getLogger(__name__)
 
 
 def plot_simple(*args,
@@ -80,26 +84,29 @@ def plot_simple(*args,
 
 def plot_simple_grid(*args,
                      nperrow: int = 11,
-                     sizes: Tuple = (2, 2),
+                     sizes: Tuple[int, int] = (2, 2),
                      demean: bool = True,
                      paired_bpm_mode: bool = False):
     """
-    Simple routine to plot a grid of data sharing x/y axes, with 1 plot per each dictionary key
-    :param demean:
-    :param paired_bpm_mode:
-    :param nperrow:
-    :param sizes:
-    :return:
+    Plot a grid of data sharing x/y axes. Each top level argument creates a new plot grid.
+    Each argument must be a dict or list of dicts. One plot per each entry (after flattening) is produced.
+    All entries my either be arrays (Y), or 2-tuples of arrays (X,Y)
+    :param demean: Whether to demean Y data
+    :param paired_bpm_mode: IOTA specific - special mode to plot left-right BPM pairs in same columns
+    :param nperrow: Plots per row
+    :param sizes: Figure size per each row/column
+    :return: fig, ax
     """
+    fig = ax = None
     for data_dict in args:
         if isinstance(data_dict, list):
             data_dict = {k: v for d in data_dict for k, v in d.items()}
         if not isinstance(data_dict, dict):
             raise Exception(f'Supplied argument is not a dict: {data_dict.__class__}')
         if len(data_dict) == 0:
-            print('Skipping empty plot')
+            logger.warning('Skipping empty plot')
             continue
-        n_rows = len(data_dict) // nperrow + 1
+        n_rows = math.ceil(len(data_dict) / nperrow)
         fig, ax = plt.subplots(n_rows, nperrow, figsize=(sizes[0] * nperrow, sizes[1] * n_rows),
                                sharex=True, sharey=True)
         if paired_bpm_mode:
@@ -121,9 +128,17 @@ def plot_simple_grid(*args,
         else:
             ax = ax.flatten()
             for i, (k, v) in enumerate(data_dict.items()):
+                if isinstance(v, tuple):
+                    x = v[0]
+                    y = v[1]
+                elif isinstance(v, np.ndarray):
+                    x = np.arange(len(v))
+                    y = v
+                else:
+                    raise Exception(f'Unknown data type: ({type(v)})')
                 if demean:
-                    v = v - np.nanmean(v)
-                ax[i].plot(v)
+                    y = y - np.nanmean(y)
+                ax[i].plot(x,y)
                 ax[i].set_title(f"{i}|{k}")
     return fig, ax
 
@@ -188,7 +203,7 @@ def plot_opt_func(fig, lat, tws, top_plot=["Dx"], legend=False, fig_name=None, g
         label = str(i+1) if i > 0 else ''
         plot_disp(ax_top, tws, top_plot, font_size)
         plot_betas(ax_b, S, beta_x, beta_y, font_size, label)
-    #new_plot_elems(ax_el, lat, s_point = S[0], legend = legend, y_scale=0.8)  # plot elements
+    # new_plot_elems(ax_el, lat, s_point = S[0], legend = legend, y_scale=0.8)  # plot elements
     plot_elems(fig, ax_el, lat, s_point=S[0], legend=legend, y_scale=0.8, font_size=font_size,
                    excld_legend=excld_legend)
     return fig, ax_top, ax_b, ax_el
@@ -213,7 +228,7 @@ def plot_betas(ax, S, beta_x, beta_y, font_size, label=''):
 
 
 def plot_alphas(ax, S, x, y, font_size):
-    #ax.set_ylabel(r"$\beta_{x,y}$ [m]", fontsize=font_size)
+    # ax.set_ylabel(r"$\beta_{x,y}$ [m]", fontsize=font_size)
     ax.plot(S, x, 'b', lw=2, label=r"$\alpha_{x}$")
     ax.plot(S, y, 'r--', lw=2, label=r"$\alpha_{y}$")
     ax.tick_params(axis='both', labelsize=font_size)

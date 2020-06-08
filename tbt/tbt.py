@@ -1,5 +1,6 @@
 import copy
 import enum
+import logging
 from typing import Union, Callable, Dict, List, Iterable, Tuple, Optional, Any
 
 import numpy as np
@@ -14,6 +15,8 @@ from scipy.signal import hilbert, chirp, butter, filtfilt
 from pyIOTA.tbt.naff import NAFF
 
 import pyIOTA.acnet.utils as acutils
+
+logger = logging.getLogger(__name__)
 
 special_keys = acutils.special_keys.copy()
 
@@ -44,7 +47,8 @@ class Kick:
                  bpm_list: Optional[Iterable] = None,
                  parent_sequence: Optional['KickSequence'] = None,
                  file_name: str = None,
-                 trim: Tuple = None):
+                 trim: Tuple = None,
+                 iota_defaults: bool = False):
         """
         Represents a single kick (continuous TBT time series) measured by multiple BPMs
 
@@ -57,7 +61,7 @@ class Kick:
         """
         for ck in critical_keys:
             if ck not in df.columns:
-                raise Exception(f'Missing critical key ({ck})')
+                raise Exception(f'Missing critical dataframe column: ({ck})')
 
         self.df = df
         self.idx = kick_id
@@ -69,9 +73,13 @@ class Kick:
         self.force_own_trim = False  # if True, all analysis method will use kick trim instead of their own
 
         if not bpm_list:
-            bpm_list = set([k[:-1] for k in pyIOTA.iota.run2.BPMS.ALLA])
-            # bpm_list = set([k[:-1] for k in df.columns if k not in special_keys])
-            # print(f'BPM list not specified - deducing {len(bpm_list)}: {bpm_list}')
+            if iota_defaults:
+                bpm_list = set([k[:-1] for k in pyIOTA.iota.run2.BPMS.ALLA])
+                logger.info(f'BPM list not specified - deducing ({len(bpm_list)}) IOTA BPMs: ({bpm_list})')
+            else:
+                bpm_list = set([k[:-1] for k in df.columns if k not in special_keys])
+                logger.info(f'BPM list not specified - deducing ({len(bpm_list)}) BPMs: ({bpm_list})')
+
         self.H = [i + "H" for i in bpm_list]
         self.V = [i + "V" for i in bpm_list]
         self.S = [i + "S" for i in bpm_list]
@@ -91,7 +99,10 @@ class Kick:
         self.fft_pwr = self.fft_freq = self.peaks = None
 
     def __getitem__(self, key):
-        return self.get(key)
+        self.get(key)
+
+    def __setitem__(self, key, value):
+        self.set(key, value)
 
     def copy(self) -> 'Kick':
         df2 = self.df.copy(deep=True)
@@ -113,21 +124,28 @@ class Kick:
         """
         self.df.iloc[0, self.df.columns.get_loc(column)] = value
 
-    def get(self, column: str):
+    def get(self, column: Union[str, int]):
         """
         Direct column getter
         :param column:
         :return:
         """
-        return self.df.iloc[0, self.df.columns.get_loc(column)]
+        if column in self.df.columns:
+            return self.df.iloc[0, self.df.columns.get_loc(column)]
+        else:
+            if isinstance(column, int) and len(self.df.columns) > column >= 0:
+                return self.df.iloc[0, column]
+            else:
+                raise Exception(f'Key ({column}) is neither a column nor valid integer index - have: ({self.df.columns})')
 
-    def col(self, column: str):
+    def col(self, column: Union[str, int]):
         """
         Return a column of underlying dataframe as value or array (different from KickSequence!!!!)
         :param column:
         :return:
         """
-        return self.df.iloc[0, self.df.columns.get_loc(column)]
+        return self.get(column)
+        #return self.df.iloc[0, self.df.columns.get_loc(column)]
 
     def state(self, param: str):
         """
@@ -319,12 +337,15 @@ class Kick:
             raise Exception(f'BPM list not supported yet')
         return datadict
 
-    def col_fft(self, bpm: str):
+    def col_fft(self, bpm: str) -> Tuple[np.ndarray, np.ndarray]:
         """
         Return FFT of specified BPM
-        :param bpm:
-        :return:
+        :param bpm: BPM name
+        :return: Frequency, Power arrays
         """
+        return self.col('fft_freq_' + bpm), self.col('fft_pwr_' + bpm)
+
+    def get_fft_data(self, bpm: str) -> Tuple[np.ndarray, np.ndarray]:
         return self.col('fft_freq_' + bpm), self.col('fft_pwr_' + bpm)
 
     def get_tune_data(self, bpm: str):
@@ -355,7 +376,8 @@ class Kick:
         """
         Retrieves all active BPMs in specified families, returning a unique list
         :param family:
-        :return:
+        :param soft_fail:
+        :return: List of string BPM keys
         """
         bpms = []
         if isinstance(family, str):
@@ -707,7 +729,7 @@ class Kick:
         families = families or ['H', 'V', 'C']
         bpms = self.get_bpms(families, soft_fail=True)
         for i, bpm in enumerate(bpms):
-            fft_freq, fft_power = naff.fft(self.df.iloc[0].loc[bpm])
+            fft_freq, fft_power = naff.fft(self.get(bpm))
             self.df['fft_freq_' + bpm] = [fft_freq]
             self.df['fft_pwr_' + bpm] = [fft_power]
 
