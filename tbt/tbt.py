@@ -1,7 +1,7 @@
 import copy
 import enum
 import logging
-from typing import Union, Callable, Dict, List, Iterable, Tuple, Optional, Any
+from typing import Union, Callable, Dict, List, Iterable, Tuple, Optional, Any, Set
 
 import numpy as np
 import pyIOTA.acnet
@@ -36,10 +36,10 @@ class Kick:
         Enum containing the most common types of data in a kick. Intended to be used with data retrieval methods.
         """
         RAW = ''
-        FFT_FREQ = 'fft_freq_'
-        FFT_POWER = 'fft_power_'
-        NUX = 'nux'
-        NUY = 'nuy'
+        FFT_FREQ = '_fft_freq'
+        FFT_POWER = '_fft_pwr'
+        NUX = '_nux'
+        NUY = '_nuy'
 
     def __init__(self,
                  df: pd.DataFrame,
@@ -136,7 +136,8 @@ class Kick:
             if isinstance(column, int) and len(self.df.columns) > column >= 0:
                 return self.df.iloc[0, column]
             else:
-                raise Exception(f'Key ({column}) is neither a column nor valid integer index - have: ({self.df.columns})')
+                raise Exception(
+                    f'Key ({column}) is neither a column nor valid integer index - have: ({self.df.columns})')
 
     def col(self, column: Union[str, int]):
         """
@@ -145,7 +146,7 @@ class Kick:
         :return:
         """
         return self.get(column)
-        #return self.df.iloc[0, self.df.columns.get_loc(column)]
+        # return self.df.iloc[0, self.df.columns.get_loc(column)]
 
     def state(self, param: str):
         """
@@ -230,8 +231,10 @@ class Kick:
         :param data_list:
         :return:
         """
-        if not all(isinstance(v, np.ndarray) for v in data_list) or not all(v.ndim == 1 for v in data_list):
-            raise Exception(f'List elements are not all 1D arrays')
+        if not all(isinstance(v, np.ndarray) for v in data_list):
+            raise Exception(f'List elements are not all arrays')
+        if not all(v.ndim == 1 for v in data_list):
+            raise Exception(f'List elements are not all 1D: ({[v.ndim for v in data_list]})')
         lengths = np.array([len(v) for v in data_list])
         if not np.all(lengths == lengths[0]):
             raise Exception(f'Data lengths are not equal: ({lengths})')
@@ -265,15 +268,21 @@ class Kick:
             columns = [columns]
             if return_type is None:
                 return_type = 'single'
+        if isinstance(columns, list):
+            if len(columns) == 0:
+                raise Exception(f'Requested BPM data with empty column list - use None instead')
         return_type = return_type or 'dict'
         assert columns is None or isinstance(columns, list)
         assert bpms is None or isinstance(bpms, list)
         assert columns or bpms or family
-        if not columns:
+        if columns is None:
             columns = self.get_column_names(bpms, family, data_type)
+            if not columns:
+                raise Exception(f'No BPMs available for family ({family}) and bpms ({bpms})')
+            columns_roots = self.get_column_names(bpms, family, self.Datatype.RAW)
 
+        data = {k: self.get(c) for k, c in zip(columns_roots, columns)}
         if self.trim and not no_trim:
-            data = {c: self.col(c) for c in columns}
             is_array = [isinstance(v, np.ndarray) for v in data.values()]
             if all(is_array):
                 data = {k: v[self.trim] for k, v in data.items()}
@@ -281,8 +290,6 @@ class Kick:
                 pass  # trim does not apply, return is uniform
             else:
                 raise Exception('WARN - data has both arrays and non-arrays, trim is ambiguous')
-        else:
-            data = {c: self.col(c) for c in columns}
 
         if return_type == 'dict':
             return data
@@ -343,10 +350,10 @@ class Kick:
         :param bpm: BPM name
         :return: Frequency, Power arrays
         """
-        return self.col('fft_freq_' + bpm), self.col('fft_pwr_' + bpm)
+        return self.col(bpm + self.Datatype.FFT_FREQ.value), self.col(bpm + self.Datatype.FFT_POWER.value)
 
     def get_fft_data(self, bpm: str) -> Tuple[np.ndarray, np.ndarray]:
-        return self.col('fft_freq_' + bpm), self.col('fft_pwr_' + bpm)
+        return self.col(bpm + self.Datatype.FFT_FREQ.value), self.col(bpm + self.Datatype.FFT_POWER.value)
 
     def get_tune_data(self, bpm: str):
         return self.fft_freq[bpm], self.fft_pwr[bpm], self.peaks[bpm]
@@ -730,8 +737,8 @@ class Kick:
         bpms = self.get_bpms(families, soft_fail=True)
         for i, bpm in enumerate(bpms):
             fft_freq, fft_power = naff.fft(self.get(bpm))
-            self.df['fft_freq_' + bpm] = [fft_freq]
-            self.df['fft_pwr_' + bpm] = [fft_power]
+            self.df[bpm + '_fft_freq'] = [fft_freq]
+            self.df[bpm + '_fft_pwr'] = [fft_power]
 
     def calculate_sum_signal(self) -> float:
         """
@@ -816,9 +823,16 @@ class KickSequence:
     def __len__(self):
         return len(self.df)
 
-    def check_dataset_integrity(self, include_octupoles: bool = True, include_nl: bool = True):
+    def check_dataset_integrity(self, include_octupoles: bool = True, include_nl: bool = True,
+                                bad_word_strings: List[str] = None, bad_word_keys: List[str] = None) -> Set[str]:
         """
-        Checks if key state parameters are the same for all kicks, and that none are contained
+        Checks if certain state parameters are the same for all kicks. Includes all standard elements, RF,
+        and optionally octupoles/NL.
+        :param include_octupoles:
+        :param include_nl:
+        :param bad_word_strings:
+        :param bad_word_keys:
+        :return:
         """
         invariant_devices = iota.DIPOLES.ALL_I + \
                             iota.CORRECTORS.ALL + \
@@ -861,6 +875,15 @@ class KickSequence:
         outlier_devs = set([x.split('.')[0] for x in outlier_keys])
         if len(invariant_devices.intersection(outlier_devs)) != 0:
             raise Exception(f'Found invariants in outlier devices: {invariant_devices.intersection(outlier_devs)}')
+
+        if bad_word_keys and bad_word_strings:
+            for k in kicks:
+                for word in bad_word_strings:
+                    for key in bad_word_keys:
+                        value = k.state(key)
+                        if word in value:
+                            logging.warning(f'Found bad word ({word}) in ({key}) for kick ({k.idx})')
+                            raise Exception(f'Found bad word ({word}) in ({key}) for kick ({k.idx})')
         return outlier_devs
 
     # Deprecated
@@ -898,17 +921,20 @@ class KickSequence:
             self.kicks.remove(k)
         self.update_df()
 
-    def get_kick(self, kick_id: int):
+    def __getitem__(self, item) -> Kick:
+        return self.get_kick(item)
+
+    def get_kick(self, kick_id: int) -> Kick:
         """
-        Gets kick object with specified id
-        :param kick_id:
+        Gets kick object in this KickSequence with specified index
+        :param kick_id: Kick integer id
         :return: Kick object
         """
         if kick_id not in self.df.idx.values:
-            raise Exception(f'Kick id {kick_id} not in sequence')
+            raise Exception(f'Kick id ({kick_id}) not in sequence')
         df_row = self.df.loc[self.df.idx == kick_id]
         if df_row.shape[0] != 1:
-            raise Exception(f'Kick id {kick_id} did not yield unique kick - result df is {df_row.shape}')
+            raise Exception(f'Kick id ({kick_id}) did not yield unique kick - result size is ({df_row.shape})')
         else:
             return df_row.iloc[0, self.df.columns.get_loc('kick')]
 

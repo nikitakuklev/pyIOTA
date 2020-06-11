@@ -36,6 +36,7 @@ class LatticeContainer:
         self.pc = info['pc']
         self.variables = variables
         self.silent = silent
+        self.method = method
 
         if reset_elements_to_defaults:
             logger.warning(f'Resetting any nonlinear elements to 0')
@@ -56,6 +57,13 @@ class LatticeContainer:
         # if not silent: print(f'Lattice ({self.name}) initialized')
         if not silent: logger.info(f'Lattice ({self.name}) initialized')
         # self.twiss = twiss(self.lattice)
+
+    def reset(self, sequence):
+        self.lattice_list = sequence
+        if not self.method:
+            self.lattice = MagneticLattice(tuple(self.lattice_list))
+        else:
+            self.lattice = MagneticLattice(tuple(self.lattice_list), method=self.method)
 
     def insert_correctors(self, destroy_skew_quads: bool = True):
         """
@@ -230,6 +238,24 @@ class LatticeContainer:
                 seq_new.append(el)
         logger.info(f'Inserted ({len(seq_new) - len(seq)}) markers')
         self.lattice.sequence = seq_new
+        return self
+
+    def remove_elements(self, elements: Union[Element, Iterable[Element]]) -> LatticeContainer:
+        """
+        Removes elements
+        :param elements: Elements to insert
+        """
+        seq = self.lattice.sequence
+        if not isinstance(elements, list):
+            elements = [elements]
+        assert all(el in seq for el in elements)
+        i = 0
+        for el in elements:
+            while el in seq:
+                # Remove duplicates if any
+                seq.remove(el)
+                i += 1
+        logger.info(f'Removed ({i}) elements')
         return self
 
     def remove_markers(self):

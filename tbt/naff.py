@@ -1,4 +1,4 @@
-from typing import Union
+from typing import Union, Tuple
 
 import numpy as np, scipy as sc
 import numba
@@ -105,36 +105,40 @@ class NAFF:
             return fft_freq[np.argmax(fft_power)]
 
     def fft(self, data: np.ndarray, window_power: int = None, pad_zeros_power: int = None,
-            output_trim=None, data_trim=None):
+            output_trim=None, data_trim=None) -> Tuple[np.ndarray,np.ndarray]:
         pad_zeros_power = pad_zeros_power or self.fft_pad_zeros_power
         window_power = window_power or self.window_power
         output_trim = output_trim or self.output_trim
         data_trim = data_trim or self.data_trim
 
-        n_turns = len(data)
         if data_trim:
             data = data[data_trim]
         data_centered = data - np.mean(data)
+        n_turns = len(data_centered)
 
-        # print(data_centered)
-        if pad_zeros_power is not None:
-            len_padded = 2 ** pad_zeros_power
-            if n_turns < len_padded:
-                # print(f'To pad: {len_padded - n_turns} (have {data_centered.shape} turns)')
-                data_centered = np.pad(data_centered, ((0, len_padded - n_turns),))
-                n_turns = len(data_centered)
-                # print(f'Padded to {n_turns} points')
+        # Windowing must happen on x[n], original data
         if window_power == 0:
-            fft_power = np.abs(np.fft.rfft(data_centered)) ** 2
+            window = np.ones_like(data_centered)
         else:
             if (n_turns, window_power) not in self.hann_cache:
                 window = np.hanning(n_turns) ** window_power
                 self.hann_cache[(n_turns, window_power)] = window
             else:
                 window = self.hann_cache[(n_turns, window_power)]
-            fft_power = np.abs(np.fft.rfft(data_centered * window)) ** 2
+        data_centered = data_centered * window
 
+        if pad_zeros_power is not None:
+            len_padded = 2 ** pad_zeros_power
+            if n_turns < len_padded:
+                # print(f'To pad: {len_padded - n_turns} (have {data_centered.shape} turns)')
+                data_centered = np.pad(data_centered, ((0, len_padded - n_turns),))
+                n_turns = len(data_centered)
+                assert n_turns == len_padded
+                # print(f'Padded to {n_turns} points')
+
+        fft_power = np.abs(np.fft.rfft(data_centered)) ** 2
         fft_freq = np.fft.rfftfreq(n_turns)
+
         if output_trim:
             # fft_power = fft_power[trim[0]:trim[1]]
             # fft_freq = fft_freq[trim[0]:trim[1]]

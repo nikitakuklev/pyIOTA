@@ -1,10 +1,27 @@
-from typing import Tuple
+__all__ = ['Invariants', 'Coordinates', 'Phase', 'Twiss', 'SVD']
+
+from typing import Tuple, List
 
 import numpy as np
 from pyIOTA.tbt.tbt import Kick
 from numba import jit
 from scipy.optimize import curve_fit
 from scipy.signal import hilbert
+
+import pyIOTA.math as pmath
+
+
+class Routines:
+    @staticmethod
+    def linear_optics_2D_SVD(kick: Kick, family:str = 'H'):
+        svd = SVD()
+        U, S, V, vh = svd.get_data_2D(kick, family)
+        Vf = U @ np.diag(S)
+        wrap = pmath.Wrapper(-np.pi, np.pi)
+        phases_exp_rel = Phase.calc_from_modes(mode2=Vf[:, 1], mode1=Vf[:, 0])
+        phases_exp_abs = Phase.relative_to_absolute(phases_exp_rel)
+        betax_exp_unscaled = Twiss.from_SVD(U,S,V)
+        return phases_exp_rel, betax_exp_unscaled
 
 
 class Invariants:
@@ -68,14 +85,60 @@ class Coordinates:
                x1 * (1 / np.tan(dphase)) * (1 / beta1) - x1 * alpha1 / beta1
 
 
-class Phase():
-    pass
+class Phase:
+    @staticmethod
+    def calc_from_modes(mode2, mode1):
+        """
+        Calculates phases from (sin/cos) spatial modes
+        :param mode1:
+        :param mode2:
+        :return:
+        """
+        phases = np.arctan2(mode2, mode1)
+        return phases
+
+    @staticmethod
+    def relative_to_absolute(phases):
+        """
+        Converts relative phases to absolutes, assuming first phase is 0. Only works if all deltas < 2pi
+        :param phases:
+        :return:
+        """
+        phases_rel = phases.copy()
+        phases_cum = np.zeros_like(phases)
+        import pyIOTA.math as pmath
+        phases_rel = pmath.addsubtract_wrap(phases_rel, -phases_rel[0], -np.pi, np.pi)
+        for i in range(1, len(phases)):
+            phases_cum[i] = phases_cum[i - 1] + pmath.forward_distance(phases_rel[i - 1], phases_rel[i], -np.pi, np.pi)
+        return phases_cum
+
+
+class Twiss:
+    @staticmethod
+    def beta_from_3bpm(bpm1, bpm2, bpm3):
+        """
+        Implements beta-function calculation from 3 BPMs
+        :param bpm1:
+        :param bpm2:
+        :param bpm3:
+        :return:
+        """
+
+    @staticmethod
+    def from_SVD(U, S, V):
+        Vf = U @ np.diag(S)
+        return Vf[:, 0] ** 2 + Vf[:, 1] ** 2
+
+    @staticmethod
+    def from_amplitudes(data: List[np.ndarray]):
+        return np.array([np.mean(np.abs(v-np.mean(v))) for v in data])
 
 
 class Envelope:
     """
     Provides several models of signal amplitude envelopes, and associated fitting methods
     """
+
     def __init__(self, data_trim=None, output_trim=None):
         self.data_trim = data_trim
         self.output_trim = output_trim
@@ -87,15 +150,15 @@ class Envelope:
     def budkerfit(xdata: np.ndarray, amplitude: float, tau: float, c2: float, freq: float, ofsx: float,
                   ofsy: float, c3: float):
         ans = amplitude * np.exp(-tau * (xdata - ofsx) ** 2 - c2 * (np.sin(freq * (xdata - ofsx)) ** 2)) + ofsy
-        ans = ans * (1+c3*np.arange(len(ans)))
+        ans = ans * (1 + c3 * np.arange(len(ans)))
         return ans
 
     @staticmethod
     @jit(nopython=True, fastmath=True, nogil=True)
     def coupled_envelope(x: np.ndarray,
                          amplitude: float,
-                         c1: float, c2: float, c3: float, nu:float,
-                         ofsx:float, ofsy: float):
+                         c1: float, c2: float, c3: float, nu: float,
+                         ofsx: float, ofsy: float):
         """
         Envelope that includes chromaticity and octupolar nonlinear decoherence, multiplied by coupling cosine envelope
         In other words, a 2D model with additional coupling 'beating' envelope
@@ -110,9 +173,9 @@ class Envelope:
         :return:
         """
         xsc = x * c2
-        xscsq = xsc**2
-        ans = 1/(1+xscsq)   *   np.exp(-xscsq*(c1**2)/(1+xscsq))    *   np.exp(-((np.sin[nu*x])*(c3/nu))**2)
-        #ans = ans * (1+c3*np.arange(len(ans)))
+        xscsq = xsc ** 2
+        ans = 1 / (1 + xscsq) * np.exp(-xscsq * (c1 ** 2) / (1 + xscsq)) * np.exp(-((np.sin[nu * x]) * (c3 / nu)) ** 2)
+        # ans = ans * (1+c3*np.arange(len(ans)))
         return ans
 
     def find_envelope(self, data_raw, normalize=False, p0=None, lu=None, full=False):
@@ -135,12 +198,12 @@ class Envelope:
         ydatafl = amplitude_envelope[fl:-fl]
         try:
             popt, pcov = curve_fit(self.budkerfit, xdatafl, ydatafl,
-                                  # bounds=([0, 0, -np.inf, -1e-1, -np.inf, -1],
+                                   # bounds=([0, 0, -np.inf, -1e-1, -np.inf, -1],
                                    #        lu),
                                    p0=p0,
                                    # p0=[1,1e-5,1e-2,1,-1,1e-2],
                                    maxfev=10000)
-            #print(popt)
+            # print(popt)
             envelope = self.budkerfit(xdata, *popt)
             if np.any(np.isnan(envelope)):
                 raise Exception()
@@ -151,7 +214,7 @@ class Envelope:
             # env = np.ones(len(data))*np.mean(data)
         env_return = envelope / max(envelope) if normalize else envelope
         if full:
-            return env_return, amplitude_envelope+data_mean, popt, pcov
+            return env_return, amplitude_envelope + data_mean, popt, pcov
         else:
             return env_return
 
@@ -161,7 +224,7 @@ class Envelope:
         return (data - data_mean) / envelope + data_mean
 
     def normalize_bpm_signal_v2(self, data: Kick, p0=None, lu=None):
-        bpms = data.get_bpms(['H','V'])
+        bpms = data.get_bpms(['H', 'V'])
 
         data_mean = np.mean(data)
         envelope = self.find_envelope(data, normalize=True, p0=p0, lu=lu)
@@ -182,43 +245,55 @@ class SVD:
         :param use_kick_trim:
         :return:
         """
-        if isinstance(data, Kick):
-            #matrix = data.get_bpm_matrix(plane)
-            matrix = data.get_bpm_data(family=plane, return_type='matrix')
+        if data.__class__.__name__ == 'Kick':
+            # isinstance(data, Kick):
+            # matrix = data.get_bpm_matrix(plane)
             if self.data_trim and not use_kick_trim:
+                matrix = data.get_bpm_data(family=plane, return_type='matrix', no_trim=True)
                 matrix = matrix[:, self.data_trim]
+            else:
+                matrix = data.get_bpm_data(family=plane, return_type='matrix')
         elif isinstance(data, np.ndarray):
             matrix = data
             if self.data_trim:
                 matrix = matrix[:, self.data_trim]
         else:
-            raise Exception(f'Unknown data type: {data}')
+            raise Exception(f'Unknown data type: {data.__class__.__name__}')
 
         matrix -= np.mean(matrix, axis=1)[:, np.newaxis]
         U, S, vh = np.linalg.svd(matrix, full_matrices=False)
         V = vh.T  # transpose it back to conventional U @ S @ V.T
         return U, S, V, vh
 
-    def decompose_kick_2D(self, kick: Kick, tag: str = 'SVD', use_kick_trim: bool = True, add_virtual_bpms: bool = True):
+    def decompose_kick_2D(self, kick: Kick, tag: str = 'SVD', use_kick_trim: bool = True,
+                          add_virtual_bpms: bool = True):
         """
         Decompose kick using SVD and store results
-        :param kick:
-        :param tag:
+        :param add_virtual_bpms: Whether to add resulting components as virtual BPMs
+        :param use_kick_trim: Whether to respect kick data trims
+        :param kick: Kick to process
+        :param tag: Column name tag
         :return:
         """
-        assert isinstance(kick, Kick)
-        for plane in ['H', 'V']:
-            #matrix = kick.get_bpm_matrix(plane)
-            U, S, V, vh = self.decompose2D(kick, plane=plane, use_kick_trim=use_kick_trim)
-            #kick.df[f'{tag}_{plane}_M0'] = vh[0, :]
-            #kick.df[f'{tag}_{plane}_M1'] = vh[1, :]
-            kick.df[f'{tag}_{plane}_S'] = [S]
-            kick.df[f'{tag}_{plane}_U'] = [U]
-            kick.df[f'{tag}_{plane}_vh'] = [vh]
+        assert kick.__class__.__name__ == 'Kick'  # assert isinstance(kick, Kick)
+        for family in ['H', 'V']:
+            # matrix = kick.get_bpm_matrix(plane)
+            U, S, V, vh = self.decompose2D(kick, plane=family, use_kick_trim=use_kick_trim)
+            # kick.df[f'{tag}_{plane}_M0'] = vh[0, :]
+            # kick.df[f'{tag}_{plane}_M1'] = vh[1, :]
+            kick.df[f'{tag}_{family}_U'] = [U]
+            kick.df[f'{tag}_{family}_S'] = [S]
+            kick.df[f'{tag}_{family}_vh'] = [vh]
             if add_virtual_bpms:
-                kick.bpms_add([f'SVD2D_{plane}_1C', f'SVD2D_{plane}_2C'])
-                kick.df[f'SVD2D_{plane}_1C'] = [vh[0, :]]
-                kick.df[f'SVD2D_{plane}_2C'] = [vh[1, :]]
+                kick.bpms_add([f'SVD2D_{family}_1C', f'SVD2D_{family}_2C'])
+                kick.df[f'SVD2D_{family}_1C'] = [vh[0, :]]
+                kick.df[f'SVD2D_{family}_2C'] = [vh[1, :]]
+
+    def get_data_2D(self, kick: Kick, family: str, tag: str = 'SVD'):
+        U = kick.get(f'{tag}_{family}_U')
+        S = kick.get(f'{tag}_{family}_S')
+        vh = kick.get(f'{tag}_{family}_vh')
+        V = vh.T
         return U, S, V, vh
 
     def decompose4D(self, data: Kick, use_kick_trim: bool = True):
@@ -230,7 +305,7 @@ class SVD:
         :return:
         """
         if isinstance(data, Kick):
-            #matrix = data.get_bpm_matrix(plane)
+            # matrix = data.get_bpm_matrix(plane)
             matrix1 = data.get_bpm_data(family='H', return_type='matrix')
             matrix2 = data.get_bpm_data(family='V', return_type='matrix')
             matrix = np.vstack([matrix1, matrix2])
@@ -261,8 +336,8 @@ class SVD:
         assert isinstance(kick, Kick)
         plane = 'HV'
         U, S, V, vh = self.decompose4D(kick, use_kick_trim=use_kick_trim)
-        #kick.df[f'{tag}_{plane}_M0'] = [vh[0, :]]
-        #kick.df[f'{tag}_{plane}_M1'] = [vh[1, :]]
+        # kick.df[f'{tag}_{plane}_M0'] = [vh[0, :]]
+        # kick.df[f'{tag}_{plane}_M1'] = [vh[1, :]]
         kick.df[f'{tag}_{plane}_S'] = [S]
         kick.df[f'{tag}_{plane}_U'] = [U]
         kick.df[f'{tag}_{plane}_vh'] = [vh]

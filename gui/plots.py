@@ -21,11 +21,11 @@ def plot_simple(*args,
                 xlabel: str = None,
                 ylabel: str = None,
                 sizes: Tuple = (12, 5),
-                demean: bool = True,
+                demean: bool = False,
                 twiny_args: Union[List, Dict, np.ndarray] = None,
                 **kwargs):
     """
-    Simple routine to plot a grid of data sharing x/y axes, with 1 plot per each dictionary key
+    Simple routine to plot data sharing x/y axes
     :param demean:
     :param sizes:
     :return:
@@ -39,9 +39,16 @@ def plot_simple(*args,
     for inputs, arrs in zip([args, twiny_args], [arrays, arrays_twiny]):
         for i, data_dict in enumerate(inputs):
             if isinstance(data_dict, list):
-                for v in data_dict:
-                    arrs.append((str(i), v))
+                if all(isinstance(n, np.number) for n in data_dict):
+                    arrs.append((str(i), data_dict))
+                else:
+                    for v in data_dict:
+                        arrs.append((str(i), v))
+            elif isinstance(data_dict, tuple):
+                # Put x,y tuple
+                arrs.append((str(i), data_dict))
             elif isinstance(data_dict, np.ndarray):
+                # Put y only
                 arrs.append((str(i), data_dict))
             elif isinstance(data_dict, dict):
                 for k, v in data_dict.items():
@@ -51,9 +58,16 @@ def plot_simple(*args,
 
     fig, ax = plt.subplots(1, 1, figsize=(sizes[0], sizes[1]))
     for z, (i, v) in enumerate(arrays):
+        if isinstance(v, tuple):
+            x_local = v[0]
+            v = v[1]
+        else:
+            x_local = None
         if demean:
             v = v - np.mean(v)
-        if x:
+        if x_local is not None:
+            ax.plot(x_local, v, fmt, label=i, zorder=z + 100, **kwargs)
+        elif x is not None:
             ax.plot(x, v, fmt, label=i, zorder=z + 100, **kwargs)
         else:
             ax.plot(v, fmt, label=i, zorder=z + 100, **kwargs)
@@ -75,7 +89,7 @@ def plot_simple(*args,
             else:
                 axy.plot(v, fmt, label=i, zorder=z, **kwargs)
             # ax.set_title(f"{i}|{k}")
-        axy.legend(loc=5)
+        axy.legend()
         ax.set_zorder(axy.get_zorder() + 1)
     ax.patch.set_visible(False)
     fig.tight_layout()
@@ -85,12 +99,14 @@ def plot_simple(*args,
 def plot_simple_grid(*args,
                      nperrow: int = 11,
                      sizes: Tuple[int, int] = (2, 2),
-                     demean: bool = True,
+                     demean: bool = False,
+                     normalize: bool = False,
                      paired_bpm_mode: bool = False):
     """
     Plot a grid of data sharing x/y axes. Each top level argument creates a new plot grid.
     Each argument must be a dict or list of dicts. One plot per each entry (after flattening) is produced.
     All entries my either be arrays (Y), or 2-tuples of arrays (X,Y)
+    :param normalize:
     :param demean: Whether to demean Y data
     :param paired_bpm_mode: IOTA specific - special mode to plot left-right BPM pairs in same columns
     :param nperrow: Plots per row
@@ -98,19 +114,20 @@ def plot_simple_grid(*args,
     :return: fig, ax
     """
     fig = ax = None
-    for data_dict in args:
-        if isinstance(data_dict, list):
-            data_dict = {k: v for d in data_dict for k, v in d.items()}
-        if not isinstance(data_dict, dict):
-            raise Exception(f'Supplied argument is not a dict: {data_dict.__class__}')
-        if len(data_dict) == 0:
+    for entry in args:
+        if isinstance(entry, list):
+            # Have list of dicts
+            entry = {k: v for d in entry for k, v in d.items()}
+        if not isinstance(entry, dict):
+            raise Exception(f'Supplied argument is not a dict: {entry.__class__}')
+        if len(entry) == 0:
             logger.warning('Skipping empty plot')
             continue
-        n_rows = math.ceil(len(data_dict) / nperrow)
+        n_rows = math.ceil(len(entry) / nperrow)
         fig, ax = plt.subplots(n_rows, nperrow, figsize=(sizes[0] * nperrow, sizes[1] * n_rows),
                                sharex=True, sharey=True)
         if paired_bpm_mode:
-            keys = [k for k in data_dict.keys()]
+            keys = [k for k in entry.keys()]
             roots = [k[:-2] for k in keys]
             seen = set()
             roots = [x for x in roots if not (x in seen or seen.add(x))]
@@ -118,7 +135,7 @@ def plot_simple_grid(*args,
                 raise Exception(f'Not enough columns ({nperrow}) to fit all pairs ({len(roots)})')
             for j, root in enumerate(roots):
                 i = 0
-                for z, (k, v) in enumerate(data_dict.items()):
+                for z, (k, v) in enumerate(entry.items()):
                     if root in k:
                         if demean:
                             v = v - np.nanmean(v)
@@ -127,18 +144,37 @@ def plot_simple_grid(*args,
                         i += 1
         else:
             ax = ax.flatten()
-            for i, (k, v) in enumerate(data_dict.items()):
+            tuples_list = []
+            for i, (k, v) in enumerate(entry.items()):
                 if isinstance(v, tuple):
-                    x = v[0]
-                    y = v[1]
+                    if all(isinstance(v2, np.ndarray) for v2 in v):
+                        x = v[0]
+                        y = v[1]
+                        tuples_list.append(([x], [y], k))
+                    else:
+                        x = [v2[0] if not isinstance(v2, np.ndarray) else np.arange(len(v)) for v2 in v]
+                        y = [v2[1] if not isinstance(v2, np.ndarray) else v2 for v2 in v]
+                        tuples_list.append((x, y, k))
+                elif isinstance(v, list):
+                    x = [v2[0] if not isinstance(v2, np.ndarray) else np.arange(len(v2)) for v2 in v]
+                    y = [v2[1] if not isinstance(v2, np.ndarray) else v2 for v2 in v]
+                    tuples_list.append((x, y, k))
                 elif isinstance(v, np.ndarray):
                     x = np.arange(len(v))
                     y = v
+                    tuples_list.append(([x], [y], k))
                 else:
                     raise Exception(f'Unknown data type: ({type(v)})')
-                if demean:
-                    y = y - np.nanmean(y)
-                ax[i].plot(x,y)
+                # tuples_list.append(((x, y), k))
+            # global_max = np.max([np.max(v[1]) for v in tuples_list])
+            for i, (xl, yl, k) in enumerate(tuples_list):
+                for x, y in zip (xl,yl):
+                    if demean:
+                        y = y - np.nanmean(y)
+                    if normalize:
+                        from sklearn.preprocessing import minmax_scale
+                        y = minmax_scale(y)  # (y-np.min(y))/np.linalg.norm(y-np.min(y))
+                    ax[i].plot(x, y)
                 ax[i].set_title(f"{i}|{k}")
     return fig, ax
 
