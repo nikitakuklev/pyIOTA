@@ -116,15 +116,23 @@ def plot_simple_grid(*args,
     fig = ax = None
     for entry in args:
         if isinstance(entry, list):
-            # Have list of dicts
-            entry = {k: v for d in entry for k, v in d.items()}
+            if all(isinstance(v, np.ndarray) for v in entry):
+                # Have list of arrays
+                entry = {i: v for i, v in enumerate(entry)}
+            elif all(isinstance(v, tuple) for v in entry):
+                # List of x,y tuples
+                entry = {i: v for i, v in enumerate(entry)}
+            else:
+                # Have list of dicts
+                entry = {k: v for d in entry for k, v in d.items()}
         if not isinstance(entry, dict):
             raise Exception(f'Supplied argument is not a dict: {entry.__class__}')
         if len(entry) == 0:
             logger.warning('Skipping empty plot')
             continue
         n_rows = math.ceil(len(entry) / nperrow)
-        fig, ax = plt.subplots(n_rows, nperrow, figsize=(sizes[0] * nperrow, sizes[1] * n_rows),
+        width = nperrow if n_rows > 1 else len(entry)
+        fig, ax = plt.subplots(n_rows, width, figsize=(sizes[0] * width, sizes[1] * n_rows),
                                sharex=True, sharey=True)
         if paired_bpm_mode:
             keys = [k for k in entry.keys()]
@@ -168,7 +176,7 @@ def plot_simple_grid(*args,
                 # tuples_list.append(((x, y), k))
             # global_max = np.max([np.max(v[1]) for v in tuples_list])
             for i, (xl, yl, k) in enumerate(tuples_list):
-                for x, y in zip (xl,yl):
+                for x, y in zip(xl, yl):
                     if demean:
                         y = y - np.nanmean(y)
                     if normalize:
@@ -180,7 +188,7 @@ def plot_simple_grid(*args,
 
 
 def plot_opt_func(fig, lat, tws, top_plot=["Dx"], legend=False, fig_name=None, grid=True, font_size=12,
-                  excld_legend=None, ontop:bool = False):
+                  excld_legend=None, ontop: bool = False):
     """
     Modified from OCELOT
 
@@ -236,12 +244,12 @@ def plot_opt_func(fig, lat, tws, top_plot=["Dx"], legend=False, fig_name=None, g
         S = [p.s for p in tws]
 
         plt.xlim(S[0], S[-1])
-        label = str(i+1) if i > 0 else ''
+        label = str(i + 1) if i > 0 else ''
         plot_disp(ax_top, tws, top_plot, font_size)
         plot_betas(ax_b, S, beta_x, beta_y, font_size, label)
     # new_plot_elems(ax_el, lat, s_point = S[0], legend = legend, y_scale=0.8)  # plot elements
     plot_elems(fig, ax_el, lat, s_point=S[0], legend=legend, y_scale=0.8, font_size=font_size,
-                   excld_legend=excld_legend)
+               excld_legend=excld_legend)
     return fig, ax_top, ax_b, ax_el
 
 
@@ -608,7 +616,7 @@ def plot_elems(fig, ax, lat, s_point=0, nturns=1, y_lim=None, y_scale=1, legend=
     if excld_legend is None:
         excld_legend = []
 
-    dict_copy=copy.deepcopy(dict_plot)
+    dict_copy = copy.deepcopy(dict_plot)
     alpha = 1
     ax.set_ylim((-1, 1.5))
     ax.tick_params(axis='both', labelsize=font_size)
@@ -649,8 +657,9 @@ def plot_elems(fig, ax, lat, s_point=0, nturns=1, y_lim=None, y_scale=1, legend=
     u_max = np.max(np.abs(u)) if len(u) != 0 else 0
     sol_max = np.max(np.abs(sol)) if len(sol) != 0 else 0
     rf_max = np.max(np.abs(rf)) if len(rf) != 0 else 0
-    m_max = np.max(m) if len(m) !=0 else 0
-    ncols = np.sign(len(q)) + np.sign(len(b)) + np.sign(len(s)) + np.sign(len(c)) + np.sign(len(u)) + np.sign(len(rf))+ np.sign(len(m))
+    m_max = np.max(m) if len(m) != 0 else 0
+    ncols = np.sign(len(q)) + np.sign(len(b)) + np.sign(len(s)) + np.sign(len(c)) + np.sign(len(u)) + np.sign(
+        len(rf)) + np.sign(len(m))
 
     labels_dict = {}
     for elem in dict_copy.keys():
@@ -666,7 +675,7 @@ def plot_elems(fig, ax, lat, s_point=0, nturns=1, y_lim=None, y_scale=1, legend=
         l = elem.l
         if l == 0:
             l = 0.03
-        #type = elem.type
+        # type = elem.type
         if elem.__class__ in dict_copy:
             scale = dict_copy[elem.__class__]["scale"]
             color = dict_copy[elem.__class__]["color"]
@@ -678,76 +687,78 @@ def plot_elems(fig, ax, lat, s_point=0, nturns=1, y_lim=None, y_scale=1, legend=
             label = dict_copy[UnknownElement]["label"]
             ecolor = dict_copy[UnknownElement]["edgecolor"]
         ampl = 1
-        s_coord = np.array([L + elem.l/2. - l/2., L + elem.l/2. - l/2., L + elem.l/2. +l/2., L + elem.l/2. +l/2., L + elem.l/2.- l/2.]) + s_point
+        s_coord = np.array(
+            [L + elem.l / 2. - l / 2., L + elem.l / 2. - l / 2., L + elem.l / 2. + l / 2., L + elem.l / 2. + l / 2.,
+             L + elem.l / 2. - l / 2.]) + s_point
 
         rect = np.array([-1, 1, 1, -1, -1])
 
         if elem.__class__ == Quadrupole:
-            ampl = elem.k1/q_max if q_max != 0 else 1
-            point, = ax.fill(s_coord,  (rect + 1)*ampl*scale*y_scale, color, edgecolor=ecolor,
+            ampl = elem.k1 / q_max if q_max != 0 else 1
+            point, = ax.fill(s_coord, (rect + 1) * ampl * scale * y_scale, color, edgecolor=ecolor,
                              alpha=alpha, label=dict_copy[elem.__class__]["label"])
             dict_copy[elem.__class__]["label"] = ""
 
         elif elem.__class__ == Solenoid:
-            ampl = elem.k/sol_max if sol_max != 0 else 1
-            point, = ax.fill(s_coord,  (rect + 1)*ampl*scale*y_scale, color, edgecolor=ecolor,
+            ampl = elem.k / sol_max if sol_max != 0 else 1
+            point, = ax.fill(s_coord, (rect + 1) * ampl * scale * y_scale, color, edgecolor=ecolor,
                              alpha=alpha, label=dict_copy[elem.__class__]["label"])
             dict_copy[elem.__class__]["label"] = ""
 
         elif elem.__class__ in [Bend, RBend, SBend]:
-            ampl = elem.angle/b_max if b_max != 0 else 1
-            point, = ax.fill(s_coord, (rect+1)*ampl*scale*y_scale, color,
+            ampl = elem.angle / b_max if b_max != 0 else 1
+            point, = ax.fill(s_coord, (rect + 1) * ampl * scale * y_scale, color,
                              alpha=alpha, label=dict_copy[elem.__class__]["label"])
             dict_copy[elem.__class__]["label"] = ""
 
         elif elem.__class__ in [Hcor, Vcor]:
-            ampl = elem.angle/c_max if c_max != 0 else 0.5
+            ampl = elem.angle / c_max if c_max != 0 else 0.5
             if elem.angle == 0:
                 ampl = 0.5
-                point, = ax.fill(s_coord, rect*ampl*scale*y_scale, "lightcyan",  edgecolor="k",
-                             alpha=0.5, label=dict_copy[elem.__class__]["label"])
+                point, = ax.fill(s_coord, rect * ampl * scale * y_scale, "lightcyan", edgecolor="k",
+                                 alpha=0.5, label=dict_copy[elem.__class__]["label"])
             else:
-                point, = ax.fill(s_coord, (rect+1)*ampl*scale*y_scale, color,  edgecolor=ecolor,
-                             alpha=alpha, label=dict_copy[elem.__class__]["label"])
+                point, = ax.fill(s_coord, (rect + 1) * ampl * scale * y_scale, color, edgecolor=ecolor,
+                                 alpha=alpha, label=dict_copy[elem.__class__]["label"])
             dict_copy[Hcor]["label"] = ""
             dict_copy[Vcor]["label"] = ""
 
         elif elem.__class__ == Sextupole:
-            ampl = elem.k2/s_max if s_max != 0 else 1
-            point, = ax.fill(s_coord, (rect+1)*ampl*scale*y_scale, color,
+            ampl = elem.k2 / s_max if s_max != 0 else 1
+            point, = ax.fill(s_coord, (rect + 1) * ampl * scale * y_scale, color,
                              alpha=alpha, label=dict_copy[elem.__class__]["label"])
             dict_copy[elem.__class__]["label"] = ""
 
         elif elem.__class__ in [Cavity, TWCavity, TDCavity]:
             ampl = 1
-            point, = ax.fill(s_coord, rect*ampl*scale*y_scale, color,
+            point, = ax.fill(s_coord, rect * ampl * scale * y_scale, color,
                              alpha=alpha, edgecolor="lightgreen", label=dict_copy[elem.__class__]["label"])
             dict_copy[elem.__class__]["label"] = ""
 
         elif elem.__class__ == Undulator:
-            ampl = elem.Kx/u_max if u_max != 0 else 0.5
-            point, = ax.fill(s_coord, rect*ampl*scale*y_scale, color,
+            ampl = elem.Kx / u_max if u_max != 0 else 0.5
+            point, = ax.fill(s_coord, rect * ampl * scale * y_scale, color,
                              alpha=alpha, label=dict_copy[elem.__class__]["label"])
             dict_copy[elem.__class__]["label"] = ""
 
         elif elem.__class__ == Multipole:
-            ampl = sum(elem.kn)/m_max if u_max != 0 else 0.5
-            point, = ax.fill(s_coord, rect*ampl*scale*y_scale, color,
+            ampl = sum(elem.kn) / m_max if u_max != 0 else 0.5
+            point, = ax.fill(s_coord, rect * ampl * scale * y_scale, color,
                              alpha=alpha, label=dict_copy[elem.__class__]["label"])
             dict_copy[elem.__class__]["label"] = ""
 
         else:
-            point, = ax.fill(s_coord, rect*ampl*scale*y_scale, color, edgecolor=ecolor,
+            point, = ax.fill(s_coord, rect * ampl * scale * y_scale, color, edgecolor=ecolor,
                              alpha=alpha)
 
-        annotation = ax.annotate(elem.__class__.__name__+": " + elem.id,
-            xy=(L+l/2., 0), #xycoords='data',
-            #xytext=(i + 1, i), textcoords='data',
-            horizontalalignment="left",
-            arrowprops=dict(arrowstyle="simple", connectionstyle="arc3,rad=+0.2"),
-            bbox=dict(boxstyle="round", facecolor="w", edgecolor="0.5", alpha=0.9),
+        annotation = ax.annotate(elem.__class__.__name__ + ": " + elem.id,
+                                 xy=(L + l / 2., 0),  # xycoords='data',
+                                 # xytext=(i + 1, i), textcoords='data',
+                                 horizontalalignment="left",
+                                 arrowprops=dict(arrowstyle="simple", connectionstyle="arc3,rad=+0.2"),
+                                 bbox=dict(boxstyle="round", facecolor="w", edgecolor="0.5", alpha=0.9),
                                  fontsize=legend_font_size
-            )
+                                 )
         # by default, disable the annotation visibility
         annotation.set_visible(False)
         L += elem.l

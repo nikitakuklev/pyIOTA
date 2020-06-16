@@ -3,6 +3,7 @@ __all__ = ['template_fma_setup']
 import numpy as np
 from .taskfile import Task
 from ..lattice import LatticeContainer
+from pathlib import Path
 
 
 def template_fma_setup(box: LatticeContainer,
@@ -21,6 +22,20 @@ def template_fma_setup(box: LatticeContainer,
     t.setup_global_settings()
     t.setup_subprocess_mkdir()
     t.setup_run_setup(p=box.pc, beamline=kwargs['beamline'], rootname='test', parameters=True)
+
+    if errors is None:
+         pass
+    else:
+        assert isinstance(errors, Path)
+        assert str(errors).split('.')[-1] == 'erl'
+        t.action_load_parameters(path=errors)
+
+    # if errors == 'noerrors' or errors is None:
+    #     pass
+    # elif errors == 'pregen':
+    #     t.action_load_parameters(path='errors.erl')
+    # else:
+    #     raise Exception(f'Unknown error mode: ({errors})')
 
     if 'oc' in kwargs:
         t.action_load_parameters(path=kwargs['oc'])

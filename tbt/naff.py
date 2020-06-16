@@ -1,4 +1,5 @@
-from typing import Union, Tuple
+import logging, time
+from typing import Union, Tuple, List
 
 import numpy as np, scipy as sc
 import numba
@@ -8,14 +9,48 @@ import scipy.integrate as sci
 import scipy.signal
 from scipy.optimize import minimize
 
+logger = logging.getLogger(__name__)
+
 
 # @jit(nopython=True, fastmath=True, nogil=True)
 def _get_integral_v11(ztabs, twin, i_line, coeffs, FR, turns, order):
-    """Numba-optimized trapezoidal integrator"""
+    """
+    NATIVE
+    Trapezoidal integrator = f[0]/2 + f[-1]/2 + f[1:-1]
+    We don't care about absolute values, so deltax = 1, which simplifies calcs
+    """
     # ZTF = np.zeros(len(ztabs), np.complex128)
     # ZTF[0] = ztabs[0]*twin[0]
-    ZTF = ztabs[1:] * twin[1:] * np.exp(-2.0 * (i_line) * np.pi * 1.0j * FR)
+    ZTF = ztabs[1:] * twin[1:] * np.exp(-1.0j * 2 * np.pi * FR * i_line)
     integral = (ztabs[0] * twin[0] + ZTF[-1]) / 2 + np.sum(ZTF[:-2])
+    A = np.real(integral)
+    B = np.imag(integral)
+    RMD = np.abs(integral)
+    return RMD, A, B
+
+
+@jit(nopython=True, fastmath=True, nogil=True)
+def _get_integral_v14(signal, window, i_line, coeffs, tune, turns, order):
+    """
+    NUMBA
+    Dumb inner product integrator (fastest, not as accurate)
+    """
+    i_line = np.arange(0, len(signal))
+    integral = np.sum(signal * window * np.exp(-1.0j * 2 * np.pi * tune * i_line))
+    A = np.real(integral)
+    B = np.imag(integral)
+    RMD = np.abs(integral)
+    return RMD, A, B
+
+
+def _get_integral_v15(signal, window, i_line, coeffs, tune, turns, order):
+    """
+    NUMEXPR
+    Dumb inner product integrator (fastest, not as accurate)
+    """
+    i_line = np.arange(0, len(signal))
+    pi = np.pi
+    integral = ne.evaluate("sum(signal * window * exp(-1.0j * 2 * pi * tune * i_line))")
     A = np.real(integral)
     B = np.imag(integral)
     RMD = np.abs(integral)
@@ -35,6 +70,7 @@ class NAFF:
         self.fft_pad_zeros_power = fft_pad_zeros_power
         self.output_trim = output_trim
         self.coeffs_cache = [sci.newton_cotes(i, 1)[0].astype(np.complex128) for i in range(1, 10)]
+        self.naff_runtimes = []
 
     def fft_hanning_peaks(self, data: np.ndarray, power: int = None, just_do_fft: bool = False,
                           search_peaks: bool = False):
@@ -46,17 +82,13 @@ class NAFF:
         :param search_peaks: whether to use scipy peak finding or just return highest bin
         :return:
         """
-        power = power or self.window_power
-        n_turns = len(data)
-        if (n_turns, power) not in self.hann_cache:
-            window = np.hanning(n_turns) ** power
-            self.hann_cache[(n_turns, power)] = window
-        else:
-            window = self.hann_cache[(n_turns, power)]
-
-        data_centered = data - np.mean(data)
-        fft_power = np.abs(np.fft.rfft(data_centered * window)) ** 2
-        fft_freq = np.fft.rfftfreq(n_turns)
+        assert isinstance(data, np.ndarray) and data.ndim == 1
+        # print(data.shape)
+        fft_freq, fft_power = self.fft(data,
+                                       window_power=power,
+                                       pad_zeros_power=self.fft_pad_zeros_power,
+                                       data_trim=np.s_[:],
+                                       output_trim=np.s_[:])
 
         if just_do_fft:
             return fft_freq, fft_power
@@ -70,7 +102,7 @@ class NAFF:
                 top_tune = None
             return top_tune, fft_freq, fft_power, peak_idx
         else:
-            return np.fft.rfftfreq(n_turns)[np.argmax(fft_power)]
+            return fft_freq[np.argmax(fft_power)]
 
     def fft_peaks(self, data: np.ndarray = None, search_peaks: bool = False, search_kwargs: dict = None,
                   fft_freq: np.ndarray = None, fft_power: np.ndarray = None):
@@ -105,7 +137,7 @@ class NAFF:
             return fft_freq[np.argmax(fft_power)]
 
     def fft(self, data: np.ndarray, window_power: int = None, pad_zeros_power: int = None,
-            output_trim=None, data_trim=None) -> Tuple[np.ndarray,np.ndarray]:
+            output_trim=None, data_trim=None) -> Tuple[np.ndarray, np.ndarray]:
         pad_zeros_power = pad_zeros_power or self.fft_pad_zeros_power
         window_power = window_power or self.window_power
         output_trim = output_trim or self.output_trim
@@ -129,19 +161,21 @@ class NAFF:
 
         if pad_zeros_power is not None:
             len_padded = 2 ** pad_zeros_power
-            if n_turns < len_padded:
-                # print(f'To pad: {len_padded - n_turns} (have {data_centered.shape} turns)')
-                data_centered = np.pad(data_centered, ((0, len_padded - n_turns),))
-                n_turns = len(data_centered)
-                assert n_turns == len_padded
-                # print(f'Padded to {n_turns} points')
-
-        fft_power = np.abs(np.fft.rfft(data_centered)) ** 2
-        fft_freq = np.fft.rfftfreq(n_turns)
+            # if n_turns < len_padded:
+            #     # print(f'To pad: {len_padded - n_turns} (have {data_centered.shape} turns)')
+            #     data_centered = np.pad(data_centered, ((0, len_padded - n_turns),))
+            #     n_turns = len(data_centered)
+            #     assert n_turns == len_padded
+            #     # print(f'Padded to {n_turns} points')
+        else:
+            len_padded = n_turns
+        fft_power = np.abs(np.fft.fft(data_centered, n=len_padded)) ** 2
+        fft_freq = np.fft.fftfreq(len_padded)
+        # Keep half
+        fft_power = fft_power[fft_freq > 0]
+        fft_freq = fft_freq[fft_freq > 0]
 
         if output_trim:
-            # fft_power = fft_power[trim[0]:trim[1]]
-            # fft_freq = fft_freq[trim[0]:trim[1]]
             fft_power = fft_power[output_trim]
             fft_freq = fft_freq[output_trim]
 
@@ -166,32 +200,39 @@ class NAFF:
             turns = int(order * a)
         return turns
 
-    def calc_correlation_amplitude(self, data: np.ndarray, freq: float, turns: int = None, order: int = 6,
-                                   method: int = 11, only_amplitude: bool = False):
+    # def calc_correlation_amplitude(self, data: np.ndarray, freq: float, turns: int = None, order: int = 6,
+    #                                method: int = 11, only_amplitude: bool = False):
+    #
+    #     """
+    #     Calculate signal correlation at a single frequency
+    #     :param data:
+    #     :param freq:
+    #     :param turns:
+    #     :param order:
+    #     :param method:
+    #     :param only_amplitude:
+    #     :return:
+    #     """
+    #     # print(f)
+    #     res = self.compute_correlations(data, [freq], turns=turns, integrator_order=order, method=method)[0]
+    #     if only_amplitude:
+    #         return res[0]
+    #     else:
+    #         return res
 
-        """
-        Calculate signal correlation at a single frequency
-        :param data:
-        :param freq:
-        :param turns:
-        :param order:
-        :param method:
-        :param only_amplitude:
-        :return:
-        """
-        # print(f)
-        res = self.compute_correlations(data, [freq], turns=turns, integrator_order=order, method=method)[0]
-        if only_amplitude:
-            return res[0]
-        else:
-            return res
-
-    def compute_correlations(self, data: np.ndarray, frequencies: list, turns=None,
-                             skip_turns=0,
-                             window_order=1, integrator_order=6, method=11,
-                             data_trim=None):
+    def compute_correlations(self,
+                             data: np.ndarray,
+                             frequencies: Union[List[float], float, int],
+                             turns: int = None,
+                             skip_turns: int = 0,
+                             window_order: int = 1,
+                             integrator_order: int = 6,
+                             method: int = 11,
+                             data_trim: slice = None,
+                             no_trim: bool = False):
         """
         Calculate correlation with a list of frequencies
+        :param no_trim:
         :param data_trim:
         :param data:
         :param frequencies:
@@ -202,9 +243,17 @@ class NAFF:
         :param method:
         :return:
         """
-        data_trim = data_trim or self.data_trim
-        if data_trim:
-            data = data[data_trim]
+        single_freq_mode = False
+        if isinstance(frequencies, float) or isinstance(frequencies, int):
+            frequencies = [frequencies]
+            single_freq_mode = True
+
+        if not no_trim:
+            data_trim = data_trim or self.data_trim
+            if data_trim:
+                if data_trim.stop is not None and data_trim.stop > len(data):
+                    raise Exception(f"Trim end ({data_trim.stop}) exceeds available data length ({len(data)})")
+                data = data[data_trim]
 
         if not turns:
             turns = len(data) - 1
@@ -213,27 +262,36 @@ class NAFF:
         data = data[skip_turns:skip_turns + turns_naff + 1]
 
         if (turns_naff, window_order) not in self.window_cache:
+            # Hanning window
             T = np.linspace(0, turns_naff, num=turns_naff + 1, endpoint=True) * 2.0 * np.pi - np.pi * turns_naff
             TWIN = ((2.0 ** window_order * np.math.factorial(window_order) ** 2) / float(
-                np.math.factorial(2 * window_order))) * (
-                           1.0 + np.cos(T / turns_naff)) ** window_order
+                np.math.factorial(2 * window_order))) * (1.0 + np.cos(T / turns_naff)) ** window_order
             self.window_cache[(turns_naff, window_order)] = TWIN
         else:
             TWIN = self.window_cache[(turns_naff, window_order)]
 
         if turns_naff not in self.linspace_cache:
+            # Just 1...N array
             i_line = np.linspace(1, turns_naff, num=turns_naff, endpoint=True)
             self.linspace_cache[turns_naff] = i_line
         else:
             i_line = self.linspace_cache[turns_naff]
 
         integral = []
+        tic = time.perf_counter()
         for f in frequencies:
             if method == 11:
                 integral.append(_get_integral_v11(data, TWIN, i_line,
                                                   self.coeffs_cache[integrator_order - 1],
                                                   f, turns_naff, integrator_order))
-
+            elif method == 14:
+                integral.append(_get_integral_v14(data, TWIN, i_line,
+                                                  self.coeffs_cache[integrator_order - 1],
+                                                  f, turns_naff, integrator_order))
+            elif method == 15:
+                integral.append(_get_integral_v15(data, TWIN, i_line,
+                                                  self.coeffs_cache[integrator_order - 1],
+                                                  f, turns_naff, integrator_order))
             # elif method == 3:
             #     integral.append(getIntegralv3(data, TWIN, f, turns_naff, order))
             # elif method == 4:
@@ -257,32 +315,87 @@ class NAFF:
             #     integral.append(getIntegralv13(data, TWIN, i_line, coeffs_cache[order - 1], f, turns_naff, order))
             else:
                 raise Exception("incorrect method selected!")
-
-        return integral
-
-    def run_naff(self, data: np.ndarray, n_points: int, n_skip: int = 0,
-                 legacy: bool = False, xatol: float = 1e-6):
-        if len(data) < n_points + n_skip:
-            raise Exception(f"Number of points+skips exceeds available data length ({len(data)})")
-        sample = data[n_skip:n_skip + n_points + 1]
-        sample -= np.mean(sample)
-        tune0 = self.fft_hanning_peaks(sample, power=1, search_peaks=False)
-        print(f'Tune initial guess: {tune0}')
-
-        def get_amplitude(freq: float, data: np.ndarray, order: int, method: int):
-            return self.compute_correlations(data, [freq], integrator_order=order, method=method)[0]
-
-        res = minimize(lambda *args: -1 * get_amplitude(*args),
-                       np.array(tune0),
-                       args=(sample, 6, 11),
-                       method='nelder-mead',
-                       options={'disp': False,
-                                'initial_simplex': np.array([[tune0 - 1e-3], [tune0 + 1e-3]]),
-                                'xatol': xatol,
-                                'fatol': 1})
-
-        tune = res.x[0]
-        if legacy:
-            return [[0, tune, 0, 0, 0]]
+        self.naff_runtimes.append((time.perf_counter() - tic) / len(frequencies))
+        if single_freq_mode:
+            return integral[0]
         else:
-            return tune
+            return np.array(integral)
+
+    def get_projection(self, u, v):
+        """
+        Get inner product projection of two vectors - <u,v>/<u,u>
+        """
+        # <v,v> = 1 * len(v) because frequency vector has entries of magnitude 1
+        return np.sum(np.conjugate(u) * v) / len(u)
+
+    def reset_perf_counters(self):
+        self.naff_runtimes = []
+
+    def run_naff(self, data: np.ndarray, data_trim=None, legacy: bool = False, xatol: float = 1e-6,
+                 n_components: int = 2, full_data: bool = True):
+        """
+        Numeric analysis of fundamental frequencies
+        Iterative method that maximizes inner product of data and oscillatory signal, finding best frequencies
+        :param data: Signal
+        :param data_trim: Optional trim override
+        :param legacy: Use old return format
+        :param xatol: Final optimization tolerance
+        :param n_components: Number of frequencies to look for
+        :param full_data: Return debug and other information in addition to tunes
+        :return:
+        """
+        data_trim = data_trim or self.data_trim
+        if data_trim:
+            if data_trim.stop is not None and data_trim.stop > len(data):
+                raise Exception(f"Trim end ({data_trim.stop}) exceeds available data length ({len(data)})")
+            data = data[data_trim]
+        data_centered = data - np.mean(data)
+        n_turns = len(data_centered)
+
+        last_eval = [0, 0, 0]
+
+        def get_amplitude(freq: np.ndarray, signal: np.ndarray, order: int, method: int):
+            nonlocal last_eval
+            last_eval = self.compute_correlations(signal, freq[0], integrator_order=order, method=method, no_trim=True)
+            return last_eval[0]
+
+        freq_components = []
+        results = []
+        tunes = []
+        for i in range(1, n_components + 1):
+            tune0 = self.fft_hanning_peaks(data_centered, power=1, search_peaks=False)
+            #logger.info(f'Component ({i}) - tune initial guess: {tune0}')
+
+            res = minimize(lambda *args: -1 * get_amplitude(*args),
+                           tune0,
+                           args=(data_centered, 6, 15),
+                           method='nelder-mead',
+                           options={'disp': False,
+                                    'initial_simplex': np.array([[tune0 - 1e-3], [tune0 + 1e-3]]),
+                                    'xatol': xatol,
+                                    'fatol': 1})
+
+            tune = res.x[0]
+            # Orthogonalize if not the first frequency and far enough
+            if np.any(np.abs(np.array(tunes) - tune) < 1e-4):
+                # Close frequency wasnt removed last time, remove without orthogonalization
+                fc = (1.0 * last_eval[1] + 1.0j * last_eval[2]) * np.exp(1.0j * 2 * np.pi * tune * np.arange(n_turns))
+                logger.warning(f'Close frequency ({tune:.6f}) found (eps={np.min(np.abs(np.array(tunes) - tune)):.6f}), removing w/o orthogonalization')
+                #raise Exception
+            else:
+                fc = np.exp(1.0j * 2 * np.pi * tune * np.arange(n_turns))
+                for j in range(2, i):
+                    # print(i,j, fc[0:5])
+                    fc = fc - self.get_projection(freq_components[j - 1], fc) * freq_components[j - 1]
+            tunes.append(tune)
+            freq_components.append(fc)
+            amplitude = self.get_projection(fc, data_centered)
+            results.append([res.x[0], data_centered.copy(), tune0, fc, amplitude, res])
+            data_centered = data_centered - amplitude * fc
+
+        if legacy:
+            return [[0, res[0], 0, 0, 0] for res in results]
+        elif full_data:
+            return results
+        else:
+            return [res[0] for res in results]

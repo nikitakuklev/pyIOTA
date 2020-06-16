@@ -41,7 +41,7 @@ class Invariants:
     def compute_I1(x, px, y, py, alpha, normalized=True):
         """Compute first DN invariant"""
         assert normalized
-        I = x ** 2 + y ** 2 + px ** 2 + py ** 2 + alpha * (x ** 4 + y ** 4 + 3 * y ** 2 * x ** 2) / 2
+        I = x ** 2 + y ** 2 + px ** 2 + py ** 2 + alpha * (x ** 4 + y ** 4 - 3 * (y ** 2) * (x ** 2)) / 2
         return I
 
 
@@ -154,33 +154,44 @@ class Envelope:
         return ans
 
     @staticmethod
-    @jit(nopython=True, fastmath=True, nogil=True)
+    def budkerfit_norm(xdata: np.ndarray,
+                       tau: float, c2: float, freq: float, ofsx: float, ofsy: float, c3: float):
+        xo = (xdata - ofsx) #* (1 + c3 * np.arange(len(xdata)))
+        ans = np.exp(-tau * (xo**2) - c2 * (1-np.cos(freq * xo))) + ofsy
+        ans = ans * (1 + c3 * np.arange(len(ans)))
+        return ans / np.max(ans)
+
+    @staticmethod
+    def budkerfit_norm2(xdata: np.ndarray,
+                       tau: float, c2: float, freq: float, ofsx: float, ofsy: float, c3: float, phase: float):
+        xo = (xdata - ofsx) #* (1 + c3 * np.arange(len(xdata)))
+        ans = np.exp(-tau * (xo**2) - c2 * (1-np.cos(freq * xo + phase))) + ofsy
+        ans = ans * (1 + c3 * np.arange(len(ans)))
+        return ans / np.max(ans)
+
+    @staticmethod
+    #@jit(nopython=True, fastmath=True, nogil=True)
     def coupled_envelope(x: np.ndarray,
-                         amplitude: float,
-                         c1: float, c2: float, c3: float, nu: float,
-                         ofsx: float, ofsy: float):
+                         amplitude: float, c1: float, c2: float, c3: float, nu: float, ofsx: float, ofsy: float):
         """
         Envelope that includes chromaticity and octupolar nonlinear decoherence, multiplied by coupling cosine envelope
         In other words, a 2D model with additional coupling 'beating' envelope
-        :param xdata:
-        :param amplitude:
-        :param tau:
-        :param c2:
-        :param freq:
-        :param ofsx:
-        :param ofsy:
-        :param c3:
-        :return:
         """
-        xsc = x * c2
+        xsc = (x-ofsx) * c2
         xscsq = xsc ** 2
-        ans = 1 / (1 + xscsq) * np.exp(-xscsq * (c1 ** 2) / (1 + xscsq)) * np.exp(-((np.sin[nu * x]) * (c3 / nu)) ** 2)
+        #ans = amplitude * (1 / (1 + xscsq)) * np.exp(-xscsq * (c1 ** 2) / (1 + xscsq)) * np.exp(-((np.sin(nu * x)) * (c3 / nu)) ** 2) + ofsy
+        ans = amplitude * (1 / (1 + xscsq)) * np.exp(-xscsq * c1 / (1 + xscsq)) * np.exp(-((np.sin(nu * x)) * (c3 / nu)) ** 2) + ofsy
         # ans = ans * (1+c3*np.arange(len(ans)))
         return ans
 
-    def find_envelope(self, data_raw, normalize=False, p0=None, lu=None, full=False):
+    def find_envelope(self,
+                      data_raw: np.ndarray,
+                      normalize:bool=False,
+                      p0=None,
+                      lu=None,
+                      full=False):
         if np.any(np.isnan(data_raw)):
-            raise Exception(f'Some of given data is NaN!')
+            raise Exception(f'Some of data is NaN!')
         data_trim = self.data_trim
         data_raw = data_raw[data_trim]
         if p0 is None:
@@ -266,7 +277,7 @@ class SVD:
         return U, S, V, vh
 
     def decompose_kick_2D(self, kick: Kick, tag: str = 'SVD', use_kick_trim: bool = True,
-                          add_virtual_bpms: bool = True):
+                          add_virtual_bpms: bool = True, families: List[str]=None):
         """
         Decompose kick using SVD and store results
         :param add_virtual_bpms: Whether to add resulting components as virtual BPMs
@@ -275,8 +286,9 @@ class SVD:
         :param tag: Column name tag
         :return:
         """
+        families = families or ['H', 'V']
         assert kick.__class__.__name__ == 'Kick'  # assert isinstance(kick, Kick)
-        for family in ['H', 'V']:
+        for family in families:
             # matrix = kick.get_bpm_matrix(plane)
             U, S, V, vh = self.decompose2D(kick, plane=family, use_kick_trim=use_kick_trim)
             # kick.df[f'{tag}_{plane}_M0'] = vh[0, :]

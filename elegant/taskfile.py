@@ -304,6 +304,33 @@ class Task:
         strings.append(f'name = {loc_name}') if loc_name else strings.append(f'name = "*"')
         return strings
 
+    # Errors
+
+    @task(name='error_control')
+    def setup_error_control(self, *args, clean_step=False,):
+        strings = [' clear_error_settings = 1',
+                   ' no_errors_for_first_step = {}'.format(clean_step),
+                   f' error_log = {self.rf}/%s.erl']
+        return strings
+
+    @task(name='error_control')
+    def setup_error_control_end(self):
+        strings = ['summarize_error_settings = 1']
+        return strings
+
+    @task(name='error_element')
+    def setup_error_element(self, *args, name, elname, item, amplitude):
+        strings = [f' name = "{name}"',
+                   f' element_type = "{elname}"',
+                   f' item = "{item}"',
+                   f' amplitude={amplitude:10e}',
+                   ' cutoff = 2.0',
+                   ' bind = 0',
+                   ' fractional = 0']
+        return strings
+
+    # Optimizer
+
     @task(name='optimize')
     def optimizer_run(self, *args, **kwargs):
         strings = ['summarize_setup = 1']

@@ -4,6 +4,7 @@ import uuid
 from pathlib import Path
 import h5py
 import pandas as pd
+import numpy as np
 import datetime
 
 special_keys = ['idx', 'kickv', 'kickh', 'state', 'custom']
@@ -52,10 +53,11 @@ def load_data_tbt(fpath: Path,
                         print(f'File {fpath.name} has corrupted data from multiple kicks ({set(vlist)})')
                         if not force_load: return None
                     else:
-                        raise Exception(f"Kick acquisition numbers ({set(vlist)}) are not the same - data is corrupted!")
+                        raise Exception(
+                            f"Kick acquisition numbers ({set(vlist)}) are not the same - data is corrupted!")
                 rowlist.append({'idx': idx or i,
-                                'kickv': h5f['state'].attrs['kickv'],
-                                'kickh': h5f['state'].attrs['kickh'],
+                                'kickv': h5f['state'].attrs.get('kickv', np.nan),
+                                'kickh': h5f['state'].attrs.get('kickh', np.nan),
                                 'state': dict(h5f['state'].attrs),
                                 # 'ts': h5f.attrs['time_utcstamp'],
                                 **kick_arrays})
@@ -79,8 +81,8 @@ def load_data_tbt(fpath: Path,
                     else:
                         raise Exception(f"Kick acquisition numbers ({set(vlist)})are not the same - data is corrupted!")
                 rowlist.append({'idx': idx or i,
-                                'kickv': h5f['state'].attrs['kickv'],
-                                'kickh': h5f['state'].attrs['kickh'],
+                                'kickv': h5f['state'].attrs.get('kickv', np.nan),
+                                'kickh': h5f['state'].attrs.get('kickh', np.nan),
                                 'state': dict(h5f['state'].attrs),
                                 'custom': dict(h5f['custom'].attrs),
                                 # 'ts': h5f.attrs['time_utcstamp'],

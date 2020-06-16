@@ -40,7 +40,6 @@ class LatticeContainer:
 
         if reset_elements_to_defaults:
             logger.warning(f'Resetting any nonlinear elements to 0')
-            # print(f'WARN - resetting any nonlinear elements to 0')
             elems = [l for l in self.lattice_list if isinstance(l, Sextupole)]
             for el in elems:
                 el.k2 = 0
@@ -478,7 +477,7 @@ class LatticeContainer:
             if verbose: print(f'Sequence ended - creating ({name_new}) of length ({l_new})')
             seq_new.append(Drift(l=l_new, eid=name_new))
 
-        if not self.silent: print(
+        if not self.silent: logger.info(
             f'Reduced element count from ({len(seq)}) to ({len(seq_new)}), ({cnt}) drifts remaining')
         if not np.isclose(l_total, sum([el.l for el in seq_new])):
             raise Exception(f'New sequence length ({sum([el.l for el in seq_new])} different from old ({l_total})!!!')

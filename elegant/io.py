@@ -1,4 +1,5 @@
-__all__ = ['SDDS', 'read_parameters_to_df', 'write_df_to_parameter_file', 'prepare_folders', 'prepare_folder_structure']
+__all__ = ['SDDS', 'read_parameters_to_df', 'write_df_to_parameter_file', 'prepare_folders', 'prepare_folder_structure',
+           'write_df_to_parameter_file_v2']
 
 """
 Collection of IO-related functions for elegant and SDDS file formats
@@ -253,6 +254,54 @@ def write_df_to_parameter_file(fpath: Path,
     for i, n in enumerate(names):
         x.setColumnValueLists(names[i], column_data[i])
     # print(column_data)
+    x.save(str(fpath))
+    del x
+
+
+def write_df_to_parameter_file_v2(fpath: Path,
+                                  df: pd.DataFrame,
+                                  parameters: dict = None,
+                                  type_map: dict = None):
+    """
+    Helper method - write dataframe to knob file (ASCII encoding).
+    :param parameters:
+    :param fpath:
+    :param df:
+    """
+
+    assert not fpath.is_dir()
+    if fpath.exists():
+        print(f'Warning - knob {fpath} already exists, overwriting')
+    # print(df)
+    x = sdds.SDDS(10)
+    x.setDescription("params", str(fpath))
+    type_dict = {'ElementName': x.SDDS_STRING, 'ElementParameter': x.SDDS_STRING, 'ParameterValue': x.SDDS_DOUBLE,
+                 'ParameterError': x.SDDS_DOUBLE, 'ElementOccurence': x.SDDS_LONG, 'ElementType': x.SDDS_STRING}
+    if type_map:
+        type_dict.update(type_map)
+    names = list(df.columns.values)
+    types = [type_dict[name] for name in names]
+    # TODO: type heuristics
+    if parameters:
+        for (k, v) in parameters.items():
+            if isinstance(v, int):
+                v = float(v)
+            if not isinstance(v, float):
+                raise Exception("Only numeric parameters supported - add strings/etc. manually plz")
+            x.defineSimpleParameter(k, x.SDDS_DOUBLE)
+            x.setParameterValueList(k, [v])
+    for i, n in enumerate(names):
+        x.defineSimpleColumn(names[i], types[i])
+    column_data = [[[]] for i in range(len(names))]
+    for row in df.itertuples(index=False):
+        #print(row)
+        for i, r in enumerate(row):
+            #print(i, r)
+            column_data[i][0].append(r)
+    for i, n in enumerate(names):
+        x.setColumnValueLists(names[i], column_data[i])
+    # print(column_data)
+    #print(names, types)
     x.save(str(fpath))
     del x
 
