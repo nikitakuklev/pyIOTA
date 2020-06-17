@@ -384,6 +384,31 @@ def parse_knobs(fpath: Path, verbose: bool = False) -> Dict:
     return {k.name: k for k in knobs}
 
 
+def parse_transfer_maps(file: Path):
+    """
+    Parses outpout of sixdsim transfer map export. Note special, old format.
+    :param file:
+    :return: Dictionary with key as target element name
+    """
+    with open(file, 'r') as f:
+        tmaps = {}
+        lines = f.readlines()
+        lines = lines[14:]
+        for i, l in enumerate(lines):
+            if i % 7 == 0:
+                src, to = l.split('->')[0].strip(), l.split('->')[1].strip()
+            else:
+                j = i % 7 - 1
+                if j == 0:
+                    matr = []
+                # print(list(filter(None, l.strip().split(' '))))
+                matr.append(np.array(list(filter(None, l.strip().split(' ')))).astype(np.float))
+                if j == 5:
+                    tmaps[to] = (src, np.stack(matr));  # print(dataarr)
+        tmaps['start'] = ('end', np.identity(6))
+    return tmaps
+
+
 class AbstractKnob:
     """
     Superclass of all knobs, which are collections of KnobVariables representing setpoints of devices
