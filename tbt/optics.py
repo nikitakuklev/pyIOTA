@@ -47,24 +47,16 @@ class Invariants:
 
 class Coordinates:
     @staticmethod
-    def normalize_x(x, beta):
+    def normalize_x(x: np.ndarray, beta: float) -> np.ndarray:
         """
         Compute normalized transverse position
-        :param x:
-        :param beta:
-        :return:
         """
         return x / np.sqrt(beta)
 
     @staticmethod
-    def normalize(x, px, beta, alpha):
+    def normalize(x: np.ndarray, px: np.ndarray, beta: float, alpha: float) -> Tuple[np.ndarray,np.ndarray]:
         """
-        Compute normalized transverse position and momentum
-        :param x:
-        :param px:
-        :param beta:
-        :param alpha:
-        :return:
+        Compute normalized transverse position and momentum from local (x,px) and twiss functions
         """
         return x / np.sqrt(beta), x * alpha / np.sqrt(beta) + np.sqrt(beta) * px
 
@@ -87,9 +79,11 @@ class Coordinates:
 
 class Phase:
     @staticmethod
-    def calc_from_modes(mode2, mode1):
+    def calc_from_modes(mode2: np.ndarray, mode1: np.ndarray) -> np.ndarray:
         """
-        Calculates phases from (sin/cos) spatial modes
+        Calculates phases from (sin/cos) spatial modes.
+        Mode order/sign flip doesnt change relative phase distances, but has bounds complications, so don't do it.
+        This is since arctan[z] = -arctan[-z] = arccot[1/z] = pi/2-arctan[1/z]
         :param mode1:
         :param mode2:
         :return:
@@ -98,7 +92,15 @@ class Phase:
         return phases
 
     @staticmethod
-    def relative_to_absolute(phases):
+    def calc_from_2bpm(bpm1, bpm2):
+        """
+        Calculates phase phi12 between two signals. This requires finding phase of C/S components via FFT
+        See thesis CERN SL/96-70 (BI)
+        """
+        raise Exception('Phase calculation requires spectral decomposition, not implemented')
+
+    @staticmethod
+    def relative_to_absolute(phases: np.ndarray) -> np.ndarray:
         """
         Converts relative phases to absolutes, assuming first phase is 0. Only works if all deltas < 2pi
         :param phases:

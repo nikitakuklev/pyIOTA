@@ -198,8 +198,8 @@ class Kick:
                         logger.warning(f'Suggested trim search on BPM ({k}) reached END OF SIGNAL')
                         break
                     elif offset + 50 > len(v):
-                        #logger.warning('Suggested trim search reached END OF SIGNAL')
-                        #break
+                        # logger.warning('Suggested trim search reached END OF SIGNAL')
+                        # break
                         raise Exception
                     offset += 5
                 if verbose: print(f'BPM {k}: Iampl {initial_ampl:.3f}, Fampl {ampl:.3f}, offset {offset}')
@@ -653,7 +653,7 @@ class Kick:
 
     # Helpers for state categories
 
-    def get_optics(self):
+    def get_optics(self) -> Dict[str, float]:
         """
         Gets all relevant optics settings
         """
@@ -732,7 +732,7 @@ class Kick:
                             data=self.df.iloc[0].loc[bpm],
                             search_peaks=True,
                             search_kwargs=search_kwargs,
-                            )
+                        )
                     # a, b = naff.fft(self.df.iloc[0].loc[bpm])
                     freq[bpm] = pf
                     pwr[bpm] = pp
@@ -925,7 +925,12 @@ class KickSequence:
         kicks = self.kicks
         #
         states = [k.get_optics() for k in kicks]
-        assert all(x == states[0] for x in states)
+        if not all(x == states[0] for x in states):
+            #print([x == states[0] for x in states])
+            for kick, x in zip(kicks, states):
+                delta = {k: (x[k], states[0][k]) for k in x if x[k] != states[0][k]}
+                logger.error(f'Kick {kick.idx} is not consistent: delta {delta}')
+            raise Exception('States inconsistent')
         states = [k.get_correctors() for k in kicks]
         assert all(x == states[0] for x in states)
         states = [k.get_sextupoles() for k in kicks]
