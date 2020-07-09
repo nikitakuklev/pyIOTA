@@ -9,7 +9,6 @@ import pyIOTA.iota.run2
 import pyIOTA.iota.run2 as iota
 import scipy as sc
 import pandas as pd
-from scipy.signal import hilbert, chirp, butter, filtfilt
 
 # special_keys = ['idx', 'kickv', 'kickh', 'state', 'custom']
 from pyIOTA.tbt.naff import NAFF
@@ -174,7 +173,8 @@ class Kick:
     def reset_trim(self):
         self.trim = self.default_trim
 
-    def suggest_trim(self, min_idx: int, max_idx: int, threshold: float = 0.2, verbose: bool = False):
+    def suggest_trim(self, min_idx: int, max_idx: int, threshold: float = 0.2,
+                     n_refturns: int = 50, verbose: bool = False, silent: bool = True):
         """
         Finds longest signal trim within constraints, based on local SNR
         :param min_idx: Starting index
@@ -188,26 +188,28 @@ class Kick:
         for fam in families:
             for k, v in self.get_bpm_data(family=fam, no_trim=True).items():
                 v = v[min_idx:max_idx] - np.mean(v[min_idx:max_idx])
-                initial_ampl = np.mean(np.abs(v[:100]))
+                # Reference is first n_refturns after min_idx
+                initial_ampl = np.mean(np.abs(v[:n_refturns]))
                 offset = 0
                 while True:
-                    ampl = np.mean(np.abs(v[offset:50 + offset]))
+                    ampl = np.mean(np.abs(v[offset:30 + offset]))
                     if ampl < initial_ampl * threshold:
                         break
-                    elif offset + 50 > max_idx - min_idx:
-                        logger.warning(f'Suggested trim search on BPM ({k}) reached END OF SIGNAL')
+                    elif offset + 30 > max_idx - min_idx:
+                        if not silent:
+                            logger.warning(f'Trim search on BPM ({k}) reached END OF SIGNAL ({offset})+({min_idx})')
                         break
-                    elif offset + 50 > len(v):
+                    elif offset + 30 > len(v):
                         # logger.warning('Suggested trim search reached END OF SIGNAL')
                         # break
-                        raise Exception
+                        raise Exception('Out of bounds problem - check trim logic')
                     offset += 5
                 if verbose: print(f'BPM {k}: Iampl {initial_ampl:.3f}, Fampl {ampl:.3f}, offset {offset}')
                 offsets[k] = offset
         if verbose: print(f'Found trims: {min_idx} + {offsets}')
         offset_avg = int(np.round(np.mean(list(offsets.values()))))
         if verbose: print(f'Average offset: {offset_avg}')
-        return np.s_[min_idx:min_idx + offset_avg + 50]
+        return np.s_[min_idx:min_idx + offset_avg + 30]
 
     def search_state(self, search_string: str):
         """
@@ -453,7 +455,10 @@ class Kick:
         for (k, v) in self.bpm_families_active.items():
             v_all = self.bpm_families_all[k]
             delta = set(v_all).difference(set(v))
-            print(f'Plane ({k}): ({len(v_all)}) BPMs total, ({len(v)}) active, disabled: ({delta})')
+            if delta:
+                print(f'Plane ({k:2s}): ({len(v_all):<2d}) BPMs total, ({len(v):<2d}) active, disabled: ({delta})')
+            else:
+                print(f'Plane ({k:2s}): ({len(v_all):<2d}) BPMs total, ({len(v):<2d}) active, disabled: (None)')
 
     def bpms_apply_filters(self,
                            plane: str,
@@ -661,11 +666,14 @@ class Kick:
         squads = [q + '.SETTING' for q in pyIOTA.iota.SKEWQUADS.ALL_CURRENTS]
         return {k: self.state(k) for k in quads + squads}
 
-    def get_correctors(self):
+    def get_correctors(self, include_physical=False):
         """
         Gets all available corrector settings
         """
-        elements = [q + '.SETTING' for q in pyIOTA.iota.CORRECTORS.ALL_VIRTUAL]
+        if include_physical:
+            elements = [q + '.SETTING' for q in pyIOTA.iota.CORRECTORS.ALL]
+        else:
+            elements = [q + '.SETTING' for q in pyIOTA.iota.CORRECTORS.ALL_VIRTUAL]
         return {k: self.state(k) for k in elements}
 
     def get_sextupoles(self):
@@ -703,6 +711,7 @@ class Kick:
         :param search_kwargs: Method specific extra parameters to be used in the search,
         :param use_precalculated:
         :param data_trim: Trim override
+        :param pairs:
         :return:
         """
         families = families or ['H', 'V']
@@ -748,10 +757,12 @@ class Kick:
                     if data_trim:
                         # Use provided trims
                         nfresult = naff.run_naff(self.get_bpm_data(bpm, no_trim=True)[data_trim],
-                                                 n_components=n_components, data_trim=np.s_[:])
+                                                 n_components=n_components,
+                                                 data_trim=np.s_[:])
                     else:
                         # Use NAFF trims
-                        nfresult = naff.run_naff(self.get_bpm_data(bpm, no_trim=True), n_components=n_components)
+                        nfresult = naff.run_naff(self.get_bpm_data(bpm, no_trim=True),
+                                                 n_components=n_components)
                     peaks[bpm] = ([n[0] for n in nfresult], nfresult)
                     if selector:
                         nu = selector(self, peaks[bpm], bpm, search_kwargs)
@@ -802,7 +813,10 @@ class Kick:
             self.df['sig_nuy'] = np.std(average_tunes['V'])
         return freq, pwr, peaks
 
-    def calculate_fft(self, naff: NAFF, families: List[str] = None):
+    def calculate_fft(self,
+                      naff: NAFF,
+                      families: List[str] = None,
+                      data_trim: slice = None):
         """
         Calculates FFT for each bpms and stores in dataframe
         :param families:
@@ -812,9 +826,16 @@ class Kick:
         families = families or ['H', 'V', 'C']
         bpms = self.get_bpms(families, soft_fail=True)
         for i, bpm in enumerate(bpms):
-            fft_freq, fft_power = naff.fft(self.get(bpm))
-            self.df[bpm + '_fft_freq'] = [fft_freq]
-            self.df[bpm + '_fft_pwr'] = [fft_power]
+            if data_trim:
+                # Use provided trims
+                fft_freq, fft_power = naff.fft(self.get_bpm_data(bpm, no_trim=True)[data_trim],
+                                               data_trim=np.s_[:])
+            else:
+                # Use NAFF trims
+                fft_freq, fft_power = naff.fft(self.get_bpm_data(bpm, no_trim=True))
+            #fft_freq, fft_power = naff.fft(self.get(bpm))
+            self.df[bpm + self.Datatype.FFT_FREQ.value] = [fft_freq]
+            self.df[bpm + self.Datatype.FFT_POWER.value] = [fft_power]
 
     def calculate_sum_signal(self) -> float:
         """
@@ -899,11 +920,17 @@ class KickSequence:
     def __len__(self):
         return len(self.kicks)
 
-    def check_dataset_integrity(self, include_octupoles: bool = True, include_nl: bool = True,
-                                bad_word_strings: List[str] = None, bad_word_keys: List[str] = None) -> Set[str]:
+    def check_dataset_integrity(self,
+                                skewquads: bool = True,
+                                sextupoles: bool = True,
+                                octupoles: bool = True,
+                                nl: bool = True,
+                                skew_tol=3e-3,
+                                bad_word_strings: List[str] = None,
+                                bad_word_keys: List[str] = None) -> Set[str]:
         """
-        Checks if certain state parameters are the same for all kicks. Includes all standard elements, RF,
-        and optionally octupoles/NL.
+        Checks if certain state parameters are the same for all kicks.
+        Includes all standard elements + RF. Some categories can be disabled when differences are expected.
         :param include_octupoles:
         :param include_nl:
         :param bad_word_strings:
@@ -913,43 +940,71 @@ class KickSequence:
         invariant_devices = iota.DIPOLES.ALL_I + \
                             iota.CORRECTORS.ALL + \
                             iota.QUADS.ALL_CURRENTS + \
-                            iota.SKEWQUADS.ALL_CURRENTS + \
-                            iota.SEXTUPOLES.ALL_CURRENTS + \
                             ['N:IRFLLA', 'N:IRFMOD', 'N:IRFEAT', 'N:IRFEPC'] + \
                             ['N:IKPSVX', 'N:IKPSVD']
-        if include_octupoles:
+        if skewquads:
+            invariant_devices += iota.SKEWQUADS.ALL_CURRENTS
+        if sextupoles:
+            invariant_devices += iota.SEXTUPOLES.ALL_CURRENTS
+        if octupoles:
             invariant_devices += iota.OCTUPOLES.ALL_CURRENTS
-        if include_nl:
+        if nl:
             invariant_devices += iota.DNMAGNET.ALL_CURRENTS
         invariant_devices = set(invariant_devices)
         kicks = self.kicks
-        #
-        states = [k.get_optics() for k in kicks]
-        if not all(x == states[0] for x in states):
-            #print([x == states[0] for x in states])
-            for kick, x in zip(kicks, states):
-                delta = {k: (x[k], states[0][k]) for k in x if x[k] != states[0][k]}
-                logger.error(f'Kick {kick.idx} is not consistent: delta {delta}')
-            raise Exception('States inconsistent')
-        states = [k.get_correctors() for k in kicks]
-        assert all(x == states[0] for x in states)
-        states = [k.get_sextupoles() for k in kicks]
-        assert all(x == states[0] for x in states)
 
+        def state_filter(kvdict):
+            abort = False
+            if not all(x == kvdict[0] for x in kvdict):
+                for kick, x in zip(kicks, kvdict):
+                    def f(k, v1, v2):
+                        dev = k.split('.')[0]
+                        if dev in iota.SKEWQUADS.ALL_CURRENTS + iota.CORRECTORS.ALL:#COMBINED_VIRTUAL:
+                            return np.abs(v1 - v2) > skew_tol
+                        else:
+                            return v1 - v2 != 0.
+
+                    delta = {k: (x[k], kvdict[0][k]) for k in x if f(k, x[k], kvdict[0][k])}
+                    if delta:
+                        abort = True
+                        logger.error(f'Kick {kick.idx} is not consistent: delta {delta}')
+            return abort
+
+        # Sanity checks
         times = [k.state('aq_timestamp') for k in kicks]
         assert all(np.diff(times) > 0)
-        times = [k.state('N:EA5TRG.READING') for k in kicks]
-        assert all(np.diff(times) > 0)
+        seq_nums = [k.state('N:EA5TRG.READING') for k in kicks]
+        assert all(np.diff(seq_nums) > 0)
 
+        # Check all states have same contents
         states = [k.get_full_state() for k in kicks]
         keys = [set(s.keys()) for s in states]
         shared_keys = set.intersection(*keys)
         assert all(len(shared_keys) == len(k) for k in keys)
-        kvtuples = [set(s.items()) for s in states]
-        shared_keys = set.intersection(*kvtuples)
+
+        # Linear optics
+        states = [k.get_optics() for k in kicks]
+        abort = state_filter(states)
+        sum_states = [k.get_optics() for k in kicks]
+        # Orbit
+        states = [k.get_correctors(include_physical=True) for k in kicks]
+        abort |= state_filter(states)
+        [ss.update(s) for ss, s in zip(sum_states, states)]
+        # Sextupoles
+        if sextupoles:
+            states = [k.get_sextupoles() for k in kicks]
+            abort |= state_filter(states)
+            [ss.update(s) for ss, s in zip(sum_states, states)]
+        # Abort if any fail
+        if abort:
+            raise Exception('Sequence states inconsistent')
+
+        # Check that remaining keys all match exactly
+        kvtuples_rem = [set(k.get_full_state().items()) - set(ss.items()) for k, ss in zip(kicks, sum_states)]
+        shared_kvts = set.intersection(*kvtuples_rem)
         outliers = set()
-        for kvt in kvtuples:
-            outliers.update(kvt - shared_keys)
+        for kvt in kvtuples_rem:
+            outliers.update(kvt - shared_kvts)
         outlier_keys = set()
         for e in outliers:
             outlier_keys.update((e[0],))
@@ -957,6 +1012,7 @@ class KickSequence:
         if len(invariant_devices.intersection(outlier_devs)) != 0:
             raise Exception(f'Found invariants in outlier devices: {invariant_devices.intersection(outlier_devs)}')
 
+        # Check for bad strings in custom keys (i.e. kicker status)
         if bad_word_keys and bad_word_strings:
             for k in kicks:
                 for word in bad_word_strings:

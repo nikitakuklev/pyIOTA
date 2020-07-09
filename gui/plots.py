@@ -22,12 +22,20 @@ def plot_simple(*args,
                 ylabel: str = None,
                 sizes: Tuple = (12, 5),
                 demean: bool = False,
+                normalize: bool = False,
                 twiny_args: Union[List, Dict, np.ndarray] = None,
                 **kwargs):
     """
-    Simple routine to plot data sharing x/y axes
-    :param demean:
-    :param sizes:
+    Routine to plot data sharing a single plot. Each tuple is treated as (x,y) pair, and any number of singletons,
+    lists or dicts containing these tuples can be supplied. Plotting on right y axis is supported with respective arguments.
+    :param x: Shared x axis
+    :param fmt: Matplotlib format
+    :param xlabel: X label, same as matplotlib
+    :param ylabel: Y label, same as matplotlib
+    :param sizes: Plot size
+    :param demean: Demean each data series
+    :param normalize: Minmax normalize each data series
+    :param twiny_args: Right y axis arguments
     :return:
     """
     arrays = []
@@ -65,6 +73,9 @@ def plot_simple(*args,
             x_local = None
         if demean:
             v = v - np.mean(v)
+        if normalize:
+            from sklearn.preprocessing import minmax_scale
+            v = minmax_scale(v)
         if x_local is not None:
             ax.plot(x_local, v, fmt, label=i, zorder=z + 100, **kwargs)
         elif x is not None:
@@ -84,6 +95,9 @@ def plot_simple(*args,
         for z, (i, v) in enumerate(arrays_twiny):
             if demean:
                 v = v - np.mean(v)
+            if normalize:
+                from sklearn.preprocessing import minmax_scale
+                v = minmax_scale(v)
             if x:
                 axy.plot(x, v, fmt, label=i, zorder=z, **kwargs)
             else:
@@ -113,7 +127,8 @@ def plot_simple_grid(*args,
     :param sizes: Figure size per each row/column
     :return: fig, ax
     """
-    fig = ax = None
+    fig_l = []
+    ax_l = []
     for entry in args:
         if isinstance(entry, list):
             if all(isinstance(v, np.ndarray) for v in entry):
@@ -134,6 +149,8 @@ def plot_simple_grid(*args,
         width = nperrow if n_rows > 1 else len(entry)
         fig, ax = plt.subplots(n_rows, width, figsize=(sizes[0] * width, sizes[1] * n_rows),
                                sharex=True, sharey=True)
+        fig_l.append(fig)
+        ax_l.append(ax.flatten())
         if paired_bpm_mode:
             keys = [k for k in entry.keys()]
             roots = [k[:-2] for k in keys]
@@ -184,6 +201,12 @@ def plot_simple_grid(*args,
                         y = minmax_scale(y)  # (y-np.min(y))/np.linalg.norm(y-np.min(y))
                     ax[i].plot(x, y)
                 ax[i].set_title(f"{i}|{k}")
+    if len(args) == 1:
+        fig = fig_l[0]
+        ax = ax_l[0]
+    else:
+        fig = fig_l
+        ax = ax_l
     return fig, ax
 
 

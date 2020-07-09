@@ -136,8 +136,12 @@ class NAFF:
         else:
             return fft_freq[np.argmax(fft_power)]
 
-    def fft(self, data: np.ndarray, window_power: int = None, pad_zeros_power: int = None,
-            output_trim=None, data_trim=None) -> Tuple[np.ndarray, np.ndarray]:
+    def fft(self,
+            data: np.ndarray,
+            window_power: int = None,
+            pad_zeros_power: int = None,
+            output_trim: slice = None,
+            data_trim: slice = None) -> Tuple[np.ndarray, np.ndarray]:
         pad_zeros_power = pad_zeros_power or self.fft_pad_zeros_power
         window_power = window_power or self.window_power
         output_trim = output_trim or self.output_trim
@@ -229,18 +233,20 @@ class NAFF:
                              integrator_order: int = 6,
                              method: int = 11,
                              data_trim: slice = None,
-                             no_trim: bool = False):
+                             no_trim: bool = False,
+                             magnitude_only: bool = True):
         """
-        Calculate correlation with a list of frequencies
-        :param no_trim:
+        Calculate NAFF correlation with a list of frequencies
+        :param data: Signal data array
+        :param frequencies: Frequencies to compute correlations for
+        :param no_trim: Override all trims and work on raw data
         :param data_trim:
-        :param data:
-        :param frequencies:
         :param turns:
         :param skip_turns:
         :param window_order:
         :param integrator_order:
-        :param method:
+        :param method: Method to calculate numeric integral
+        :param magnitude_only:
         :return:
         """
         single_freq_mode = False
@@ -254,6 +260,10 @@ class NAFF:
                 if data_trim.stop is not None and data_trim.stop > len(data):
                     raise Exception(f"Trim end ({data_trim.stop}) exceeds available data length ({len(data)})")
                 data = data[data_trim]
+
+        # Check for deprecated parameters, temp hack
+        if turns or skip_turns:
+            raise Exception('Deprecated parameters used!')
 
         if not turns:
             turns = len(data) - 1
@@ -319,7 +329,10 @@ class NAFF:
         if single_freq_mode:
             return integral[0]
         else:
-            return np.array(integral)
+            if magnitude_only:
+                return np.array(integral)[:, 0]
+            else:
+                return np.array(integral)
 
     def get_projection(self, u, v):
         """
@@ -364,7 +377,7 @@ class NAFF:
         tunes = []
         for i in range(1, n_components + 1):
             tune0 = self.fft_hanning_peaks(data_centered, power=1, search_peaks=False)
-            #logger.info(f'Component ({i}) - tune initial guess: {tune0}')
+            # logger.info(f'Component ({i}) - tune initial guess: {tune0}')
 
             res = minimize(lambda *args: -1 * get_amplitude(*args),
                            tune0,
@@ -380,8 +393,9 @@ class NAFF:
             if np.any(np.abs(np.array(tunes) - tune) < 1e-4):
                 # Close frequency wasnt removed last time, remove without orthogonalization
                 fc = (1.0 * last_eval[1] + 1.0j * last_eval[2]) * np.exp(1.0j * 2 * np.pi * tune * np.arange(n_turns))
-                logger.warning(f'Close frequency ({tune:.6f}) found (eps={np.min(np.abs(np.array(tunes) - tune)):.6f}), removing w/o orthogonalization')
-                #raise Exception
+                logger.warning(
+                    f'Close frequency ({tune:.6f}) found (eps={np.min(np.abs(np.array(tunes) - tune)):.6f}), removing w/o orthogonalization')
+                # raise Exception
             else:
                 fc = np.exp(1.0j * 2 * np.pi * tune * np.arange(n_turns))
                 for j in range(2, i):
