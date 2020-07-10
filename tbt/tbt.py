@@ -1,5 +1,6 @@
 import copy
 import enum
+import itertools
 import logging
 from typing import Union, Callable, Dict, List, Iterable, Tuple, Optional, Any, Set
 
@@ -97,6 +98,7 @@ class Kick:
         self.n_turns = self.get_turns()
         self.kickv = self.get('kickv')
         self.kickh = self.get('kickh')
+        self.tag = f'{self.idx} {self.kickh:.3f} {self.kickv:.3f}'
         self.nux = None  # main tune
         self.nuy = None  # main tune
         self.fft_pwr = self.fft_freq = self.peaks = None
@@ -258,9 +260,11 @@ class Kick:
                      return_type: str = None,
                      use_cache: bool = True,
                      add_to_cache: bool = True,
-                     no_trim: bool = False):
+                     no_trim: bool = False,
+                     data_trim: slice = None):
         """
         General data retrieval method for data that is per-bpm
+
         :param columns: List of literal column names, supercedes all other parameters
         :param bpms: List of bpms (supercedes family), will be resolved agaisnt data_type
         :param family: Family (aka plane) of BPMs, used along with data_type if no bpms/columns provided
@@ -268,7 +272,8 @@ class Kick:
         :param return_type: 'dict', 'list', 'matrix', 'single'
         :param add_to_cache: In future, result of operations like matrix building will be cached
         :param use_cache:
-        :param no_trim: Force full data, ignoring kick trim
+        :param no_trim: Force full data, ignoring kick trim. Overrides data_trim parameter.
+        :param data_trim: Override kick trim
         :return:
         """
         # catch shorthand 1 bpm notation
@@ -292,14 +297,17 @@ class Kick:
             columns_roots = columns
 
         data = {k: self.get(c) for k, c in zip(columns_roots, columns)}
-        if self.trim and not no_trim:
+        if (self.trim or data_trim) and not no_trim:
             is_array = [isinstance(v, np.ndarray) for v in data.values()]
             if all(is_array):
-                data = {k: v[self.trim] for k, v in data.items()}
+                if data_trim:
+                    data = {k: v[data_trim] for k, v in data.items()}
+                else:
+                    data = {k: v[self.trim] for k, v in data.items()}
             elif all([not i for i in is_array]):
                 pass  # trim does not apply, return is uniform
             else:
-                raise Exception('WARN - data has both arrays and non-arrays, trim is ambiguous')
+                raise Exception('Data has both arrays and non-arrays, trim is ambiguous')
 
         if return_type == 'dict':
             return data
@@ -659,27 +667,31 @@ class Kick:
     # Helpers for state categories
 
     def get_optics(self) -> Dict[str, float]:
-        """
-        Gets all relevant optics settings
-        """
+        """ Gets all relevant optics settings """
         quads = [q + '.SETTING' for q in pyIOTA.iota.QUADS.ALL_CURRENTS]
         squads = [q + '.SETTING' for q in pyIOTA.iota.SKEWQUADS.ALL_CURRENTS]
         return {k: self.state(k) for k in quads + squads}
 
-    def get_correctors(self, include_physical=False):
-        """
-        Gets all available corrector settings
-        """
+    def get_correctors(self, include_physical=False) -> Dict[str, float]:
+        """ Gets all available corrector settings """
         if include_physical:
             elements = [q + '.SETTING' for q in pyIOTA.iota.CORRECTORS.ALL]
         else:
             elements = [q + '.SETTING' for q in pyIOTA.iota.CORRECTORS.ALL_VIRTUAL]
         return {k: self.state(k) for k in elements}
 
-    def get_sextupoles(self):
-        """
-        Gets sextupoles settings
-        """
+    def get_quadrupoles(self) -> Dict[str, float]:
+        """ Gets quarupole settings """
+        elements = [q + '.SETTING' for q in pyIOTA.iota.QUADS.ALL_CURRENTS]
+        return {k: self.state(k) for k in elements}
+
+    def get_skewquads(self) -> Dict[str, float]:
+        """ Gets quarupole settings """
+        elements = [q + '.SETTING' for q in pyIOTA.iota.SKEWQUADS.ALL_CURRENTS]
+        return {k: self.state(k) for k in elements}
+
+    def get_sextupoles(self) -> Dict[str, float]:
+        """ Gets sextupole settings """
         elements = [q + '.SETTING' for q in pyIOTA.iota.SEXTUPOLES.ALL_CURRENTS]
         return {k: self.state(k) for k in elements}
 
@@ -804,14 +816,29 @@ class Kick:
         # self.fft_pwr = pwr
         self.peaks = peaks
         if 'H' in families:
-            self.nux = np.mean(average_tunes['H'])
+            self.nux = np.nanmean(average_tunes['H'])
             self.df['nux'] = self.nux
-            self.df['sig_nux'] = np.std(average_tunes['H'])
+            self.df['sig_nux'] = np.nanstd(average_tunes['H'])
         if 'V' in families:
-            self.nuy = np.mean(average_tunes['V'])
+            self.nuy = np.nanmean(average_tunes['V'])
             self.df['nuy'] = self.nuy
-            self.df['sig_nuy'] = np.std(average_tunes['V'])
+            self.df['sig_nuy'] = np.nanstd(average_tunes['V'])
         return freq, pwr, peaks
+
+    def update_mean_tune(self, families):
+        families = families or ['H', 'V']
+        if 'H' in families:
+            bpms = self.get_bpms('H')
+            tunes = [self.get(b + self.Datatype.NU.value) for b in bpms]
+            self.nux = np.nanmean(tunes)
+            self.df['nux'] = self.nux
+            self.df['sig_nux'] = np.nanstd(tunes)
+        if 'V' in families:
+            bpms = self.get_bpms('V')
+            tunes = [self.get(b + self.Datatype.NU.value) for b in bpms]
+            self.nuy = np.nanmean(tunes)
+            self.df['nuy'] = self.nuy
+            self.df['sig_nuy'] = np.nanstd(tunes)
 
     def calculate_fft(self,
                       naff: NAFF,
@@ -921,7 +948,9 @@ class KickSequence:
         return len(self.kicks)
 
     def check_dataset_integrity(self,
+                                quadrupoles: bool = True,
                                 skewquads: bool = True,
+                                correctors: bool = True,
                                 sextupoles: bool = True,
                                 octupoles: bool = True,
                                 nl: bool = True,
@@ -931,19 +960,22 @@ class KickSequence:
         """
         Checks if certain state parameters are the same for all kicks.
         Includes all standard elements + RF. Some categories can be disabled when differences are expected.
-        :param include_octupoles:
-        :param include_nl:
-        :param bad_word_strings:
-        :param bad_word_keys:
+        :param skewquads: Combined skewquads+HV correctors
+        :param skew_tol: Tolerance in skew quads - necessary because these are virtual devices with resolution jitter
+        :param sextupoles: Sextupoles
+        :param octupoles: Octupoles
+        :param nl: DN magnet
+        :param bad_word_strings: Parameters (keys) to check for bad words
+        :param bad_word_keys: List of bad words
         :return:
         """
         invariant_devices = iota.DIPOLES.ALL_I + \
-                            iota.CORRECTORS.ALL + \
-                            iota.QUADS.ALL_CURRENTS + \
                             ['N:IRFLLA', 'N:IRFMOD', 'N:IRFEAT', 'N:IRFEPC'] + \
                             ['N:IKPSVX', 'N:IKPSVD']
+        if quadrupoles:
+            invariant_devices += iota.QUADS.ALL_CURRENTS
         if skewquads:
-            invariant_devices += iota.SKEWQUADS.ALL_CURRENTS
+            invariant_devices += iota.SKEWQUADS.ALL_CURRENTS + iota.CORRECTORS.ALL
         if sextupoles:
             invariant_devices += iota.SEXTUPOLES.ALL_CURRENTS
         if octupoles:
@@ -953,28 +985,58 @@ class KickSequence:
         invariant_devices = set(invariant_devices)
         kicks = self.kicks
 
-        def state_filter(kvdict):
+        def state_filter(sd_list):
+            # Given list of state kv dicts, return decision on whether differences are fatal
             abort = False
-            if not all(x == kvdict[0] for x in kvdict):
-                for kick, x in zip(kicks, kvdict):
-                    def f(k, v1, v2):
-                        dev = k.split('.')[0]
-                        if dev in iota.SKEWQUADS.ALL_CURRENTS + iota.CORRECTORS.ALL:#COMBINED_VIRTUAL:
-                            return np.abs(v1 - v2) > skew_tol
-                        else:
-                            return v1 - v2 != 0.
+            if not all(x == sd_list[0] for x in sd_list):
+                def f(key, vals):
+                    dev = key.split('.')[0]
+                    if dev in iota.SKEWQUADS.ALL_CURRENTS + iota.CORRECTORS.ALL:  # COMBINED_VIRTUAL:
+                        # Compare within tolerances
+                        return [np.abs(v - vals[0]) > skew_tol for v in vals]
+                    elif dev in iota.DNMAGNET.ALL_CURRENTS + iota.OCTUPOLES.ALL_CURRENTS:
+                        # Only compare nonzeroes
+                        uniques, counts = np.unique([v for v in vals if v != 0.], return_counts=True)
+                        if len(uniques) > 1:
+                            return [True if v == 0. else v == uniques[0] for v in vals]
+                    else:
+                        return [v != vals[0] for v in vals]
 
-                    delta = {k: (x[k], kvdict[0][k]) for k in x if f(k, x[k], kvdict[0][k])}
-                    if delta:
+                for key in sd_list[0].keys():
+                    # Scan all kicks for each key
+                    values = [sd[key] for (kick, sd) in zip(kicks, sd_list)]
+                    mask = f(key, values)
+                    #print(key, mask)
+                    if any(mask):
                         abort = True
-                        logger.error(f'Kick {kick.idx} is not consistent: delta {delta}')
+                        #uniques, counts, idxs = np.unique()
+                        logger.error(f'{key} inconsistent, OK:{[(kick.idx, sd[key]) for (kick, sd, m) in zip(kicks, sd_list, mask) if not m]} '
+                                     f'BAD: {[(kick.idx, sd[key]) for (kick, sd, m) in zip(kicks, sd_list, mask) if m]}')
+                        #return True
+                # for kick, sd in zip(kicks, sd_list):
+                #     def f(k, v1, v2):
+                #         dev = k.split('.')[0]
+                #         if dev in iota.SKEWQUADS.ALL_CURRENTS + iota.CORRECTORS.ALL:#COMBINED_VIRTUAL:
+                #             return np.abs(v1 - v2) > skew_tol
+                #         elif dev in iota.DNMAGNET.ALL_CURRENTS:
+                #             if v1 == 0. or v2 == 0.:
+                #                 return False
+                #         else:
+                #             return v1 - v2 != 0.
+                #
+                #     delta = {k: (sd[k], sd_list[0][k]) for k in sd if f(k, sd[k], sd_list[0][k])}
+                #     if delta:
+                #         abort = True
+                #         logger.error(f'Kick {kick.idx} is not consistent: delta {delta}')
             return abort
+            #return False
 
         # Sanity checks
         times = [k.state('aq_timestamp') for k in kicks]
-        assert all(np.diff(times) > 0)
+        assert all(np.diff(times) > 0)  # All in order
+        assert max(times)-min(times) < 3600  # 1 hour delta max
         seq_nums = [k.state('N:EA5TRG.READING') for k in kicks]
-        assert all(np.diff(seq_nums) > 0)
+        assert all(np.diff(seq_nums) > 0)  # Counter counting up
 
         # Check all states have same contents
         states = [k.get_full_state() for k in kicks]
@@ -982,19 +1044,27 @@ class KickSequence:
         shared_keys = set.intersection(*keys)
         assert all(len(shared_keys) == len(k) for k in keys)
 
-        # Linear optics
-        states = [k.get_optics() for k in kicks]
-        abort = state_filter(states)
-        sum_states = [k.get_optics() for k in kicks]
-        # Orbit
-        states = [k.get_correctors(include_physical=True) for k in kicks]
-        abort |= state_filter(states)
-        [ss.update(s) for ss, s in zip(sum_states, states)]
-        # Sextupoles
-        if sextupoles:
-            states = [k.get_sextupoles() for k in kicks]
+        # Start detailed checks by category
+        sum_states = [{} for i in range(len(kicks))]
+        abort = False
+
+        def check_category(states):
+            nonlocal sum_states, abort
             abort |= state_filter(states)
             [ss.update(s) for ss, s in zip(sum_states, states)]
+
+        # Quadrupoles
+        if quadrupoles: check_category([k.get_quadrupoles() for k in kicks])
+        # Skewquads
+        if skewquads: check_category([k.get_skewquads() for k in kicks])
+        # Orbit
+        if correctors: check_category([k.get_correctors(include_physical=True)for k in kicks])
+        # Sextupoles
+        if sextupoles: check_category([k.get_sextupoles() for k in kicks])
+        # Octupoles
+        if octupoles: check_category([{dev: k.state(dev + '.SETTING') for dev in iota.OCTUPOLES.ALL_CURRENTS} for k in kicks])
+        # NL
+        if nl: check_category([{dev: k.state(dev + '.SETTING') for dev in iota.DNMAGNET.ALL_CURRENTS} for k in kicks])
         # Abort if any fail
         if abort:
             raise Exception('Sequence states inconsistent')

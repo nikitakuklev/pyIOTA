@@ -115,7 +115,8 @@ def plot_simple_grid(*args,
                      sizes: Tuple[int, int] = (2, 2),
                      demean: bool = False,
                      normalize: bool = False,
-                     paired_bpm_mode: bool = False):
+                     paired_bpm_mode: bool = False,
+                     fontsize: int = 10):
     """
     Plot a grid of data sharing x/y axes. Each top level argument creates a new plot grid.
     Each argument must be a dict or list of dicts. One plot per each entry (after flattening) is produced.
@@ -200,7 +201,7 @@ def plot_simple_grid(*args,
                         from sklearn.preprocessing import minmax_scale
                         y = minmax_scale(y)  # (y-np.min(y))/np.linalg.norm(y-np.min(y))
                     ax[i].plot(x, y)
-                ax[i].set_title(f"{i}|{k}")
+                ax[i].set_title(f"{i}|{k}", fontsize=fontsize)
     if len(args) == 1:
         fig = fig_l[0]
         ax = ax_l[0]

@@ -21,13 +21,11 @@ def full_chromaticity(lattice: MagneticLattice,
     """
     Computes full chromaticity.
 
-
-
-
     :param lattice: Lattice sequence (with precomputed transfer maps)
     :param tws_0: Optional initial twiss (uses periodic ring solution if not provided)
-    :param tws_1:
+    :param tws_1: Endpoint twiss (for channel mode)
     :param method:
+        'matrix_order_2' -
         'numeric' - computes chromaticity as integral of [beta*k1] within focusing elements. Less accurate than tracking,
          but fast. Does not account for feed down of sextupoles, octupoles, etc.
     :param method_kwargs: Method parameters as a dictionary. Common ones are:
