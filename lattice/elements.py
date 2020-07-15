@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-__all__ = ['LatticeContainer', 'NLLens', 'HKPoly', 'ILMatrix', 'OctupoleInsert']
+__all__ = ['LatticeContainer', 'NLLens', 'HKPoly', 'ILMatrix', 'OctupoleInsert', 'NLInsert']
 
 import logging
 from pathlib import Path
@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Union, List, Dict, Type, Iterable, Callable, Optional
 from ocelot.cpbd.elements import *
 from ocelot import MagneticLattice, twiss, MethodTM
+from pyIOTA.ocelot_extras import NLLens
 
 logger = logging.getLogger(__name__)
 
@@ -641,15 +642,15 @@ class LatticeContainer:
         return wr.write_lattice_ng(fpath=fpath, box=self, save=not dry_run)
 
 
-class NLLens(Element):
-    """
-    For our purposes, it is a drift
-    l - length of drift in [m]
-    """
-
-    def __init__(self, l: float = 0.0, eid: str = None):
-        Element.__init__(self, eid)
-        self.l = l
+# class NLLens(Element):
+#     """
+#     For our purposes, it is a drift
+#     l - length of drift in [m]
+#     """
+#
+#     def __init__(self, l: float = 0.0, eid: str = None):
+#         Element.__init__(self, eid)
+#         self.l = l
 
 
 class HKPoly(Element):
@@ -796,6 +797,99 @@ class OctupoleInsert:
 
     def set_current(self):
         pass
+
+    def to_sequence(self):
+        return self.seq
+
+
+class NLInsert:
+    """
+    A collection of nonlinear lenses for DN magnet
+    """
+
+    def __init__(self):
+        self.l0 = self.mu0 = None
+        self.seq = []
+        pass
+
+    def configure(self, oqK=1.0, t=0.4, cn=0.01, run=2, l0=1.8, mu0=0.3, otype=1, olen=0.07, nn=17):
+        """
+        Initializes QI configuration
+        :param l0: #l0     = 1.8;        # length of the straight section
+        :param mu0: #mu0 = 0.3;  # phase advance over straight section
+        :param run: # which run configuration to use, 1 or 2
+        :param otype: # type of magnet (0) thin, (1) thick, only works for octupoles (ncut=4)
+        :param olen: #olen = 0.07  # length of octupole for thick option.must be < l0 / nn
+        :param nn: # number of nonlinear elements
+        """
+        self.l0 = l0
+        self.mu0 = mu0
+        tn = t
+        #tn = 0.4  # strength of nonlinear lens
+        #cn = 0.01  # dimentional parameter of nonlinear lens
+
+        if run == 1:
+            # Margins on the sides were present
+            oqSpacing = 0.03325  # (1.8-0.022375-0.022375-17*0.07)/17
+            margin = 0.022375  # extra margin at the start and end of insert
+            positions = margin + (l0 - 2 * margin) / nn * (np.arange(1, nn + 1) - 0.5)
+        elif run == 2:
+            # Perfect spacing with half drift on each end
+            oqSpacing = (l0 - olen * nn) / nn
+            margin = 0.0
+            positions = l0 / nn * (np.arange(1, nn + 1) - 0.5)
+        else:
+            raise Exception
+
+        # musect = mu0 + 0.5
+        f0, betae, alfae, betas = self.calculate_optics_parameters()
+
+        print(f"Insert optics: mu0:{mu0:.3f}|f0:{f0:.3f}|1/f0:{1 / f0:.3f}|"
+              f"betaedge:{betae:.3f}|alphaedge:{alfae:.3f}|betastar:{betas:.3f}")
+        # value, , oqK, nltype, otype;
+
+        self.seq = seq = []
+        seq.append(Drift(l=margin, eid='oNLmargin'))
+        for i in range(1, nn + 1):
+            sn = positions[i - 1]
+            bn = l0 * (1 - sn * (l0 - sn) / l0 / f0) / np.sqrt(1.0 - (1.0 - l0 / 2.0 / f0) ** 2)
+            knn = tn * l0 / nn / bn ** 2
+            cnll = cn * np.sqrt(bn)
+            knll = knn * cnll ** 2
+            k1 = knn * 2  # 1 * 2!
+            k3 = knn / cn ** 2 / bn * 16  # 2 / 3 * 4!
+            k3scaled = k3 * oqK
+
+            seq.append(Drift(l=oqSpacing / 2, eid=f'oNL{i:02}l'))
+            seq.append(NLLens(l=olen, knll=knll, cnll=cnll, eid=f'NL{i:02}'))
+            seq.append(Drift(l=oqSpacing / 2, eid=f'oNL{i:02}r'))
+            # value, i, bn, sn, k3, k3scaled, (betas ^ 3 / bn ^ 3);
+        seq.append(Drift(l=margin, eid='oNLmargin'))
+        l_list = [e.l for e in seq]
+        assert np.isclose(sum(l_list), l0)
+
+        s_list = []
+        s = 0
+        for e in seq:
+            s += e.l / 2
+            s_list.append(s)
+            s += e.l / 2
+
+        s_oct = [s for e, s in zip(seq, s_list) if not isinstance(e, Drift)]
+        assert np.allclose(np.diff(np.array(s_oct)), oqSpacing + olen)
+
+    def calculate_optics_parameters(self):
+        """
+        Calculates the key descriptive parameters of insert based on length and phase advance
+        :return:f0, betae, alfae, betas
+        """
+        l0 = self.l0
+        mu0 = self.mu0
+        f0 = l0 / 4.0 * (1.0 + 1.0 / np.tan(np.pi * mu0) ** 2)
+        betae = l0 / np.sqrt(1.0 - (1.0 - l0 / 2.0 / f0) ** 2)
+        alfae = l0 / 2.0 / f0 / np.sqrt(1.0 - (1.0 - l0 / 2.0 / f0) ** 2)
+        betas = l0 * (1 - l0 / 4.0 / f0) / np.sqrt(1.0 - (1.0 - l0 / 2.0 / f0) ** 2)
+        return f0, betae, alfae, betas
 
     def to_sequence(self):
         return self.seq
