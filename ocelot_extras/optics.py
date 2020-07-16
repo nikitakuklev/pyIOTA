@@ -63,7 +63,7 @@ class NLKickTM(TransferMap):
     def map_drift_exact(self, X, ibeta, igammabeta, l):
         # Time is cdt (earlier is negative), opposite of MADX and Sixtrack, same as ynergia)
         # deltaE/p same as MADX (NOT deltaP/p like in some refs, be careful about how delta is defined)
-        x, px, y, py, cdt, deop = X
+        # i.e. x, px, y, py, cdt, deop = X
 
         # # If we had dpop, then:
         # # 1 + delta:
@@ -81,12 +81,12 @@ class NLKickTM(TransferMap):
         # cdt = cdt + sig * sqrt(D2 * ibeta2) - reference_cdt;
 
         # But with deop have to do:
-        ibeta_p_deop = ibeta + deop
-        inv_npz = 1.0 / np.sqrt(ibeta_p_deop * ibeta_p_deop - px * px - py * py - igammabeta * igammabeta)
+        ibeta_p_deop = ibeta + X[5]
+        inv_npz = 1.0 / np.sqrt(ibeta_p_deop * ibeta_p_deop - X[1] * X[1] - X[3] * X[3] - igammabeta * igammabeta)
 
         # new x,y with added l*x',l*y' (px, py unchanged)
-        X[0] += px * l * inv_npz
-        X[2] += py * l * inv_npz
+        X[0] += X[1] * l * inv_npz
+        X[2] += X[3] * l * inv_npz
         # new cdt assuming reference time = design time
         # TODO: treat closed orbit
         X[4] -= (ibeta - ibeta_p_deop * inv_npz) * l
@@ -103,10 +103,10 @@ class NLKickTM(TransferMap):
         if y == 0.0 and abs(x) >= 1:
             raise Exception('Encountered branch cut in NLLENS transport')
         dF = self.Fderivative(x, y)
-        dPx = kick * np.real(dF)
-        dPy = -kick * np.imag(dF)
-        X[1] += dPx
-        X[3] += dPy
+        #dPx = kick * np.real(dF)
+        #dPy = -kick * np.imag(dF)
+        X[1] += kick * np.real(dF)
+        X[3] += -kick * np.imag(dF)
 
     def Fderivative(self, x, y):
         """

@@ -21,9 +21,13 @@ class NLLens(Element):
             raise Exception('Dimensional parameter of NLLens must be non-zero!')
         self.cnll = cnll
         self.tilt = tilt
-        self.k1 = 2*knll/(cnll*cnll)
-        self.k2 = 0.  # Potential has no sextupolar component
-        #self.k3 = 0. # (knll/(cn*sqrt(bn))^2)/cn^2/bn*16 # TODO: implement calculation, there is octupolar field. Could be useful for KickTM.
+        self.k1 = 2.0*knll/(cnll*cnll)
+        # DN potential has no sextupolar component
+        self.k2 = 0.0
+        # There is octupolar field. Could be useful for KickTM.
+        # knn/cn^2/bn /. knn -> knll/cnll^2 /. cn -> cnll /Sqrt[bn] = knll/cnll^4
+        self.k3 = 16.0*knll/(cnll*cnll*cnll*cnll)
+
 
     def __str__(self):
         s = 'NLLens : '
