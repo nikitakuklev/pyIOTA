@@ -119,8 +119,8 @@ class NLKickTM(TransferMap):
         X[0] += X[1] * l * inv_npz
         X[2] += X[3] * l * inv_npz
 
-        #
-        X[4] -= (ibeta - 0.5 * (X[1]*X[1] + X[3]*X[3]) * inv_npz * inv_npz) * l
+        # inv_npz*(1/beta0 + deop) = 1/beta
+        X[4] -= l * (ibeta - (1.0 + 0.5 * (X[1]*X[1] + X[3]*X[3]) * inv_npz * inv_npz) * (inv_npz * ibeta_plus_deop))
 
     def map_drift_6D_linear(self, X: np.ndarray, ibeta: float, igammabeta: float, l: float):
         """ This is what OCELOT uses in KickTM """
