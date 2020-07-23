@@ -1,17 +1,17 @@
 __all__ = ['Writer']
 
+import datetime
 import sys
 import textwrap
-import datetime
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Dict, List
-import numpy as np
+from typing import Dict
 
+import numpy as np
 import pyIOTA
-from pyIOTA.lattice.elements import LatticeContainer, NLLens, HKPoly, ILMatrix
 from ocelot import Sextupole, Hcor, Vcor, Element, Edge, Marker, Octupole, Matrix, Quadrupole, SBend, Drift, Solenoid, \
     Cavity, Monitor
+from pyIOTA.lattice.elements import LatticeContainer, NLLens, HKPoly, ILMatrix
 
 
 class Writer:

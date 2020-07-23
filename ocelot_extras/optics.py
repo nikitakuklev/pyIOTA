@@ -32,19 +32,21 @@ class NLKickTM(TransferMap):
         self.drift_type = drift_type
 
     def kick(self, X: np.ndarray, l: float, knll: float, cnll: float, energy: float, nkick: int):
+        #print(f'NLKickMap with knll ({knll}) and cnll ({cnll}), X vector size ({X.shape})')
         kick_fraction = 1. / nkick
         l = l / nkick
         dl = l / 2
 
-        # Relatistic gamma = Etotal/Erest
+        # gamma0 = Etotal/Erest
         gamma = energy / m_e_GeV
         if gamma != 0:
             gamma2 = gamma * gamma
-            # KickTM has an approximation beta = 1. - 0.5 / gamma2 (from Taylor series), using exact here
+            # KickTM has approximation beta = 1. - 0.5 / gamma2, using exact
             beta = np.sqrt(1.0 - 1.0 / gamma2)
             ibeta = 1. / beta
             gammabeta = np.sqrt(gamma2 - 1.0)
             igammabeta = 1. / gammabeta
+            # Drift type in various approximations - linear is fastest
             if self.drift_type == 1:
                 map_drift = self.map_drift_6D_exact
             elif self.drift_type == 2:
@@ -107,7 +109,7 @@ class NLKickTM(TransferMap):
         X[4] -= (ibeta - ibeta_plus_deop * inv_npz) * l
 
     def map_drift_6D_paraxial(self, X: np.ndarray, ibeta: float, igammabeta: float, l: float):
-        """ Expanded Hamiltonian to second order (px, py << (1 + dpop)) """
+        """ Expanded Hamiltonian to second order using (px, py << (1 + dpop)) """
         # (x, x', y, y', cdt, deop) = X
         # also known as (x, px/p0, y, py/p0, cdt, pt/cp0)
 
@@ -120,7 +122,8 @@ class NLKickTM(TransferMap):
         X[2] += X[3] * l * inv_npz
 
         # inv_npz*(1/beta0 + deop) = 1/beta
-        X[4] -= l * (ibeta - (1.0 + 0.5 * (X[1]*X[1] + X[3]*X[3]) * inv_npz * inv_npz) * (inv_npz * ibeta_plus_deop))
+        X[4] -= l * (
+                ibeta - (1.0 + 0.5 * (X[1] * X[1] + X[3] * X[3]) * inv_npz * inv_npz) * (inv_npz * ibeta_plus_deop))
 
     def map_drift_6D_linear(self, X: np.ndarray, ibeta: float, igammabeta: float, l: float):
         """ This is what OCELOT uses in KickTM """
@@ -136,14 +139,16 @@ class NLKickTM(TransferMap):
     def map_nllens_thin(self, X: np.ndarray, knll: float, cnll: float):
         """ Single DN lens kick """
         icnll = 1.0 / cnll
-        x = X[0] * icnll
-        y = X[2] * icnll
+        x = X[0, :] * icnll
+        y = X[2, :] * icnll
         kick = -knll * icnll
-        if y == 0.0 and abs(x) >= 1:
+        #print(x, y)
+        if np.any(y == 0.0) and np.any(np.abs(x) >= 1):
+            # TODO: recheck what actual domain is
             raise Exception('Encountered branch cut in NLLENS transport')
         dF = self.Fderivative(x, y)
-        #dPx = kick * np.real(dF)
-        #dPy = -kick * np.imag(dF)
+        # dPx = kick * np.real(dF)
+        # dPy = -kick * np.imag(dF)
         X[1] += kick * np.real(dF)
         X[3] += -kick * np.imag(dF)
 

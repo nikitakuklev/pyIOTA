@@ -8,7 +8,6 @@ from pathlib import Path
 from typing import Union, List, Dict, Type, Iterable, Callable, Optional
 from ocelot.cpbd.elements import *
 from ocelot import MagneticLattice, twiss, MethodTM
-from pyIOTA.ocelot_extras import NLLens
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +52,8 @@ class LatticeContainer:
             self.lattice = MagneticLattice(tuple(self.lattice_list))
         else:
             self.lattice = MagneticLattice(tuple(self.lattice_list), method=method)
+
+        self.update_element_positions()
 
         # if not silent: print(f'Lattice ({self.name}) initialized')
         if not silent: logger.info(f'Lattice ({self.name}) initialized')
@@ -701,6 +702,43 @@ class ILMatrix(Matrix):
         super().__init__(eid=eid, l=l, **mdict)
 
 
+class NLLens(Element):
+    """
+    Danilov-Nagaitsev thick nonlinear lens. When l==0, matches MAD-X NLLENS element.
+    Supports linear transport by deriving k1 from nonlinear potential.
+    Tracking should use NLKickTM that does symplectic drift-kick integration.
+    l - length of lens in [m]
+    knll - integrated strength of lens [m]. The strength is parametrized so that the
+     quadrupole term of the multipole expansion is k1(integrated)=2*knll/cnll^2.
+    cnll - dimensional parameter of lens [m]. The singularities of the potential are located at X=-cnll,+cnll and Y=0.
+    tilt - tilt of lens in [rad]
+    """
+    def __init__(self, l=0., knll=0., cnll=0., tilt=0., eid=None):
+        Element.__init__(self, eid)
+        self.l = l
+        self.knll = knll
+        if cnll == 0.:
+            raise Exception('Dimensional parameter of NLLens must be non-zero!')
+        self.cnll = cnll
+        self.tilt = tilt
+        self.k1 = 2.0*knll/(cnll*cnll) / l
+        # DN potential has no sextupolar component
+        self.k2 = 0.0
+        # There is octupolar field. Could be useful for KickTM.
+        # knn/cn^2/bn /. knn -> knll/cnll^2 /. cn -> cnll /Sqrt[bn] = knll/cnll^4
+        self.k3 = 16.0*knll/(cnll*cnll*cnll*cnll) / l
+
+    def __str__(self):
+        s = 'NLLens : '
+        s += 'id = ' + str(self.id) + '\n'
+        s += 'l    =%8.4f m\n' % self.l
+        s += 'knll     =%8.3f m\n' % self.knll
+        s += 'cnll     =%8.3f m\n' % self.cnll
+        s += 'k1 (calc)=%8.3f 1/m^2\n' % self.k1
+        s += 'tilt =%8.2f deg\n' % (self.tilt * 180.0 / np.pi)
+        return s
+
+
 class OctupoleInsert:
     """
     A collection of octupoles for quasi-integrable insert that can be generated into a sequence
@@ -812,13 +850,12 @@ class NLInsert:
         self.seq = []
         pass
 
-    def configure(self, oqK=1.0, t=0.4, cn=0.01, run=2, l0=1.8, mu0=0.3, otype=1, olen=0.07, nn=17):
+    def configure(self, oqK=1.0, t=0.4, cn=0.01, run=2, l0=1.8, mu0=0.3, olen=0.06, nn=18):
         """
         Initializes QI configuration
         :param l0: #l0     = 1.8;        # length of the straight section
         :param mu0: #mu0 = 0.3;  # phase advance over straight section
         :param run: # which run configuration to use, 1 or 2
-        :param otype: # type of magnet (0) thin, (1) thick, only works for octupoles (ncut=4)
         :param olen: #olen = 0.07  # length of octupole for thick option.must be < l0 / nn
         :param nn: # number of nonlinear elements
         """

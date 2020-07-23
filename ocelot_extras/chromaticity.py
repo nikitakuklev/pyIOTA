@@ -27,7 +27,7 @@ def full_chromaticity(lattice: MagneticLattice,
     :param method:
         'matrix_order_2' -
         'numeric' - computes chromaticity as integral of [beta*k1] within focusing elements. Less accurate than tracking,
-         but fast. Does not account for feed down of sextupoles, octupoles, etc.
+         but fast. Does not account for feed down of misaligned sextupoles, octupoles, etc.
     :param method_kwargs: Method parameters as a dictionary. Common ones are:
         'n_superperiods' - optional number of superperiods that will scale final chromaticity
     :param debug:
