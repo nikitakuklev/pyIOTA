@@ -3,10 +3,12 @@ __all__ = ['chromaticity']
 import copy
 import functools
 import numpy as np
+import ocelot
 from scipy import integrate
 from typing import Dict
 from ocelot import Twiss, MagneticLattice, Edge, twiss
 from ocelot.cpbd.elements import SBend, RBend, Bend, Quadrupole, Multipole, Sextupole
+from pyIOTA.tbt import NAFF
 
 """
 Improved chromaticity calculations
@@ -47,6 +49,14 @@ def chromaticity(lattice: MagneticLattice,
         'n_superperiods' - optional number of superperiods that will scale final chromaticity
     :param debug: Toggle debug printing
     :return: (1x2) X/Y chromaticity array
+
+    See https://mad8.web.cern.ch/mad8/doc/phys_guide.pdf
+    See https://home.fnal.gov/~ostiguy/OptiM/OptimHelp/dipole_edge.html
+    See doi:10.18429/JACoW-IPAC2018-TUPMK014
+    See https://slac.stanford.edu/pubs/slacreports/reports01/slac-r-075.pdf page 117
+    See LA-UR-11-10334
+    See CERN-THESIS-2018-300
+    See Fringe Effects in MAD PART I https://frs.web.cern.ch/frs/report/fringe_part_I.pdf
     """
 
     method_kwargs = method_kwargs or {}
@@ -65,7 +75,20 @@ def chromaticity(lattice: MagneticLattice,
         ring_mode = True
         tws_1 = tws_0
 
-    if method == 'matrix':
+    if method == 'track':
+        # Track particle for tune
+        navi = ocelot.Navigator(lattice)
+        p_neg = ocelot.Particle(x=0.0, y=0.0, p=-1e-6, E=0.0)
+        p_ref = ocelot.Particle(x=0.0, y=0.0, p=0.0, E=0.0)
+        p_pos = ocelot.Particle(x=0.0, y=0.0, p=1e-6, E=0.0)
+        p_list = [p_neg, p_ref, p_pos]
+        t_list = [ocelot.Track_info(p) for p in p_list]
+        tl_out = ocelot.track_nturns(lattice, 1024, t_list, print_progress=False)
+        naff = NAFF(window_power=1, fft_pad_zeros_power=14)
+
+
+
+    elif method == 'matrix':
         # Use second order matrix - this is same as MADX TWISS routine !without! chrom flag
         # Also same as in elegant for chromaticity correction (but elegant has up to 3rd order, only 2nd here)
         # See https://svn.aps.anl.gov/AOP/oag/trunk/apps/src/elegant/chrom.c
@@ -104,17 +127,17 @@ def chromaticity(lattice: MagneticLattice,
     elif method == 'numeric':
         n_steps = method_kwargs.get('n_steps', 9)
         chrom_1period = natural_chromaticity_numeric(lattice, tws_0, n_steps, debug)
-        chrom_1period += edge_chromaticity(lattice, tws_0)
+        chrom_1period += edge_chromaticity(lattice, tws_0, debug)
         chrom_1period += sextupole_chromaticity_numeric(lattice, tws_0, n_steps, debug)
     elif method == 'analytic':
         chrom_1period = natural_chromaticity_analytic(lattice, tws_0, debug)
-        chrom_1period += edge_chromaticity(lattice, tws_0)
+        chrom_1period += edge_chromaticity(lattice, tws_0, debug)
         # TODO: Analytic dispersion to get analytic sextupole contributions
         chrom_1period += sextupole_chromaticity_numeric(lattice, tws_0, 9, debug)
     return chrom_1period * n_superperiods
 
 
-def __compute_R_derivative(i: int, j: int, tws: Twiss, T: np.ndarray) -> np.float:
+def __compute_R_derivative(i: int, j: int, tws: Twiss, T: np.ndarray) -> float:
     """ Determine dRij/dDelta from second order matrix """
     eta = [tws.Dx, tws.Dxp, tws.Dy, tws.Dyp, 0, 1]
     result = 0.0
@@ -132,7 +155,7 @@ def __compute_R_derivative(i: int, j: int, tws: Twiss, T: np.ndarray) -> np.floa
 
 
 def __compute_chroma_from_dR(dR11: float, dR12: float, dR22: float, R11: float, R12: float, R22: float, beta0: float,
-                             alpha0: float, beta1: float, alpha1: float, phi1: float, ring_mode: bool):
+                             alpha0: float, beta1: float, alpha1: float, phi1: float, ring_mode: bool) -> float:
     """ Use linear map first derivatives to get linear chromaticity """
     if ring_mode:
         return -(dR11 + dR22) / R12 * beta0 / (2 * 2 * np.pi)
@@ -145,7 +168,6 @@ def __compute_chroma_from_dR(dR11: float, dR12: float, dR22: float, R11: float, 
 def natural_chromaticity_analytic(lattice: MagneticLattice, tws_0: Twiss, debug: bool) -> np.ndarray:
     """
     Use twiss at entrance to compute analytic beta average inside, then sum betaavg*k1*l
-    See CERN-THESIS-2018-300
     """
     tws_elem = copy.deepcopy(tws_0)
     integr_x = integr_y = 0.
@@ -300,11 +322,6 @@ def sextupole_chromaticity_numeric(lattice: MagneticLattice, tws_0: Twiss, n_ste
 def edge_chromaticity(lattice: MagneticLattice, tws_0: Twiss, debug: bool = False):
     """
     Computes contribution of sector and rectangle bend edges to chromaticity analytically
-    Includes soft edge focusing effects via FINT/FINTX/GAP parameters
-    See https://home.fnal.gov/~ostiguy/OptiM/OptimHelp/dipole_edge.html (they are using an approximation tan(x)~x
-    See doi:10.18429/JACoW-IPAC2018-TUPMK014
-    See https://slac.stanford.edu/pubs/slacreports/reports01/slac-r-075.pdf page 117
-    See LA-UR-11-10334
     """
     # TODO: integrate with EdgeUtil conventions
     ksi_x_edge = 0.0
@@ -327,9 +344,13 @@ def edge_chromaticity(lattice: MagneticLattice, tws_0: Twiss, debug: bool = Fals
             # ksi_y_focusing = -tws_elem.beta_y * np.tan(alpha) * el.h
             # ksi_y_edge += ksi_y_focusing + ksi_y_fringe
             # No tan approximation
-            phi = el.gap * el.fint * el.h * (1 + np.sin(alpha) ** 2) / np.cos(alpha)
-            ksi_y_edge += -tws_elem.beta_y * np.tan(alpha - phi) * el.h
-
-            print("{:.3f} {:.3f} {:.3f} {:.3f} {:.3f} {:.5f} {:.3f}".format(el.h, el.gap, el.fint, el.h ** 2, alpha,
-                                                                            ksi_y_edge / tws_elem.beta_y, ksi_y_edge))
+            # phi = el.gap * el.fint * el.h * (1 + np.sin(alpha) ** 2) / np.cos(alpha)
+            # ksi_y_edge += -tws_elem.beta_y * np.tan(alpha - phi) * el.h
+            # Hmmmm - edge focusing doesnt contribute to chroma???
+            ksi_y_focusing = -tws_elem.beta_y * np.tan(alpha) * el.h
+            ksi_y_edge += ksi_y_focusing
+            if debug:
+                print("{:.3f} {:.3f} {:.3f} {:.3f} {:.3f} {:.5f} {:.3f}".format(el.h, el.gap, el.fint, el.h ** 2, alpha,
+                                                                                ksi_y_edge / tws_elem.beta_y,
+                                                                                ksi_y_edge))
     return np.array([ksi_x_edge, ksi_y_edge])
