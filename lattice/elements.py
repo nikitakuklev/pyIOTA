@@ -534,7 +534,7 @@ class LatticeContainer:
                  singleton_only: bool = False):
         return self.get_first(el_name, el_type, exact, singleton_only, last=True)
 
-    def get_elements(self, el_type: Union[str, type] = None) -> List[Optional[type]]:
+    def get_elements(self, el_type: Union[str, type] = None) -> List[type]:
         """
         Gets all elements of type in sequence
         :param el_type:
@@ -545,7 +545,7 @@ class LatticeContainer:
         else:
             return [el for el in self.lattice.sequence if isinstance(el, el_type)]
 
-    def get_all(self, el_type: Union[str, type] = None) -> List[Optional[type]]:
+    def get_all(self, el_type: Union[str, type] = None) -> List[type]:
         return self.get_elements(el_type)
 
     def __getitem__(self, item) -> Element:

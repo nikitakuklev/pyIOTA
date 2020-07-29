@@ -1,0 +1,1018 @@
+//Saved at: Tue Mar 03 14:21:47 CST 2020
+INFO: 
+Np:1.0E9
+pc:100.0
+spaceCharge:0
+initialTwiss:{"EStart":100.0,"ex":null,"ey":null,"es":null,"bx":95.0,"by":125.0,"bs":100000.0}
+aperture:{"type":"ELLIPSE","x":2.4,"y":2.4}
+
+$Mp = 938.271998
+$Me = 0.510998902
+$c = 2.99792458E10
+$PI = 3.141592653589793
+$pc = 100
+$HR = $pc/0.299792458
+$R0 = 70
+$L030 = $PI/6*$R0
+$L060 = $PI/3*$R0
+$L30 = 39.11403724892143
+$R30 = $L30/$PI*6
+$H30 = $HR/$R30
+$LEdge30 = 1.215832
+$L60 = 75.7985231986529
+$R60 = $L60/$PI*3
+$H60 = $HR/$R60
+$LEdge60 = 1.28964
+
+
+$kASQA = 0.006946
+$kRB = 0.016449
+
+$N_IQA1RI = 37.03409535
+$N_IQA2RI = 59.17608328
+$N_IQA3RI = 60.14436231
+$N_IQA4RI = 96.495607
+$N_IQB1RI = 48.50032142
+$N_IQB2RI = 72.62675457
+$N_IQB3RI = 33.24651878
+$N_IQB4RI = 33.13827246
+$N_IQB5RI = 64.74155912
+$N_IQB6RI = 57.82272587
+$N_IQC1RI = 64.94779029
+$N_IQC2RI = 57.71130098
+$N_IQC3RI = 64.981569
+$N_IQD1RI = 38.95004436
+$N_IQD2RI = 11.9434112
+$N_IQD3RI = 13.09548498
+$N_IQD4RI = 10.41323516
+$N_IQE1RI = 9.631793731
+$N_IQE2RI = 14.62381767
+$N_IQE3CI = 34.77437871
+$N_IQE2LI = 14.62381767
+$N_IQE1LI = 9.631793731
+$N_IQD4LI = 10.41323516
+$N_IQD3LI = 13.09548498
+$N_IQD2LI = 11.9434112
+$N_IQD1LI = 38.95004436
+$N_IQC3LI = 64.981569
+$N_IQC2LI = 57.71130098
+$N_IQC1LI = 64.94779029
+$N_IQB6LI = 57.82272587
+$N_IQB5LI = 64.74155912
+$N_IQB4LI = 33.13827246
+$N_IQB3LI = 33.24651878
+$N_IQB2LI = 72.62675457
+$N_IQB1LI = 48.50032142
+$N_IQA4LI = 96.495607
+$N_IQA3LI = 60.14436231
+$N_IQA2LI = 59.17608328
+$N_IQA1LI = 37.03409535
+
+$qa1rG = -$kASQA*$N_IQA1RI
+$qa2rG = $kASQA*$N_IQA2RI
+$qa3rG = -$kASQA*$N_IQA3RI
+$qa4rG = $kASQA*$N_IQA4RI
+$qb1rG = -$kASQA*$N_IQB1RI
+$qb2rG = $kASQA*$N_IQB2RI
+$qb3rG = -$kASQA*$N_IQB3RI
+$qb4rG = -$kASQA*$N_IQB4RI
+$qb5rG = $kASQA*$N_IQB5RI
+$qb6rG = -$kASQA*$N_IQB6RI
+$qc1rG = -$kASQA*$N_IQC1RI
+$qc2rG = $kASQA*$N_IQC2RI
+$qc3rG = -$kASQA*$N_IQC3RI
+$qd1rG = -$kASQA*$N_IQD1RI
+$qd2rG = $kRB*  $N_IQD2RI
+$qd3rG = -$kRB*  $N_IQD3RI
+$qd4rG = $kRB*  $N_IQD4RI
+$qe1rG = -$kRB*  $N_IQE1RI
+$qe2rG = $kRB*  $N_IQE2RI
+$qe3G = -$kASQA*$N_IQE3CI
+$qe2lG = $kRB*  $N_IQE2LI
+$qe1lG = -$kRB*  $N_IQE1LI
+$qd4lG = $kRB*  $N_IQD4LI
+$qd3lG = -$kRB*  $N_IQD3LI
+$qd2lG = $kRB*  $N_IQD2LI
+$qd1lG = -$kASQA*$N_IQD1LI
+$qc3lG = -$kASQA*$N_IQC3LI
+$qc2lG = $kASQA*$N_IQC2LI
+$qc1lG = -$kASQA*$N_IQC1LI
+$qb6lG = -$kASQA*$N_IQB6LI
+$qb5lG = $kASQA*$N_IQB5LI
+$qb4lG = -$kASQA*$N_IQB4LI
+$qb3lG = -$kASQA*$N_IQB3LI
+$qb2lG = $kASQA*$N_IQB2LI
+$qb1lG = -$kASQA*$N_IQB1LI
+$qa4lG = $kASQA*$N_IQA4LI
+$qa3lG = -$kASQA*$N_IQA3LI
+$qa2lG = $kASQA*$N_IQA2LI
+$qa1lG = -$kASQA*$N_IQA1LI
+$kHSQ = 0.1-0.034645
+$kPIC = 1
+$kPIC_A1C = 1.0-0.3406547556456447-0.0030535804440006667
+$kPIC_A2R = 1.0-0.024279048054898843+0.006583153420397625
+$kPIC_A3R = 1.0+0.009058892234585898-0.025823332056752843
+$kPIC_B1R = 1.0+0.030931942033137892-0.04325663610114598
+$kPIC_B2R = 1.0+0.001607650860833789+0.006683799388256848
+$kPIC_C1R = 1.0+0.015759486042087507-0.007594663721177901
+$kPIC_C2R = 1.0-0.013800531623975246-0.010602686224577018
+$kPIC_D1R = 1.0-0.009470945515288078-0.0011497131554601835
+$kPIC_D2R = 1.0+0.011654571819774761-0.020833372517623388
+$kPIC_E1R = 1.0-0.021059973398227825-0.005536427762263928
+$kPIC_E2R = 1.0-0.020240072383222327-0.012298455755457462
+$kPIC_E2L = 1.0-0.011106735457191782-0.010618410903213244
+$kPIC_E1L = 1.0-0.02541116177539913+0.002606854791151357
+$kPIC_D2L = 1.0+0.01765892363335856-0.016969733509914844
+$kPIC_D1L = 1.0-0.008789876577081811+0.0030823308733380996
+$kPIC_C2L = 1.0+0.021833588732042362-0.03481034609742378
+$kPIC_C1L = 1.0-0.02204845208606345+0.017640674065357877
+$kPIC_B2L = 1.0+0.026849640730828857-0.02263972917133147
+$kPIC_B1L = 1.0+0.012361232446068198+2.0162441080406936E-16
+$kPIC_A3L = 1.0+0.014010739490479339-4.80363015403843E-16
+$kPIC_A2L = 1.0-0.03391627953077451-0.016578109480874088
+$kCAM = 1.0
+$kCAM_M1R = 1.0
+$kCAM_M2R = 1.0
+$kCAM_M3R = 1.0
+$kCAM_M4R = 1.0
+$kCAM_M1L = 1.0
+$kCAM_M2L = 1.0
+$kCAM_M3L = 1.0
+$kCAM_M4L = 1.0
+$ang_M1R = 0+2.0994295259168188-0.0029598185662472066
+$ang_M2R = 0-1.3511690959622573-0.0017565261412644793
+$ang_M3R = 0-4.425701950095472-0.19495064530320844
+$ang_M4R = 0+3.835366320045668E13+1.5440789929123556E-16
+$ang_M1L = 0-0.9214575194848554+0.0027985484117108205
+$ang_M2L = 0-0.6828218149051408+0.008708726648041214
+$ang_M3L = 0-2.3252969176296854+0.08791141325734417
+$ang_M4L = 0-4.871041820453307-0.008179509574486935
+$N_IHA1RI = 0
+$N_IHA2RI = 0
+$N_IHB1RI = 0
+$N_IHB2RI = 0
+$N_IHC1RI = 0
+$N_IHC2RI = 0
+$N_IHD1RI = 0
+$N_IHD2RI = 0
+$N_IHE1RI = 0
+$N_IHE2RI = 0
+$N_IHA1LI = 0
+$N_IHA2LI = 0
+$N_IHB1LI = 0
+$N_IHB2LI = 0
+$N_IHC1LI = 0
+$N_IHC2LI = 0
+$N_IHD1LI = 0
+$N_IHD2LI = 0
+$N_IHE1LI = 0
+$N_IHE2LI = 0
+$kBMP = 0.1+0.007740048467569568+0.004977584508133105
+$N_IBMPRI = 0
+$N_IBMPLI = 0
+$HxBMPR = $kBMP*$N_IBMPRI
+$HxBMPL = $kBMP*$N_IBMPLI
+$kH30 = 0.1+0.08909
+$kH60 = -0.1-0.08895
+$N_IHM1RI = 0
+$N_IHM4RI = 0
+$N_IHM1LI = 0
+$N_IHM4LI = 0
+$N_IHM2RI = 0
+$N_IHM3RI = 0
+$N_IHM2LI = 0
+$N_IHM3LI = 0
+
+$kHyM1R = 1-0.4297534797569657+0.03438083172722012
+$kHyM4R = 1-0.21553717407642742+0.04067366622316543
+$kHyM1L = 1-0.18618595242509556-0.0015406321765626908
+$kHyM4L = 1-0.21047666056387151+0.011376949890412123
+$kHyM2R = 1-0.20376319863145956+0.05045083462617113
+$kHyM3R = 1-0.22461882569863956+0.06326912896052216
+$kHyM2L = 1-0.13846816807912354+0.040000667258154605
+$kHyM3L = 1-0.16379394897470062+0.031037409984805767
+
+$HyM1R = -$kHyM1R*$kH30*$N_IHM1RI/10
+$HyM4R = -$kHyM4R*$kH30*$N_IHM4RI/10
+$HyM1L = -$kHyM1L*$kH30*$N_IHM1LI/10
+$HyM4L = -$kHyM4L*$kH30*$N_IHM4LI/10
+$HyM2R = -$kHyM2R*$kH60*$N_IHM2RI/10
+$HyM3R = -$kHyM3R*$kH60*$N_IHM3RI/10
+$HyM2L = -$kHyM2L*$kH60*$N_IHM2LI/10
+$HyM3L = -$kHyM3L*$kH60*$N_IHM3LI/10
+
+$kGSQ = 0.011
+
+$N_IKA1RI = 0.0
+$N_IKA2RI = 0.0
+$N_IKB1RI = 0.0
+$N_IKB2RI = 0.0
+$N_IKC1RI = 0.0
+$N_IKC2RI = 0.0
+$N_IKD1RI = 0.0
+$N_IKD2RI = 0.0
+$N_IKE1RI = 0.0
+$N_IKE2RI = 0.0
+$N_IKA1LI = 0.0
+$N_IKA2LI = 0.0
+$N_IKB1LI = 0.0
+$N_IKB2LI = 0.0
+$N_IKC1LI = 0.0
+$N_IKC2LI = 0.0
+$N_IKD1LI = 0.0
+$N_IKD2LI = 0.0
+$N_IKE1LI = 0.0
+$N_IKE2LI = 0.0
+$GSQA1R = $kGSQ*$N_IKA1RI
+$GSQA2R = $kGSQ*$N_IKA2RI
+$GSQB1R = $kGSQ*$N_IKB1RI
+$GSQB2R = $kGSQ*$N_IKB2RI
+$GSQC1R = $kGSQ*$N_IKC1RI
+$GSQC2R = $kGSQ*$N_IKC2RI
+$GSQD1R = $kGSQ*$N_IKD1RI
+$GSQD2R = $kGSQ*$N_IKD2RI
+$GSQE1R = $kGSQ*$N_IKE1RI
+$GSQE2R = $kGSQ*$N_IKE2RI
+$GSQA1L = $kGSQ*$N_IKA1LI
+$GSQA2L = $kGSQ*$N_IKA2LI
+$GSQB1L = $kGSQ*$N_IKB1LI
+$GSQB2L = $kGSQ*$N_IKB2LI
+$GSQC1L = $kGSQ*$N_IKC1LI
+$GSQC2L = $kGSQ*$N_IKC2LI
+$GSQD1L = $kGSQ*$N_IKD1LI
+$GSQD2L = $kGSQ*$N_IKD2LI
+$GSQE1L = $kGSQ*$N_IKE1LI
+$GSQE2L = $kGSQ*$N_IKE2LI
+
+$angSQA1R = 0.0+0.22917990599084215+0.12133118737958534
+$angSQA2R = 0.0-0.08756998398610898+0.2502449610561079
+$angSQB1R = 0.0+0.3179078882556817-0.04730549430008105
+$angSQB2R = 0.0-0.14118432136294337+0.3399964400075552
+$angSQC1R = 0.0+0.027871984348081667-0.24493732668595533
+$angSQC2R = 0.0+0.34149262548849013+0.24368629831897254
+$angSQD1R = 0.0+0.1318900179338748-0.019133377715297238
+$angSQD2R = 0.0-0.299624097002832+0.332321684925154
+$angSQE1R = 0.0+1.0822876594379565+0.0772010242724518
+$angSQE2R = 0.0+0.13037464183969855+0.4483488733681508
+$angSQA1L = 0.0+0.6845223570850089-0.12703978405356378
+$angSQA2L = 0.0+0.15136473552319926+0.08944805093904602
+$angSQB1L = 0.0-0.026281516546177976+0.34260546903420547
+$angSQB2L = 0.0-0.04339419311552201+0.12691669952630563
+$angSQC1L = 0.0+0.47095445391468654-0.1031769713724869
+$angSQC2L = 0.0-0.021988536812565372+0.02004780160229868
+$angSQD1L = 0.0+0.20514185438800978+0.1337758490048336
+$angSQD2L = 0.0+0.4813915697614291-0.2652465374636491
+$angSQE1L = 0.0+0.30680385684327127+0.12923900331588997
+$angSQE2L = 0.0+1.1690766977451545+0.08212291382224282
+$kHSQA1R = 1+0.39701819631735413+0.05297359282815477
+$kHSQA2R = 1+0.20985170337860007+0.015425933806582444
+$kHSQB1R = 1+0.29717814638041967-0.005287429804494954
+$kHSQB2R = 1+0.2220267635369653+0.04516527680269268
+$kHSQC1R = 1+0.37992732702359067+0.04744046868337684
+$kHSQC2R = 1+0.3423983190966768+0.020108383026387316
+$kHSQD1R = 1+0.33526028520558193+0.04521115309994522
+$kHSQD2R = 1+0.39085929038977757+0.022265029596594547
+$kHSQE1R = 1+0.3338064946329373+0.0635936725452711
+$kHSQE2R = 1+0.4698278003530916+0.034799554709947625
+$kHSQA1L = 1+0.3881449550867419+0.013814842318970899
+$kHSQA2L = 1+0.22571116633758717+0.007093391424455062
+$kHSQB1L = 1+0.31896258727012533+0.010665031582593631
+$kHSQB2L = 1+0.27588404627525015-0.0028737577728206306
+$kHSQC1L = 1+0.330027044649631+0.08762938094567327
+$kHSQC2L = 1+0.3510291653371862+0.009237073170469274
+$kHSQD1L = 1+0.3249671836992059+0.05712325332848626
+$kHSQD2L = 1+0.4085991257008965+0.014562031994556272
+$kHSQE1L = 1+0.3433752907475775+0.06121256710958478
+$kHSQE2L = 1+0.48990577839749344+0.011787719602888188
+$HySQA1R = -$kHSQ*$kHSQA1R*$N_IHA1RI
+$HySQA2R = -$kHSQ*$kHSQA2R*$N_IHA2RI
+$HySQB1R = -$kHSQ*$kHSQB1R*$N_IHB1RI
+$HySQB2R = -$kHSQ*$kHSQB2R*$N_IHB2RI
+$HySQC1R = -$kHSQ*$kHSQC1R*$N_IHC1RI
+$HySQC2R = -$kHSQ*$kHSQC2R*$N_IHC2RI
+$HySQD1R = -$kHSQ*$kHSQD1R*$N_IHD1RI
+$HySQD2R = -$kHSQ*$kHSQD2R*$N_IHD2RI
+$HySQE1R = -$kHSQ*$kHSQE1R*$N_IHE1RI
+$HySQE2R = -$kHSQ*$kHSQE2R*$N_IHE2RI
+$HySQA1L = -$kHSQ*$kHSQA1L*$N_IHA1LI
+$HySQA2L = -$kHSQ*$kHSQA2L*$N_IHA2LI
+$HySQB1L = -$kHSQ*$kHSQB1L*$N_IHB1LI
+$HySQB2L = -$kHSQ*$kHSQB2L*$N_IHB2LI
+$HySQC1L = -$kHSQ*$kHSQC1L*$N_IHC1LI
+$HySQC2L = -$kHSQ*$kHSQC2L*$N_IHC2LI
+$HySQD1L = -$kHSQ*$kHSQD1L*$N_IHD1LI
+$HySQD2L = -$kHSQ*$kHSQD2L*$N_IHD2LI
+$HySQE1L = -$kHSQ*$kHSQE1L*$N_IHE1LI
+$HySQE2L = -$kHSQ*$kHSQE2L*$N_IHE2LI
+$N_IVA1RI = 0
+$N_IVA2RI = 0
+$N_IVB1RI = 0
+$N_IVB2RI = 0
+$N_IVC1RI = 0
+$N_IVC2RI = 0
+$N_IVD1RI = 0
+$N_IVD2RI = 0
+$N_IVE1RI = 0
+$N_IVE2RI = 0
+$N_IVA1LI = 0
+$N_IVA2LI = 0
+$N_IVB1LI = 0
+$N_IVB2LI = 0
+$N_IVC1LI = 0
+$N_IVC2LI = 0
+$N_IVD1LI = 0
+$N_IVD2LI = 0
+$N_IVE1LI = 0
+$N_IVE2LI = 0
+$HxSQA1R = $kHSQ*$kHSQA1R*$N_IVA1RI
+$HxSQA2R = $kHSQ*$kHSQA2R*$N_IVA2RI
+$HxSQB1R = $kHSQ*$kHSQB1R*$N_IVB1RI
+$HxSQB2R = $kHSQ*$kHSQB2R*$N_IVB2RI
+$HxSQC1R = $kHSQ*$kHSQC1R*$N_IVC1RI
+$HxSQC2R = $kHSQ*$kHSQC2R*$N_IVC2RI
+$HxSQD1R = $kHSQ*$kHSQD1R*$N_IVD1RI
+$HxSQD2R = $kHSQ*$kHSQD2R*$N_IVD2RI
+$HxSQE1R = $kHSQ*$kHSQE1R*$N_IVE1RI
+$HxSQE2R = $kHSQ*$kHSQE2R*$N_IVE2RI
+$HxSQA1L = $kHSQ*$kHSQA1L*$N_IVA1LI
+$HxSQA2L = $kHSQ*$kHSQA2L*$N_IVA2LI
+$HxSQB1L = $kHSQ*$kHSQB1L*$N_IVB1LI
+$HxSQB2L = $kHSQ*$kHSQB2L*$N_IVB2LI
+$HxSQC1L = $kHSQ*$kHSQC1L*$N_IVC1LI
+$HxSQC2L = $kHSQ*$kHSQC2L*$N_IVC2LI
+$HxSQD1L = $kHSQ*$kHSQD1L*$N_IVD1LI
+$HxSQD2L = $kHSQ*$kHSQD2L*$N_IVD2LI
+$HxSQE1L = $kHSQ*$kHSQE1L*$N_IVE1LI
+$HxSQE2L = $kHSQ*$kHSQE2L*$N_IVE2LI
+
+$nlq9uK = 0.15        +0.03633371723560212
+$nlq8uK = 0.141176471 +0.03891038909751038
+$nlq7uK = 0.135       +0.030181409176714063
+$nlq6uK = 0.127810651 +0.02175431443352034
+$nlq5uK = 0.12        +0.006796624204349593
+$nlq4uK = 0.111917098 +0.0012438969229757594
+$nlq3uK = 0.103846154 -0.006745529793411125
+$nlq2uK = 0.096       -0.010795754789343595
+$nlq1uK = 0.08852459  -0.014814745343089497
+$nlq9dK = 0.15        +0.037665660239240326
+$nlq8dK = 0.141176471 +0.03973496314694237
+$nlq7dK = 0.135       +0.03693161598566796
+$nlq6dK = 0.127810651 +0.023802636683263257
+$nlq5dK = 0.12        +0.01436292679906285
+$nlq4dK = 0.111917098 +0.003932241759016514
+$nlq3dK = 0.103846154 -0.0026648086865726298
+$nlq2dK = 0.096       -0.009895901337218781
+$nlq1dK = 0.08852459  -0.011785097585532462
+
+$nlq1uI = 0
+$nlq2uI = 0
+$nlq3uI = 0         
+$nlq4uI = 0         
+$nlq5uI = 0         
+$nlq6uI = 0         
+$nlq7uI = 0         
+$nlq8uI = 0         
+$nlq9uI = 0         
+$nlq1dI = 0         
+$nlq2dI = 0         
+$nlq3dI = 0         
+$nlq4dI = 0         
+$nlq5dI = 0         
+$nlq6dI = 0         
+$nlq7dI = 0         
+$nlq8dI = 0         
+$nlq9dI = 0         
+
+$nlq1uG = $nlq1uK*$nlq1uI
+$nlq2uG = $nlq2uK*$nlq2uI
+$nlq3uG = $nlq3uK*$nlq3uI
+$nlq4uG = $nlq4uK*$nlq4uI
+$nlq5uG = $nlq5uK*$nlq5uI
+$nlq6uG = $nlq6uK*$nlq6uI
+$nlq7uG = $nlq7uK*$nlq7uI
+$nlq8uG = $nlq8uK*$nlq8uI
+$nlq9uG = $nlq9uK*$nlq9uI
+
+$nlq1dG = $nlq1dK*$nlq1dI
+$nlq2dG = $nlq2dK*$nlq2dI
+$nlq3dG = $nlq3dK*$nlq3dI
+$nlq4dG = $nlq4dK*$nlq4dI
+$nlq5dG = $nlq5dK*$nlq5dI
+$nlq6dG = $nlq6dK*$nlq6dI
+$nlq7dG = $nlq7dK*$nlq7dI
+$nlq8dG = $nlq8dK*$nlq8dI
+$nlq9dG = $nlq9dK*$nlq9dI
+
+$oq01I = 0
+$oq02I = 0
+$oq03I = 0
+$oq04I = 0
+$oq05I = 0
+$oq06I = 0
+$oq07I = 0
+$oq08I = 0
+$oq09I = 0
+$oq10I = 0
+$oq11I = 0
+$oq12I = 0
+$oq13I = 0
+$oq14I = 0
+$oq15I = 0
+$oq16I = 0
+$oq17I = 0
+$oqK = 0.1        
+$oq01G = $oqK*$oq01I
+$oq02G = $oqK*$oq02I
+$oq03G = $oqK*$oq03I
+$oq04G = $oqK*$oq04I
+$oq05G = $oqK*$oq05I
+$oq06G = $oqK*$oq06I
+$oq07G = $oqK*$oq07I
+$oq08G = $oqK*$oq08I
+$oq09G = $oqK*$oq09I
+$oq10G = $oqK*$oq10I
+$oq11G = $oqK*$oq11I
+$oq12G = $oqK*$oq12I
+$oq13G = $oqK*$oq13I
+$oq14G = $oqK*$oq14I
+$oq15G = $oqK*$oq15I
+$oq16G = $oqK*$oq16I
+$oq17G = $oqK*$oq17I
+
+$N_ISC1RI = 0
+$N_ISC2RI = 0
+$N_ISC1LI = 0
+$N_ISC2LI = 0
+
+$scK = 0.1    
+    
+$sc1rG = $scK*$N_ISC1RI
+$sc2rG = $scK*$N_ISC2RI
+$sc1lG = $scK*$N_ISC1LI
+$sc2lG = $scK*$N_ISC2LI
+
+$kRFMOD = -703
+$rfmod = 0
+$dIRFLLF = 0
+$kIRFLLF = -1000000
+
+$ang_A1C = 0.0221810646-0.014417242990142687+0.06436651892179186
+$ang_A2R = 0.9875833576-0.17147947286235823-0.026618697956617383
+$ang_A3R = 0.5253550568-0.39265451014456454+0.2424537922834834
+$ang_B1R = 0.1843285411-0.29226009719705515+0.1555837062597952
+$ang_B2R = -0.1090869529+0.24097606011831105-0.06506257030807427
+$ang_C1R = -1.8987719192+0.3694812871483479-0.3132597055550107
+$ang_C2R = -2.0858192009+0.35292439065554887-0.4903951310379541
+$ang_D1R = 1.3505902106+0.020902018480860422+0.08539343411802906
+$ang_D2R = 0.7721062385+0.22855723079726514-0.37516924201989266
+$ang_E1R = 0.1187425999+0.5082810523537392-0.3257709661109522
+$ang_E2R = 1.2306612952+0.15946992439748225-0.02098357551832094
+$ang_E2L = -8.0000928889E-9+1.7541369533867859-0.19370750593709335
+$ang_E1L = 1.3501527949+0.011838418990570324+0.03090955212719608
+$ang_D2L = 0.6626287369-0.46010798813142556+0.28435275073955457
+$ang_D1L = -0.5372188661+0.1284994814935096-0.037574508486957266
+$ang_C2L = 1.0370730258-0.2691227163895441+0.12360108950304524
+$ang_C1L = 0.4834240608-0.07990304868379831+0.007396213999966398
+$ang_B2L = -0.1748835362+0.06710258867596149+0.2109958532654538
+$ang_B1L = -0.4827120342-0.16537864136756736
+$ang_A3L = -1.7229804178-0.3950323111287693
+$ang_A2L = -1.4130117067-0.11878108198248696+0.033783569182641804
+
+$pg30m1r = 5.8
+$pg30m4r = 5.8
+$pg30m4l = 5.8
+$pg30m1l = 5.8
+$pg60m2r = 5.8
+$pg60m3r = 5.8
+$pg60m3l = 5.8
+$pg60m2l = 5.8
+
+$shM1L = 0.0
+$shM2L = 0.0
+$shM3L = 0.0
+$shM4L = 0.0
+$shM1R = 0.0
+$shM2R = 0.0
+$shM3R = 0.0
+$shM4R = 0.0
+
+$kCAMy = 1.0
+
+$kPIC_A1Cx = 1.0
+$kPIC_A2Rx = 1.0
+$kPIC_A3Rx = 1.0
+$kPIC_B1Rx = 1.0
+$kPIC_B2Rx = 1.0
+$kPIC_C1Rx = 1.0
+$kPIC_C2Rx = 1.0
+$kPIC_D1Rx = 1.0
+$kPIC_D2Rx = 1.0
+$kPIC_E1Rx = 1.0
+$kPIC_E2Rx = 1.0
+$kPIC_E2Lx = 1.0
+$kPIC_E1Lx = 1.0
+$kPIC_D2Lx = 1.0
+$kPIC_D1Lx = 1.0
+$kPIC_C2Lx = 1.0
+$kPIC_C1Lx = 1.0
+$kPIC_B2Lx = 1.0
+$kPIC_B1Lx = 1.0
+$kPIC_A3Lx = 1.0
+$kPIC_A2Lx = 1.0
+$kPIC_A1Cy = 1.0
+$kPIC_A2Ry = 1.0
+$kPIC_A3Ry = 1.0
+$kPIC_B1Ry = 1.0
+$kPIC_B2Ry = 1.0
+$kPIC_C1Ry = 1.0
+$kPIC_C2Ry = 1.0
+$kPIC_D1Ry = 1.0
+$kPIC_D2Ry = 1.0
+$kPIC_E1Ry = 1.0
+$kPIC_E2Ry = 1.0
+$kPIC_E2Ly = 1.0
+$kPIC_E1Ly = 1.0
+$kPIC_D2Ly = 1.0
+$kPIC_D1Ly = 1.0
+$kPIC_C2Ly = 1.0
+$kPIC_C1Ly = 1.0
+$kPIC_B2Ly = 1.0
+$kPIC_B1Ly = 1.0
+$kPIC_A3Ly = 1.0
+$kPIC_A2Ly = 1.0
+
+
+
+ELEMENTS: 
+ID: NLMRup Gap L 15.25 
+
+ID: nll Gap L 3.5 
+ID: nllc Gap L 3.5 
+ID: nllu Gap L 3.5 
+ID: nlld Gap L 3.5 
+ID: nllh Gap L 1.75 
+ID: nlq1u Quad L 6.5 G $nlq1uG 
+ID: nlq2u Quad L 6.5 G $nlq2uG 
+ID: nlq3u Quad L 6.5 G $nlq3uG 
+ID: nlq4u Quad L 6.5 G $nlq4uG 
+ID: nlq5u Quad L 6.5 G $nlq5uG 
+ID: nlq6u Quad L 6.5 G $nlq6uG 
+ID: nlq7u Quad L 6.5 G $nlq7uG 
+ID: nlq8u Quad L 6.5 G $nlq8uG 
+ID: nlq9u Quad L 6.5 G $nlq9uG 
+
+ID: nlq1d Quad L 6.5 G $nlq1dG 
+ID: nlq2d Quad L 6.5 G $nlq2dG 
+ID: nlq3d Quad L 6.5 G $nlq3dG 
+ID: nlq4d Quad L 6.5 G $nlq4dG 
+ID: nlq5d Quad L 6.5 G $nlq5dG 
+ID: nlq6d Quad L 6.5 G $nlq6dG 
+ID: nlq7d Quad L 6.5 G $nlq7dG 
+ID: nlq8d Quad L 6.5 G $nlq8dG 
+ID: nlq9d Quad L 6.5 G $nlq9dG 
+
+
+
+ID: NLMRdown Gap L 15.25 
+ID: NLMLup Gap L 15.25 
+
+ID: NLMLdown Gap L 15.25 
+
+ID: ol Gap L 3.5882353 
+ID: olh Gap L 1.79411765 
+
+ID: oq01 Quad L 7 G $oq01G 
+ID: oq02 Quad L 7 G $oq02G 
+ID: oq03 Quad L 7 G $oq03G 
+ID: oq04 Quad L 7 G $oq04G 
+ID: oq05 Quad L 7 G $oq05G 
+ID: oq06 Quad L 7 G $oq06G 
+ID: oq07 Quad L 7 G $oq07G 
+ID: oq08 Quad L 7 G $oq08G 
+ID: oq09 Quad L 7 G $oq09G 
+ID: oq10 Quad L 7 G $oq10G 
+ID: oq11 Quad L 7 G $oq11G 
+ID: oq12 Quad L 7 G $oq12G 
+ID: oq13 Quad L 7 G $oq13G 
+ID: oq14 Quad L 7 G $oq14G 
+ID: oq15 Quad L 7 G $oq15G 
+ID: oq16 Quad L 7 G $oq16G 
+ID: oq17 Quad L 7 G $oq17G 
+
+ID: LStart Gap L 0 
+ID: L1 Gap L 14 aperture {"type":"ELLIPSE","x":3.4,"y":3.4} 
+ID: L1kx Gap L 55.25 
+ID: L1ky Gap L 22 
+
+ID: L2 Gap L 13.5 
+ID: L3 Gap L 8.25 
+ID: bumpr Gap L 10 
+ID: L4 Gap L 15 
+ID: L5 Gap L 4 
+ID: L6 Gap L 15.25 
+ID: L7 Gap L 14.5 
+ID: L8 Gap L 16.25 
+ID: L9 Gap L 11-$LEdge30 
+
+ID: m1r Dipole L $L30 Hy $H30 G 0 M2N 0 M2S 0  aperture {"type":"RECT","x":2.0,"y":2.4} 
+ID: m2r Dipole L $L60 Hy $H60 G 0 M2N 0 M2S 0  
+ID: m3r Dipole L $L60 Hy $H60 G 0 M2N 0 M2S 0  
+ID: m4r Dipole L $L30 Hy $H30 G 0 M2N 0 M2S 0  aperture {"type":"RECT","x":2.0,"y":2.4} 
+ID: m4l Dipole L $L30 Hy $H30 G 0 M2N 0 M2S 0  aperture {"type":"RECT","x":2.0,"y":2.4} 
+ID: m3l Dipole L $L60 Hy $H60 G 0 M2N 0 M2S 0  
+ID: m2l Dipole L $L60 Hy $H60 G 0 M2N 0 M2S 0  
+ID: m1l Dipole L $L30 Hy $H30 G 0 M2N 0 M2S 0  aperture {"type":"RECT","x":2.0,"y":2.4} 
+
+ID: de30M1Lu DipEdge Hy $H30 inA 0 poleGap $pg30m1l fringeK 0.5 
+ID: de60M2Lu DipEdge Hy $H60 inA 0 poleGap $pg60m2l fringeK 0.5 
+ID: de60M3Lu DipEdge Hy $H60 inA 0 poleGap $pg60m3l fringeK 0.5 
+ID: de30M4Lu DipEdge Hy $H30 inA 0 poleGap $pg30m4l fringeK 0.5 
+ID: de30M1Ru DipEdge Hy $H30 inA 0 poleGap $pg30m1r fringeK 0.5 
+ID: de60M2Ru DipEdge Hy $H60 inA 0 poleGap $pg60m2r fringeK 0.5 
+ID: de60M3Ru DipEdge Hy $H60 inA 0 poleGap $pg60m3r fringeK 0.5 
+ID: de30M4Ru DipEdge Hy $H30 inA 0 poleGap $pg30m4r fringeK 0.5 
+
+ID: de30M1Ld DipEdge Hy $H30 inA 0 poleGap $pg30m1l fringeK 0.5 
+ID: de60M2Ld DipEdge Hy $H60 inA 0 poleGap $pg60m2l fringeK 0.5 
+ID: de60M3Ld DipEdge Hy $H60 inA 0 poleGap $pg60m3l fringeK 0.5 
+ID: de30M4Ld DipEdge Hy $H30 inA 0 poleGap $pg30m4l fringeK 0.5 
+ID: de30M1Rd DipEdge Hy $H30 inA 0 poleGap $pg30m1r fringeK 0.5 
+ID: de60M2Rd DipEdge Hy $H60 inA 0 poleGap $pg60m2r fringeK 0.5 
+ID: de60M3Rd DipEdge Hy $H60 inA 0 poleGap $pg60m3r fringeK 0.5 
+ID: de30M4Rd DipEdge Hy $H30 inA 0 poleGap $pg30m4r fringeK 0.5 
+
+ID: L10 Gap L 17-$LEdge30 
+ID: L11 Gap L 8.25 
+ID: L12 Gap L 14 
+ID: L13 Gap L 14 
+
+ID: L15 Gap L 14 
+ID: L16 Gap L 14 
+ID: L17 Gap L 8.25 
+ID: L18 Gap L 17-$LEdge60 
+
+ID: L19 Gap L 20-$LEdge60 
+ID: L20 Gap L 16.25 
+ID: L21 Gap L 12.75 
+ID: L22 Gap L 12.75 
+ID: L23 Gap L 12.75 
+ID: L24 Gap L 12.75 
+ID: L25 Gap L 16.25 
+ID: L26 Gap L 20-$LEdge60 
+
+ID: L27m Gap L 10-$LEdge60 
+ID: L27s Gap L 7.5 
+ID: L27 Gap L 31.5 
+
+ID: L28 Gap L 7.25 
+ID: L29 Gap L 16 
+ID: L30 Gap L 16 
+ID: L31 Gap L 46.25 
+ID: cel Sol L 70 Hs 0 
+ID: L32 Gap L 46.25 
+ID: L33 Gap L 16 
+ID: L34 Gap L 16 
+ID: L35 Gap L 66.25-$LEdge30 
+ID: L36 Gap L 56.25-$LEdge30 
+ID: L37 Gap L 9.25 
+ID: L38 Gap L 104.25 
+ID: L39 Gap L 9.25 
+ID: L40 Gap L 4 
+ID: L41 Gap L 28.25 
+ID: L42 Gap L 9.25 
+ID: L43 Gap L 9.25 
+ID: L44 Gap L 28.25 
+ID: L45 Gap L 4 
+ID: L46 Gap L 9.25 
+ID: L47 Gap L 104.25 
+ID: L48 Gap L 9.25 
+ID: L49 Gap L 56.25-$LEdge30 
+ID: L50 Gap L 66.25-$LEdge30 
+ID: L51 Gap L 16 
+ID: L52 Gap L 16 
+ID: L53 Gap L 78.75 
+ID: rfc Acc L 5 U 1E-3 F 3.000308E7 
+ID: L54 Gap L 78.75 
+ID: L55 Gap L 16 
+ID: L56 Gap L 16 
+ID: L57 Gap L 7.25 
+
+ID: L58 Gap L 31.5 
+ID: L58s Gap L 7.5 
+ID: L58m Gap L 10-$LEdge60 
+
+ID: L59 Gap L 20-$LEdge60 
+ID: L60 Gap L 16.25 
+ID: L61 Gap L 12.75 
+ID: L62 Gap L 12.75 
+ID: L63 Gap L 12.75 
+ID: L64 Gap L 12.75 
+ID: L65 Gap L 16.25 
+ID: L66 Gap L 20-$LEdge60 
+ID: L67 Gap L 17-$LEdge60 
+ID: L68 Gap L 8.25 
+ID: L69 Gap L 14 
+ID: L70 Gap L 14 
+
+ID: L72 Gap L 14 
+ID: L73 Gap L 14 
+ID: L74 Gap L 8.25 
+ID: L75 Gap L 17-$LEdge30 
+ID: L76 Gap L 11-$LEdge30 
+ID: L77 Gap L 16.25 
+ID: L78 Gap L 14.5 
+ID: L79 Gap L 15.25 
+ID: L80 Gap L 4 
+ID: L81a Gap L 7 
+ID: L81b Gap L 8 aperture {"type":"ELLIPSE","x":3.4,"y":3.4} 
+ID: bumpl Gap L 10 aperture {"type":"ELLIPSE","x":3.4,"y":3.4} 
+ID: L82 Gap L 8.25 aperture {"type":"ELLIPSE","x":3.4,"y":3.4} 
+ID: L83 Gap L 13.5 aperture {"type":"ELLIPSE","x":3.4,"y":3.4} 
+ID: L84 Gap L 21.25 aperture {"type":"ELLIPSE","x":3.4,"y":3.4} 
+ID: LLamb Gap L 55 aperture {"type":"ELLIPSE","x":2.0,"yArr":[3.2,2.0]} 
+ID: L85 Gap L 15 aperture {"type":"ELLIPSE","x":3.4,"yArr":[3.4,3.4,3.4]} 
+
+
+ID: sa1r Mult L 10 M2N 0.0
+ID: sc1r Mult L 10 M2N $sc1rG 
+ID: sc2r Mult L 10 M2N $sc2rG 
+ID: sd1r Mult L 10 M2N 0 
+ID: se1r Mult L 10 M2N 0 
+ID: se2r Mult L 10 M2N 0 
+ID: se2l Mult L 10 M2N 0 
+ID: se1l Mult L 10 M2N 0 
+ID: sd1l Mult L 10 M2N 0 
+ID: sc2l Mult L 10 M2N $sc2lG 
+ID: sc1l Mult L 10 M2N $sc1lG 
+ID: sa1l Mult L 10 M2N 0.0
+
+
+
+
+ID: qa1r Quad L 21 G $qa1rG 
+ID: qa2r Quad L 21 G $qa2rG 
+ID: qa3r Quad L 21 G $qa3rG 
+ID: qa4r Quad L 21 G $qa4rG 
+ID: qb1r Quad L 21 G $qb1rG 
+ID: qb2r Quad L 21 G $qb2rG 
+ID: qb3r Quad L 21 G $qb3rG 
+ID: qb4r Quad L 21 G $qb4rG 
+ID: qb5r Quad L 21 G $qb5rG 
+ID: qb6r Quad L 21 G $qb6rG 
+ID: qc1r Quad L 21 G $qc1rG 
+ID: qc2r Quad L 21 G $qc2rG 
+ID: qc3r Quad L 21 G $qc3rG 
+ID: qd1r Quad L 21 G $qd1rG 
+ID: qd2r Quad L 21 G $qd2rG 
+ID: qd3r Quad L 21 G $qd3rG 
+ID: qd4r Quad L 21 G $qd4rG 
+ID: qe1r Quad L 21 G $qe1rG 
+ID: qe2r Quad L 21 G $qe2rG 
+ID: qe3 Quad L 21 G $qe3G 
+ID: qe2l Quad L 21 G $qe2lG 
+ID: qe1l Quad L 21 G $qe1lG 
+ID: qd4l Quad L 21 G $qd4lG 
+ID: qd3l Quad L 21 G $qd3lG 
+ID: qd2l Quad L 21 G $qd2lG 
+ID: qd1l Quad L 21 G $qd1lG 
+ID: qc3l Quad L 21 G $qc3lG 
+ID: qc2l Quad L 21 G $qc2lG 
+ID: qc1l Quad L 21 G $qc1lG 
+ID: qb6l Quad L 21 G $qb6lG 
+ID: qb5l Quad L 21 G $qb5lG 
+ID: qb4l Quad L 21 G $qb4lG 
+ID: qb3l Quad L 21 G $qb3lG 
+ID: qb2l Quad L 21 G $qb2lG 
+ID: qb1l Quad L 21 G $qb1lG 
+ID: qa4l Quad L 21 G $qa4lG 
+ID: qa3l Quad L 21 G $qa3lG 
+ID: qa2l Quad L 21 G $qa2lG aperture {"type":"ELLIPSE","x":3.4,"y":3.4} 
+ID: qa1l Quad L 21 G $qa1lG aperture {"type":"ELLIPSE","x":3.4,"y":3.4} 
+
+
+ID: sqa1r SQuad L 10 G $GSQA1R rotA $angSQA1R 
+ID: sqa2r SQuad L 10 G $GSQA2R rotA $angSQA2R 
+ID: sqb1r SQuad L 10 G $GSQB1R rotA $angSQB1R 
+ID: sqb2r SQuad L 10 G $GSQB2R rotA $angSQB2R 
+ID: sqc1r SQuad L 10 G $GSQC1R rotA $angSQC1R 
+ID: sqc2r SQuad L 10 G $GSQC2R rotA $angSQC2R 
+ID: sqd1r SQuad L 10 G $GSQD1R rotA $angSQD1R 
+ID: sqd2r SQuad L 10 G $GSQD2R rotA $angSQD2R 
+ID: sqe1r SQuad L 10 G $GSQE1R rotA $angSQE1R 
+ID: sqe2r SQuad L 10 G $GSQE2R rotA $angSQE2R 
+ID: sqa1l SQuad L 10 G $GSQA1L rotA $angSQA1L 
+ID: sqa2l SQuad L 10 G $GSQA2L rotA $angSQA2L 
+ID: sqb1l SQuad L 10 G $GSQB1L rotA $angSQB1L 
+ID: sqb2l SQuad L 10 G $GSQB2L rotA $angSQB2L 
+ID: sqc1l SQuad L 10 G $GSQC1L rotA $angSQC1L 
+ID: sqc2l SQuad L 10 G $GSQC2L rotA $angSQC2L 
+ID: sqd1l SQuad L 10 G $GSQD1L rotA $angSQD1L 
+ID: sqd2l SQuad L 10 G $GSQD2L rotA $angSQD2L 
+ID: sqe1l SQuad L 10 G $GSQE1L rotA $angSQE1L 
+ID: sqe2l SQuad L 10 G $GSQE2L rotA $angSQE2L 
+
+CORRECTORS:
+ID:  qa1r_SHIFT ElementShiftCorrector XShift 0 YShift 0 El qa1r 
+ID:  qa2r_SHIFT ElementShiftCorrector XShift 0 YShift 0 El qa2r 
+ID:  qa3r_SHIFT ElementShiftCorrector XShift 0 YShift 0 El qa3r 
+ID:  qa4r_SHIFT ElementShiftCorrector XShift 0 YShift 0 El qa4r 
+ID:  qb1r_SHIFT ElementShiftCorrector XShift 0 YShift 0 El qb1r 
+ID:  qb2r_SHIFT ElementShiftCorrector XShift 0 YShift 0 El qb2r 
+ID:  qb3r_SHIFT ElementShiftCorrector XShift 0 YShift 0 El qb3r 
+ID:  qb4r_SHIFT ElementShiftCorrector XShift 0 YShift 0 El qb4r 
+ID:  qb5r_SHIFT ElementShiftCorrector XShift 0 YShift 0 El qb5r 
+ID:  qb6r_SHIFT ElementShiftCorrector XShift 0 YShift 0 El qb6r 
+ID:  qc1r_SHIFT ElementShiftCorrector XShift 0 YShift 0 El qc1r 
+ID:  qc2r_SHIFT ElementShiftCorrector XShift 0 YShift 0 El qc2r 
+ID:  qc3r_SHIFT ElementShiftCorrector XShift 0 YShift 0 El qc3r 
+ID:  qd1r_SHIFT ElementShiftCorrector XShift 0 YShift 0 El qd1r 
+ID:  qd2r_SHIFT ElementShiftCorrector XShift 0 YShift 0 El qd2r 
+ID:  qd3r_SHIFT ElementShiftCorrector XShift 0 YShift 0 El qd3r 
+ID:  qd4r_SHIFT ElementShiftCorrector XShift 0 YShift 0 El qd4r 
+ID:  qe1r_SHIFT ElementShiftCorrector XShift 0 YShift 0 El qe1r 
+ID:  qe2r_SHIFT ElementShiftCorrector XShift 0 YShift 0 El qe2r 
+ID:  qe3_SHIFT  ElementShiftCorrector XShift 0 YShift 0 El qe3  
+ID:  qe2l_SHIFT ElementShiftCorrector XShift 0 YShift 0 El qe2l 
+ID:  qe1l_SHIFT ElementShiftCorrector XShift 0 YShift 0 El qe1l 
+ID:  qd4l_SHIFT ElementShiftCorrector XShift 0 YShift 0 El qd4l 
+ID:  qd3l_SHIFT ElementShiftCorrector XShift 0 YShift 0 El qd3l 
+ID:  qd2l_SHIFT ElementShiftCorrector XShift 0 YShift 0 El qd2l 
+ID:  qd1l_SHIFT ElementShiftCorrector XShift 0 YShift 0 El qd1l 
+ID:  qc3l_SHIFT ElementShiftCorrector XShift 0 YShift 0 El qc3l 
+ID:  qc2l_SHIFT ElementShiftCorrector XShift 0 YShift 0 El qc2l 
+ID:  qc1l_SHIFT ElementShiftCorrector XShift 0 YShift 0 El qc1l 
+ID:  qb6l_SHIFT ElementShiftCorrector XShift 0 YShift 0 El qb6l 
+ID:  qb5l_SHIFT ElementShiftCorrector XShift 0 YShift 0 El qb5l 
+ID:  qb4l_SHIFT ElementShiftCorrector XShift 0 YShift 0 El qb4l 
+ID:  qb3l_SHIFT ElementShiftCorrector XShift 0 YShift 0 El qb3l 
+ID:  qb2l_SHIFT ElementShiftCorrector XShift 0 YShift 0 El qb2l 
+ID:  qb1l_SHIFT ElementShiftCorrector XShift 0 YShift 0 El qb1l 
+ID:  qa4l_SHIFT ElementShiftCorrector XShift 0 YShift 0 El qa4l 
+ID:  qa3l_SHIFT ElementShiftCorrector XShift 0 YShift 0 El qa3l 
+ID:  qa2l_SHIFT ElementShiftCorrector XShift 0 YShift 0 El qa2l 
+ID:  qa1l_SHIFT ElementShiftCorrector XShift 0 YShift 0 El qa1l 
+
+ID: DF RFCorrector dF $kRFMOD*$rfmod+$kIRFLLF*$dIRFLLF El rfc 
+
+ID: xLambIn XCorrector Hy 0 El L84 
+ID: xLamb XCorrector Hy 0 El LLamb 
+ID: xLambOut XCorrector Hy 0 El L85 
+
+ID: xM1R XCorrector Hy $HyM1R El m1r 
+ID: xM2R XCorrector Hy $HyM2R El m2r 
+ID: xM3R XCorrector Hy $HyM3R El m3r 
+ID: xM4R XCorrector Hy $HyM4R El m4r 
+ID: xM1L XCorrector Hy $HyM1L El m1l 
+ID: xM2L XCorrector Hy $HyM2L El m2l 
+ID: xM3L XCorrector Hy $HyM3L El m3l 
+ID: xM4L XCorrector Hy $HyM4L El m4l 
+
+ID: xSQA1R XCorrector Hy $HySQA1R rotA $angSQA1R El sqa1r 
+ID: xSQA2R XCorrector Hy $HySQA2R rotA $angSQA2R El sqa2r 
+ID: xSQB1R XCorrector Hy $HySQB1R rotA $angSQB1R El sqb1r 
+ID: xSQB2R XCorrector Hy $HySQB2R rotA $angSQB2R El sqb2r 
+ID: xSQC1R XCorrector Hy $HySQC1R rotA $angSQC1R El sqc1r 
+ID: xSQC2R XCorrector Hy $HySQC2R rotA $angSQC2R El sqc2r 
+ID: xSQD1R XCorrector Hy $HySQD1R rotA $angSQD1R El sqd1r 
+ID: xSQD2R XCorrector Hy $HySQD2R rotA $angSQD2R El sqd2r 
+ID: xSQE1R XCorrector Hy $HySQE1R rotA $angSQE1R El sqe1r 
+ID: xSQE2R XCorrector Hy $HySQE2R rotA $angSQE2R El sqe2r 
+ID: xSQA1L XCorrector Hy $HySQA1L rotA $angSQA1L El sqa1l 
+ID: xSQA2L XCorrector Hy $HySQA2L rotA $angSQA2L El sqa2l 
+ID: xSQB1L XCorrector Hy $HySQB1L rotA $angSQB1L El sqb1l 
+ID: xSQB2L XCorrector Hy $HySQB2L rotA $angSQB2L El sqb2l 
+ID: xSQC1L XCorrector Hy $HySQC1L rotA $angSQC1L El sqc1l 
+ID: xSQC2L XCorrector Hy $HySQC2L rotA $angSQC2L El sqc2l 
+ID: xSQD1L XCorrector Hy $HySQD1L rotA $angSQD1L El sqd1l 
+ID: xSQD2L XCorrector Hy $HySQD2L rotA $angSQD2L El sqd2l 
+ID: xSQE1L XCorrector Hy $HySQE1L rotA $angSQE1L El sqe1l 
+ID: xSQE2L XCorrector Hy $HySQE2L rotA $angSQE2L El sqe2l 
+
+ID: ySQA1R YCorrector Hx $HxSQA1R rotA $angSQA1R El sqa1r 
+ID: ySQA2R YCorrector Hx $HxSQA2R rotA $angSQA2R El sqa2r 
+ID: ySQB1R YCorrector Hx $HxSQB1R rotA $angSQB1R El sqb1r 
+ID: ySQB2R YCorrector Hx $HxSQB2R rotA $angSQB2R El sqb2r 
+ID: ySQC1R YCorrector Hx $HxSQC1R rotA $angSQC1R El sqc1r 
+ID: ySQC2R YCorrector Hx $HxSQC2R rotA $angSQC2R El sqc2r 
+ID: ySQD1R YCorrector Hx $HxSQD1R rotA $angSQD1R El sqd1r 
+ID: ySQD2R YCorrector Hx $HxSQD2R rotA $angSQD2R El sqd2r 
+ID: ySQE1R YCorrector Hx $HxSQE1R rotA $angSQE1R El sqe1r 
+ID: ySQE2R YCorrector Hx $HxSQE2R rotA $angSQE2R El sqe2r 
+ID: ySQA1L YCorrector Hx $HxSQA1L rotA $angSQA1L El sqa1l 
+ID: ySQA2L YCorrector Hx $HxSQA2L rotA $angSQA2L El sqa2l 
+ID: ySQB1L YCorrector Hx $HxSQB1L rotA $angSQB1L El sqb1l 
+ID: ySQB2L YCorrector Hx $HxSQB2L rotA $angSQB2L El sqb2l 
+ID: ySQC1L YCorrector Hx $HxSQC1L rotA $angSQC1L El sqc1l 
+ID: ySQC2L YCorrector Hx $HxSQC2L rotA $angSQC2L El sqc2l 
+ID: ySQD1L YCorrector Hx $HxSQD1L rotA $angSQD1L El sqd1l 
+ID: ySQD2L YCorrector Hx $HxSQD2L rotA $angSQD2L El sqd2l 
+ID: ySQE1L YCorrector Hx $HxSQE1L rotA $angSQE1L El sqe1l 
+ID: ySQE2L YCorrector Hx $HxSQE2L rotA $angSQE2L El sqe2l 
+
+ID: injection OrbitShiftCorrector Shift 0 YShift 0 YAngle 0 El LStart endTurn 1 
+
+ID: xKick1 XCorrector Hy 0 El L1kx endTurn 1 aperture {"type":"ELLIPSE","x":2.0,"y":3.1} 
+
+ID: yKick1 YCorrector Hx 0 El L1ky endTurn 1 aperture {"type":"ELLIPSE","x":3.1,"y":2.0} 
+ID: yKick2 YCorrector Hx 0 El qa1r endTurn 1 aperture {"type":"ELLIPSE","x":3.1,"y":2.0} 
+ID: yKick3 YCorrector Hx 0 El L2 endTurn 1 aperture {"type":"ELLIPSE","x":3.1,"y":2.0} 
+ID: yKick4 YCorrector Hx 0 El qa2r endTurn 1 aperture {"type":"ELLIPSE","x":3.1,"y":2.0} 
+ID: yKick5 YCorrector Hx 0 El L3 endTurn 1 aperture {"type":"ELLIPSE","x":3.1,"y":2.0} 
+ID: yKick6 YCorrector Hx 0 El bumpr endTurn 1 aperture {"type":"ELLIPSE","x":3.1,"y":2.0} 
+
+ID: yBumpR YCorrector Hx $HxBMPR El bumpr 
+ID: yBumpL YCorrector Hx $HxBMPL El bumpl 
+
+ID: StartOC OrbitShiftCorrector Shift 0 XShift 0 XAngle 0 YShift 0 YAngle 0 El L1 
+
+MONITORS:
+ID: nlr1 BPM xK 1 yK 1 rotAx 0 rotAy 0 K 1 K2 0 K3 0 rotA 0 Shift 15.25 El NLMRup 
+ID: ioru BPM xK 1 yK 1 K 1 Shift 1.75 El nllu 
+ID: ior BPM xK 1 yK 1 K 1 Shift 1.75 El nllc 
+ID: iord BPM xK 1 yK 1 K 1 Shift 1.75 El nlld 
+ID: nlr2 BPM xK 1 yK 1 rotAx 0 rotAy 0 K 1 K2 0 K3 0 rotA 0 Shift 0 El NLMRdown 
+ID: nll1 BPM xK 1 yK 1 K 1 Shift 0 El NLMLup 
+ID: iol BPM xK 1 yK 1 K 1 Shift 3.5 El oq09 
+ID: iol_10cm BPM xK 1 yK 1 K 1 Shift 3.2 El oq08 
+ID: nll2 BPM xK 1 yK 1 K 1 Shift 15.25 El NLMLdown 
+ID: el1 BPM xK 1 yK 1 K 1 Shift 46.25 El L31 
+ID: el2 BPM xK 1 yK 1 K 1 Shift 69.999999 El cel 
+
+
+ID: BA1C BPM xK $kPIC_A1Cx yK $kPIC_A1Cy K $kPIC*$kPIC_A1C rotA $ang_A1C Shift 2 El L1 
+ID: BA2R BPM xK $kPIC_A2Rx yK $kPIC_A2Ry K $kPIC*$kPIC_A2R rotA $ang_A2R Shift 5.5 El L6 
+ID: BA3R BPM xK $kPIC_A3Rx yK $kPIC_A3Ry K $kPIC*$kPIC_A3R rotA $ang_A3R Shift 10.75 El L8 
+
+ID: BB1R BPM xK $kPIC_B1Rx yK $kPIC_B1Ry K $kPIC*$kPIC_B1R rotA $ang_B1R Shift 9.14 El NLMRup 
+ID: BB2R BPM xK $kPIC_B2Rx yK $kPIC_B2Ry K $kPIC*$kPIC_B2R rotA $ang_B2R Shift 5.86 El NLMRdown 
+
+ID: BC1R BPM xK $kPIC_C1Rx yK $kPIC_C1Ry K $kPIC*$kPIC_C1R rotA $ang_C1R Shift 5.5 El L20 
+ID: BC2R BPM xK $kPIC_C2Rx yK $kPIC_C2Ry K $kPIC*$kPIC_C2R rotA $ang_C2R Shift 10.75 El L25 
+ID: BD1R BPM xK $kPIC_D1Rx yK $kPIC_D1Ry K $kPIC*$kPIC_D1R rotA $ang_D1R Shift 18 El L27 
+ID: BD2R BPM xK $kPIC_D2Rx yK $kPIC_D2Ry K $kPIC*$kPIC_D2R rotA $ang_D2R Shift 30.75 El L35 
+ID: BE1R BPM xK $kPIC_E1Rx yK $kPIC_E1Ry K $kPIC*$kPIC_E1R rotA $ang_E1R Shift 35.5-$LEdge30 El L36 
+ID: BE2R BPM xK $kPIC_E2Rx yK $kPIC_E2Ry K $kPIC*$kPIC_E2R rotA $ang_E2R Shift 93.5 El L38 
+ID: BE2L BPM xK $kPIC_E2Lx yK $kPIC_E2Ly K $kPIC*$kPIC_E2L rotA $ang_E2L Shift 10.75 El L47 
+ID: BE1L BPM xK $kPIC_E1Lx yK $kPIC_E1Ly K $kPIC*$kPIC_E1L rotA $ang_E1L Shift 20.75 El L49 
+ID: BD2L BPM xK $kPIC_D2Lx yK $kPIC_D2Ly K $kPIC*$kPIC_D2L rotA $ang_D2L Shift 35.5 El L50 
+ID: BD1L BPM xK $kPIC_D1Lx yK $kPIC_D1Ly K $kPIC*$kPIC_D1L rotA $ang_D1L Shift 13.5 El L58 
+ID: BC2L BPM xK $kPIC_C2Lx yK $kPIC_C2Ly K $kPIC*$kPIC_C2L rotA $ang_C2L Shift 5.5 El L60 
+ID: BC1L BPM xK $kPIC_C1Lx yK $kPIC_C1Ly K $kPIC*$kPIC_C1L rotA $ang_C1L Shift 10.75 El L65 
+
+ID: BB2L BPM xK $kPIC_B2Lx yK $kPIC_B2Ly K $kPIC*$kPIC_B2L rotA $ang_B2L Shift 5.57 El NLMLdown 
+ID: BB1L BPM xK $kPIC_B1Lx yK $kPIC_B1Ly K $kPIC*$kPIC_B1L rotA $ang_B1L Shift 9.43 El NLMLup 
+
+ID: BA3L BPM xK $kPIC_A3Lx yK $kPIC_A3Ly K $kPIC*$kPIC_A3L rotA $ang_A3L Shift 5.499999 El L77 
+ID: BA2L BPM xK $kPIC_A2Lx yK $kPIC_A2Ly K $kPIC*$kPIC_A2L rotA $ang_A2L Shift 9.749999 El L79 
+
+ID: qe3_MID BPM xK 1 yK 1 K 1 rotA 1 Shift 10.5 El qe3 
+ID: qa2r_MID BPM xK 1 yK 1 K 1 rotA 1 Shift 10.5 El qa2r 
+
+
+
+ID: M1R BPM xK 1 yK $kCAMy K $kCAM*$kCAM_M1R rotA $ang_M1R Shift $L30/15+$shM1R El m1r 
+ID: M2R BPM xK 1 yK $kCAMy K $kCAM*$kCAM_M2R rotA $ang_M2R Shift $L60/2+$shM2R El m2r 
+ID: M3R BPM xK 1 yK $kCAMy K $kCAM*$kCAM_M3R rotA $ang_M3R Shift $L60/2+$shM3R El m3r 
+ID: M4R BPM xK 1 yK $kCAMy K $kCAM*$kCAM_M4R rotA $ang_M4R Shift $L30/15+$shM4R El m4r 
+ID: M1L BPM xK 1 yK $kCAMy K $kCAM*$kCAM_M1L rotA $ang_M1L Shift $L30/15+$shM1L El m1l 
+ID: M2L BPM xK 1 yK $kCAMy K $kCAM*$kCAM_M2L rotA $ang_M2L Shift $L60/2+$shM2L El m2l 
+ID: M3L BPM xK 1 yK $kCAMy K $kCAM*$kCAM_M3L rotA $ang_M3L Shift $L60/2+$shM3L El m3l 
+ID: M4L BPM xK 1 yK $kCAMy K $kCAM*$kCAM_M4L rotA $ang_M4L Shift $L30/15+$shM4L El m4l 
+
+ID: start BPM xK 1 yK 1 K 1 Shift 0 El L1 
+
+
+ID: FULL BPM xK 1 yK 1 K 1 Shift 0 El L1 
+
+LATTICE:
+
+LStart  L1  L1kx  L1ky  qa1r  L2  qa2r  L3  bumpr  
+L4  sa1r  L5  sqa1r  L6  qa3r  L7  qa4r  L8  sqa2r  
+L9  de30M1Ru  m1r  de30M1Rd  L10  sqb1r  L11  qb1r  L12  qb2r  
+L13  qb3r  NLMRup  nllh  nlq1u  nll  nlq2u  nll  nlq3u  nll  
+nlq4u  nll  nlq5u  nll  nlq6u  nll  nlq7u  nll  nlq8u  nllu  
+nlq9u  nllc  nlq9d  nlld  nlq8d  nll  nlq7d  nll  nlq6d  nll  
+nlq5d  nll  nlq4d  nll  nlq3d  nll  nlq2d  nll  nlq1d  nllh  
+NLMRdown  qb4r  L15  qb5r  L16  qb6r  L17  sqb2r  L18  de60M2Ru  
+m2r  de60M2Rd  L19  sqc1r  L20  qc1r  L21  sc1r  L22  qc2r  
+L23  sc2r  L24  qc3r  L25  sqc2r  L26  de60M3Ru  m3r  de60M3Rd  
+L27m  L27s  L27  sqd1r  L28  qd1r  L29  sd1r  L30  qd2r  
+L31  cel  L32  qd3r  L33  sqd2r  L34  qd4r  L35  de30M4Ru  
+m4r  de30M4Rd  L36  qe1r  L37  sqe1r  L38  qe2r  L39  se1r  
+L40  sqe2r  L41  se2r  L42  qe3  L43  se2l  L44  sqe2l  
+L45  se1l  L46  qe2l  L47  sqe1l  L48  qe1l  L49  de30M4Lu  
+m4l  de30M4Ld  L50  qd4l  L51  sqd2l  L52  qd3l  L53  rfc  
+L54  qd2l  L55  sd1l  L56  qd1l  L57  sqd1l  L58  L58s  
+L58m  de60M3Lu  m3l  de60M3Ld  L59  sqc2l  L60  qc3l  L61  sc2l  
+L62  qc2l  L63  sc1l  L64  qc1l  L65  sqc1l  L66  de60M2Lu  
+m2l  de60M2Ld  L67  sqb2l  L68  qb6l  L69  qb5l  L70  qb4l  
+NLMLdown  olh  oq01  ol  oq02  ol  oq03  ol  oq04  ol  
+oq05  ol  oq06  ol  oq07  ol  oq08  ol  oq09  ol  
+oq10  ol  oq11  ol  oq12  ol  oq13  ol  oq14  ol  
+oq15  ol  oq16  ol  oq17  olh  NLMLup  qb3l  L72  qb2l  
+L73  qb1l  L74  sqb1l  L75  de30M1Lu  m1l  de30M1Ld  L76  sqa2l  
+L77  qa4l  L78  qa3l  L79  sqa1l  L80  sa1l  L81a  L81b  
+bumpl  L82  qa2l  L83  qa1l  L84  LLamb  L85  
+
+END
+

@@ -29,15 +29,20 @@ def chromaticity(lattice: MagneticLattice,
     :param tws_1: Endpoint twiss (for channel mode)
     :param method: Computation method
 
-        'matrix' - Recommended, uses second order matrices. Same as MADX or elegant when not tracking,
-         i.e. without 'chrom' option.
+        'track' - Track and find tunes using NAFF. Has to be used for elements with kick-only maps.
+        Speed depends on how many elements can be merged. Should be same as MADX TWISS with 'chrom' option.
+        Parameters:
+         n_turns=2048 - number of turns to use
+         deltap=1e-6 - momentum deviation of probe particles
+
+        'matrix' - Recommended, uses second order matrices. Same as MADX TWISS without 'chrom' option and elegant.
          Parameters:
           None
 
         'integral_numeric' - Compute integral of [beta*k1] within focusing elements with discrete steps.
          Less accurate than matrix method. Does not account for feed down of misaligned sextupoles, octupoles, etc.
          Parameters:
-          n_steps - number of steps inside each element
+          n_steps=9 - number of steps inside each element
 
         'integral_analytic' - Compute integral of [beta*k1] within focusing elements by using analytic average
          beta function in each. Same caveats as 'integral_numeric', but should be more accurate and faster.
@@ -76,18 +81,44 @@ def chromaticity(lattice: MagneticLattice,
         tws_1 = tws_0
 
     if method == 'track':
-        # Track particle for tune
-        navi = ocelot.Navigator(lattice)
-        p_neg = ocelot.Particle(x=0.0, y=0.0, p=-1e-6, E=0.0)
-        p_ref = ocelot.Particle(x=0.0, y=0.0, p=0.0, E=0.0)
-        p_pos = ocelot.Particle(x=0.0, y=0.0, p=1e-6, E=0.0)
+        # Track 3 particles for tune, and calculate chromaticity
+        # Should converge to matrix method if only have SecondTM elements
+        # 1e-6 is MADX standard delta, and also need some x/y amplitude to get tune
+
+        # 2048 turns is what elegant uses
+        n_turns = method_kwargs.get('n_turns', 1024)
+        deltap = method_kwargs.get('deltap', 1e-6)
+        naff_atol = 1e-12
+
+        p_neg = ocelot.Particle(x=1.0e-6, y=1.0e-6, p=-deltap)
+        p_ref = ocelot.Particle(x=1.0e-6, y=1.0e-6, p=0.0)
+        p_pos = ocelot.Particle(x=1.0e-6, y=1.0e-6, p=deltap)
         p_list = [p_neg, p_ref, p_pos]
         t_list = [ocelot.Track_info(p) for p in p_list]
-        tl_out = ocelot.track_nturns(lattice, 1024, t_list, print_progress=False)
+
+        # Use merged maps tracking
+        from . import track_nturns_fast
+        tl_out = track_nturns_fast(lattice, n_turns, t_list, print_progress=False)
+        #tl_out = ocelot.track_nturns(lattice, n_turns, t_list, print_progress=False)
+        # This is ideal data so can use window
         naff = NAFF(window_power=1, fft_pad_zeros_power=14)
-
-
-
+        freq_x = [naff.run_naff(tl.get_x(), n_components=1, full_data=False, xatol=naff_atol)[0] for tl in tl_out]
+        freq_xp = [naff.run_naff(tl.get_xp(), n_components=1, full_data=False, xatol=naff_atol)[0] for tl in tl_out]
+        freq_y = [naff.run_naff(tl.get_y(), n_components=1, full_data=False, xatol=naff_atol)[0] for tl in tl_out]
+        freq_yp = [naff.run_naff(tl.get_yp(), n_components=1, full_data=False, xatol=naff_atol)[0] for tl in tl_out]
+        fx = np.hstack([np.diff(freq_x), np.diff(freq_xp)])
+        fy = np.hstack([np.diff(freq_y), np.diff(freq_yp)])
+        if debug:
+            print(f'X tune delta: {np.mean(fx)} +- {np.std(fx)}')
+            print(f'Y tune delta: {np.mean(fy)} +- {np.std(fy)}')
+        # Check tune consistency
+        if np.std(fx) > naff_atol*100 or np.std(fy) > naff_atol*100:
+            print(f'X tunes delta: {fx}')
+            print(f'Y tunes delta: {fy}')
+            raise Exception('Tune determination unstable - try increasing turn number')
+        ksi_x = np.mean(fx)/deltap
+        ksi_y = np.mean(fy)/deltap
+        chrom_1period = np.array([ksi_x, ksi_y])
     elif method == 'matrix':
         # Use second order matrix - this is same as MADX TWISS routine !without! chrom flag
         # Also same as in elegant for chromaticity correction (but elegant has up to 3rd order, only 2nd here)

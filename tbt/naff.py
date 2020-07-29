@@ -98,11 +98,7 @@ class NAFF:
         self.coeffs_cache = [sci.newton_cotes(i, 1)[0].astype(np.complex128) for i in range(1, 10)]
         self.naff_runtimes = []
 
-    def fft(self,
-            data: np.ndarray,
-            window_power: int = None,
-            pad_zeros_power: int = None,
-            output_trim: slice = None,
+    def fft(self, data: np.ndarray, window_power: int = None, pad_zeros_power: int = None, output_trim: slice = None,
             data_trim: slice = None) -> Tuple[np.ndarray, np.ndarray]:
         """
         It is me, your personal FFT. Really...just FFT, so I don't have to rewrite same thing 10 times.
@@ -231,9 +227,9 @@ class NAFF:
         Numeric analysis of fundamental frequencies
         Iterative method that maximizes inner product of data and oscillatory signal, finding best frequencies
         :param data: Signal
-        :param data_trim: Optional trim override
+        :param data_trim: Uses object default if not specified
         :param legacy: Use old return format
-        :param xatol: Final optimization tolerance
+        :param xatol: Final optimization absolute tolerance
         :param n_components: Number of frequencies to look for
         :param full_data: Return debug and other information in addition to tunes
         :return:
@@ -268,20 +264,20 @@ class NAFF:
                                     'initial_simplex': np.array([[tune0 - 1e-3], [tune0 + 1e-3]]),
                                     'xatol': xatol,
                                     'fatol': 1})
-
             tune = res.x[0]
+
             # Orthogonalize if not the first frequency and far enough
             if np.any(np.abs(np.array(tunes) - tune) < 1e-4):
                 # Close frequency wasnt removed last time, remove without orthogonalization
                 fc = (1.0 * last_eval[1] + 1.0j * last_eval[2]) * np.exp(1.0j * 2 * np.pi * tune * np.arange(n_turns))
-                logger.warning(
-                    f'Close frequency ({tune:.6f}) found (eps={np.min(np.abs(np.array(tunes) - tune)):.6f}), removing w/o orthogonalization')
-                # raise Exception
+                logger.warning(f'NAFF - close frequency ({tune:.6f}) found '
+                               f'(eps={np.min(np.abs(np.array(tunes) - tune)):.6f}), removing w/o orthogonalization')
             else:
                 fc = np.exp(1.0j * 2 * np.pi * tune * np.arange(n_turns))
                 for j in range(2, i):
                     # print(i,j, fc[0:5])
                     fc = fc - self.get_projection(freq_components[j - 1], fc) * freq_components[j - 1]
+
             tunes.append(tune)
             freq_components.append(fc)
             amplitude = self.get_projection(fc, data_centered)
@@ -289,11 +285,11 @@ class NAFF:
             data_centered = data_centered - amplitude * fc
 
         if legacy:
-            return [[0, res[0], 0, 0, 0] for res in results]
+            return [[0, r[0], 0, 0, 0] for r in results]
         elif full_data:
             return results
         else:
-            return [res[0] for res in results]
+            return [r[0] for r in results]
 
     def __calculate_naff_turns(self, data: np.ndarray, turns: int, order: int):
         """ Returns max number of turns that can be used for NAFF, depending on integrator and order """
