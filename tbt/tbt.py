@@ -3,6 +3,7 @@ import enum
 import itertools
 import json
 import logging
+from json import JSONDecodeError
 from typing import Union, Callable, Dict, List, Iterable, Tuple, Optional, Any, Set
 
 import numpy as np
@@ -30,22 +31,39 @@ critical_keys = ['kickv', 'kickh', 'idx']
 #     return filtered_signal
 
 class Util:
-
     @staticmethod
     def load_folders(folders):
-        """ Load folders with kick data into lists """
+        """ Load folders with kick data into lists and check for config """
         files_ll = []
         props_dicts = []
-        for folder in folders:
-            fs = sorted(list(folder.glob('*.hdf5')))
-            print(f'{folder} - {len(fs)} files')
-            files_ll.append(fs)
 
-            props_fpath = folder / 'analysis_props.txt'
-            props = {}
-            if props_fpath.exists():
-                with props_fpath.open('r') as f:
-                    props = json.load(f)
+        def parse(p):
+            if p.exists():
+                with p.open('r') as f:
+                    try:
+                        d = json.load(f)
+                        return d
+                    except JSONDecodeError:
+                        logger.error(f'JSON file {p} failed to parse, ignoring')
+                        return {}
+
+        for folder in folders:
+            # Return in name sorted order - should be time ordered too since all names have timestamp
+            fs = sorted(list(folder.glob('*.hdf5')))
+            files_ll.append(fs)
+            # Options for analysis
+            props_fpath = folder / 'analysis_props.json'
+            props_fpath2 = folder / 'analysis_props_manual.json'
+
+            props = parse(props_fpath)
+            props2 = parse(props_fpath2)
+            if props or props2:
+                # Manual overrides auto generated values
+                logger.info(f'{folder} - {len(fs)} files (cfg LOADED - {len(props)} gen + {len(props2)} manual keys)')
+                props.update(props2)
+            else:
+                # No config
+                logger.info(f'{folder} - {len(fs)} files')
             props_dicts.append(props)
         return files_ll, props_dicts
 
@@ -881,7 +899,7 @@ class Kick:
             else:
                 # Use NAFF trims
                 fft_freq, fft_power = naff.fft(self.get_bpm_data(bpm, no_trim=True))
-            #fft_freq, fft_power = naff.fft(self.get(bpm))
+            # fft_freq, fft_power = naff.fft(self.get(bpm))
             self.df[bpm + self.Datatype.FFT_FREQ.value] = [fft_freq]
             self.df[bpm + self.Datatype.FFT_POWER.value] = [fft_power]
 
@@ -944,7 +962,7 @@ class Kick:
 class KickSequence:
     BPMS_ACTIVE = []
 
-    def __init__(self, kicks: list, demean=True):
+    def __init__(self, kicks: list, demean=True, eid=None):
         self.kicks = kicks
         # dflist = [k.df for k in self.kicks]
         # self.df = pd.concat(dflist)
@@ -959,6 +977,7 @@ class KickSequence:
         self.kicksV = self.df.loc[:, 'kickv']
         self.kicksH = self.df.loc[:, 'kickh']
         self.naff = None
+        self.id = eid or 'GenericKS'
 
         # demean data
         # if demean:
@@ -981,7 +1000,9 @@ class KickSequence:
         """
         Checks if certain state parameters are the same for all kicks.
         Includes all standard elements + RF. Some categories can be disabled when differences are expected.
+        :param quadrupoles:
         :param skewquads: Combined skewquads+HV correctors
+        :param correctors:
         :param skew_tol: Tolerance in skew quads - necessary because these are virtual devices with resolution jitter
         :param sextupoles: Sextupoles
         :param octupoles: Octupoles
@@ -990,6 +1011,7 @@ class KickSequence:
         :param bad_word_keys: List of bad words
         :return:
         """
+        logger.info(f'Checking ({self.id}) states')
         invariant_devices = iota.DIPOLES.ALL_I + \
                             ['N:IRFLLA', 'N:IRFMOD', 'N:IRFEAT', 'N:IRFEPC'] + \
                             ['N:IKPSVX', 'N:IKPSVD']
@@ -1027,16 +1049,17 @@ class KickSequence:
                     # Scan all kicks for each key
                     values = [sd[key] for (kick, sd) in zip(kicks, sd_list)]
                     mask = f(key, values)
-                    #print(key, mask)
+                    # print(key, mask)
                     if any(mask):
                         abort = True
-                        #uniques, counts, idxs = np.unique()
+                        # uniques, counts, idxs = np.unique()
                         ok_tuples = [(kick.idx, sd[key]) for (kick, sd, m) in zip(kicks, sd_list, mask) if not m]
-                        bad_tuples = [(kick.idx, sd[key], kick.kickh, kick.kickv) for (kick, sd, m) in zip(kicks, sd_list, mask) if m]
+                        bad_tuples = [(kick.idx, sd[key], kick.kickh, kick.kickv) for (kick, sd, m) in
+                                      zip(kicks, sd_list, mask) if m]
                         logger.error(f'{key} inconsistent')
-                        logger.error(f'OK:{ok_tuples}')
-                        logger.error(f'BAD:{bad_tuples}')
-                        #return True
+                        logger.error(f'>OK:{ok_tuples}')
+                        logger.error(f'>BAD:{bad_tuples}')
+                        # return True
                 # for kick, sd in zip(kicks, sd_list):
                 #     def f(k, v1, v2):
                 #         dev = k.split('.')[0]
@@ -1053,12 +1076,12 @@ class KickSequence:
                 #         abort = True
                 #         logger.error(f'Kick {kick.idx} is not consistent: delta {delta}')
             return abort
-            #return False
+            # return False
 
         # Sanity checks
         times = [k.state('aq_timestamp') for k in kicks]
         assert all(np.diff(times) > 0)  # All in order
-        assert max(times)-min(times) < 3600  # 1 hour delta max
+        assert max(times) - min(times) < 3600  # 1 hour delta max
         seq_nums = [k.state('N:EA5TRG.READING') for k in kicks]
         assert all(np.diff(seq_nums) > 0)  # Counter counting up
 
@@ -1082,11 +1105,12 @@ class KickSequence:
         # Skewquads
         if skewquads: check_category([k.get_skewquads() for k in kicks])
         # Orbit
-        if correctors: check_category([k.get_correctors(include_physical=True)for k in kicks])
+        if correctors: check_category([k.get_correctors(include_physical=True) for k in kicks])
         # Sextupoles
         if sextupoles: check_category([k.get_sextupoles() for k in kicks])
         # Octupoles
-        if octupoles: check_category([{dev: k.state(dev + '.SETTING') for dev in iota.OCTUPOLES.ALL_CURRENTS} for k in kicks])
+        if octupoles: check_category(
+            [{dev: k.state(dev + '.SETTING') for dev in iota.OCTUPOLES.ALL_CURRENTS} for k in kicks])
         # NL
         if nl: check_category([{dev: k.state(dev + '.SETTING') for dev in iota.DNMAGNET.ALL_CURRENTS} for k in kicks])
         # Abort if any fail
@@ -1137,19 +1161,23 @@ class KickSequence:
     def remove_kicks(self, kick_ids: List[Union[int, Kick]]):
         """
         Remove specified kicks from sequence
-        :param kick_ids: Kick id or object itself
+        :param kick_ids: Kick ids or objects themselves
         """
+        removed_list = []
         for kid in kick_ids:
             if isinstance(kid, int):
                 try:
                     k = self.get_kick(kid)
                 except:
+                    logger.warning(f'Kick ({kid}) not found in KS ({self.id}) - ignoring')
                     continue
             elif isinstance(kid, Kick):
                 k = kid
             else:
-                raise Exception
+                raise Exception(f'Unrecognized kick identified ({kid})')
             self.kicks.remove(k)
+            removed_list.append(k.idx)
+        logger.info(f'Removed kicks ({removed_list}) from ({self.id})')
         self.update_df()
 
     def __getitem__(self, item: int) -> Kick:
