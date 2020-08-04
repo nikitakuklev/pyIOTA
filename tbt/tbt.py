@@ -1,6 +1,7 @@
 import copy
 import enum
 import itertools
+import json
 import logging
 from typing import Union, Callable, Dict, List, Iterable, Tuple, Optional, Any, Set
 
@@ -27,6 +28,26 @@ critical_keys = ['kickv', 'kickh', 'idx']
 #     B, A = butter(1, cutoff / (fs / 2), btype='low')
 #     filtered_signal = filtfilt(B, A, signal, axis=0)
 #     return filtered_signal
+
+class Util:
+
+    @staticmethod
+    def load_folders(folders):
+        """ Load folders with kick data into lists """
+        files_ll = []
+        props_dicts = []
+        for folder in folders:
+            fs = sorted(list(folder.glob('*.hdf5')))
+            print(f'{folder} - {len(fs)} files')
+            files_ll.append(fs)
+
+            props_fpath = folder / 'analysis_props.txt'
+            props = {}
+            if props_fpath.exists():
+                with props_fpath.open('r') as f:
+                    props = json.load(f)
+            props_dicts.append(props)
+        return files_ll, props_dicts
 
 
 class Kick:
@@ -1010,8 +1031,11 @@ class KickSequence:
                     if any(mask):
                         abort = True
                         #uniques, counts, idxs = np.unique()
-                        logger.error(f'{key} inconsistent, OK:{[(kick.idx, sd[key]) for (kick, sd, m) in zip(kicks, sd_list, mask) if not m]} '
-                                     f'BAD: {[(kick.idx, sd[key]) for (kick, sd, m) in zip(kicks, sd_list, mask) if m]}')
+                        ok_tuples = [(kick.idx, sd[key]) for (kick, sd, m) in zip(kicks, sd_list, mask) if not m]
+                        bad_tuples = [(kick.idx, sd[key], kick.kickh, kick.kickv) for (kick, sd, m) in zip(kicks, sd_list, mask) if m]
+                        logger.error(f'{key} inconsistent')
+                        logger.error(f'OK:{ok_tuples}')
+                        logger.error(f'BAD:{bad_tuples}')
                         #return True
                 # for kick, sd in zip(kicks, sd_list):
                 #     def f(k, v1, v2):
