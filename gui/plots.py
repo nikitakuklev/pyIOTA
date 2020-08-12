@@ -225,16 +225,39 @@ def get_ax(fig=None, ax=None):
     return fig, ax
 
 
-def plot_floor_map(fig=None, ax=None, lattice: MagneticLattice = None, **kwargs):
+def plot_floor_map(fig=None,
+                   ax=None,
+                   lattice: MagneticLattice = None,
+                   monitors: List = None,
+                   legend: bool = False,
+                   **kwargs):
     fig, ax = get_ax(fig, ax)
+    if 'octupole_scaling' in kwargs:
+        maxh = kwargs['octupole_scaling']
+        octupoles = [el for el in lattice.sequence if isinstance(el, Octupole)]
+        max_str = max(el.k3 for el in octupoles)
+        kwargs['octupoles_scale_factor'] = max_str
     for el in lattice.sequence:
         draw_element(ax, el, **kwargs)
+    if monitors:
+        for el in monitors:
+            draw_element(ax, el, **kwargs)
     ax.set_aspect('equal')
+    ax.set_xlabel('X (m)')
+    ax.set_ylabel('Y (m)')
+    xc = 0.0
+    yc = (max([el.o[1] for el in lattice.sequence])+min(el.o[1] for el in lattice.sequence))/2
+    if legend:
+        classes = [Quadrupole, SBend, Sextupole]
+        handles = []
+        for c in classes:
+            first_el = [el for el in lattice.sequence if isinstance(el, c)][0]
+            p0 = first_el.patches[0]
+            handles.append(p0)
+        ax.legend(handles=handles, labels=[c.__name__ for c in classes], loc='center', fontsize=16)
 
 
-def draw_element(ax, el: Element, draw_edges=True, debug=True):
-    x_list = [el.o[0], el.o[0] + el.v_ent_to_ext[0]]
-    y_list = [el.o[1], el.o[1] + el.v_ent_to_ext[1]]
+def draw_element(ax, el: Element, draw_edges=True, debug=True, **kwargs):
     # Transform global frame - move to element origin and rotate
     t = mpl.transforms.Affine2D().rotate(el.rot_v_ent).translate(el.o[0], el.o[1]) + ax.transData
     p_list = []
@@ -245,17 +268,32 @@ def draw_element(ax, el: Element, draw_edges=True, debug=True):
     pkw = {'ec': ec, 'lw': lw_element_edge}
 
     if isinstance(el, Drift):
-        ax.plot(x_list, y_list, '-', c='k', lw=lw_orbit)
+        x_list = [el.o[0], el.o[0] + el.v_ent_to_ext[0]]
+        y_list = [el.o[1], el.o[1] + el.v_ent_to_ext[1]]
+        ax.plot(x_list, y_list, '-', c='k', lw=lw_orbit, zorder=1)
     elif isinstance(el, SBend):
         h = 0.4
         r = np.abs(el.l / el.angle)
         a1 = 90 - el.angle * 180 / np.pi
-        p2 = patches.Arc((0, -r), 2 * r, 2 * r, theta1=a1, theta2=90, color="k", lw=4.0)
+        p2 = patches.Arc((0, -r), 2 * r, 2 * r, theta1=a1, theta2=90, color="k", lw=4.0, zorder=1)
         p = arc_patch((0, -r), 2 * r, 2 * r, theta1=a1, theta2=90, color="blue", alpha=0.80, **pkw)
         p_list.append(p)
         p_list.append(p2)
+    elif isinstance(el, Monitor):
+        h = 0.3
+        l = 0.05
+        # Back off by half the virtual bpm length to center box
+        # t2 = mpl.transforms.Affine2D().rotate(el.rot_v_ent)
+        # t2 = t2.translate(el.o[0] - el.v_ext[0] * l / 2, el.o[1] - el.v_ext[1] * l / 2) + ax.transData
+        p = patches.Rectangle((-l/2, -h / 2), l, h, color="gray", alpha=0.90, **pkw)
+        p_list.append(p)
+        h = 1.0
+        p_list.append(patches.Rectangle((0, -h / 2), 0, h, color="k", alpha=0.80, **pkw))
+        p_list.append(p)
     else:
-        ax.plot(x_list, y_list, '-', c='k', lw=lw_orbit)
+        x_list = [el.o[0], el.o[0] + el.v_ent_to_ext[0]]
+        y_list = [el.o[1], el.o[1] + el.v_ent_to_ext[1]]
+        ax.plot(x_list, y_list, '-', c='k', lw=lw_orbit, zorder=1)
         if isinstance(el, Quadrupole) and el.id.startswith('Q'):
             h = 0.5
             p = patches.Rectangle((0, -h / 2), el.l, h, color="green", alpha=0.80, **pkw)
@@ -268,9 +306,14 @@ def draw_element(ax, el: Element, draw_edges=True, debug=True):
             h = 0.3
             p = patches.Rectangle((0, -h / 2), el.l, h, color="purple", alpha=0.80, **pkw)
             p_list.append(p)
-        elif isinstance(el, Monitor):
-            h = 0.3
-            p = patches.Rectangle((0, -h / 2), el.l, h, color="gray", alpha=0.90, **pkw)
+        elif isinstance(el, Octupole):
+            ocp_maxh = kwargs.get('octupole_scaling', None)
+            ocp_sc = kwargs.get('octupoles_scale_factor', None)
+            if ocp_maxh and ocp_sc:
+                h = ocp_maxh * el.k3/ocp_sc if el.k3 != 0.0 else 0.2
+            else:
+                h = 0.2
+            p = patches.Rectangle((0, -h / 2), el.l, h, color="orange", alpha=0.80, **pkw)
             p_list.append(p)
 
     if debug:
@@ -278,8 +321,14 @@ def draw_element(ax, el: Element, draw_edges=True, debug=True):
         p_list.append(patches.Rectangle((0, -h / 2), 0, h, color="k", alpha=0.80, **pkw))
 
     for p in p_list:
-        p.set_transform(t)
-        ax.add_patch(p)
+        if isinstance(p, tuple):
+            p[0].set_transform(p[1])
+            ax.add_patch(p[0])
+        else:
+            p.set_transform(t)
+            ax.add_patch(p)
+
+    el.patches = p_list
 
 
 def arc_patch(center, w, h, theta1, theta2, resolution=50, t_out=0.2, t_in=0.2, **kwargs):

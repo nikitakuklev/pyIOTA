@@ -139,7 +139,7 @@ class LatticeContainer:
                            new_type: Type[Element],
                            verbose: bool = False) -> LatticeContainer:
         """
-        Transmutes element type to new one. Only length and id are preserved.
+        Transmutes element type to new one. Only length and id are preserved. Refs are transferred.
         :param elements: Elements to transmute
         :param new_type: New element type
         :param verbose:
@@ -170,7 +170,12 @@ class LatticeContainer:
                 seq[i] = new_el
                 if verbose: print(f'Transmuted ({new_el.id}) at pos ({i}) from ({matches[0].__class__.__name__}) '
                                   f'to ({seq[i].__class__.__name__})')
+                # Preserve references
+                for m in self.monitors:
+                    if m.ref_el == target:
+                        m.ref_el = new_el
         assert l_seq == len(seq)
+
         # if not self.silent: print(f'Transmuted ({len(elements)}) elements')
         if not self.silent: logger.info(f'Transmuted ({len(elements)}) elements')
         return self

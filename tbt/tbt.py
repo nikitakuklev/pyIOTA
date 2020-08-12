@@ -10,7 +10,6 @@ import numpy as np
 import pyIOTA.acnet
 import pyIOTA.iota.run2
 import pyIOTA.iota.run2 as iota
-import scipy as sc
 import pandas as pd
 
 # special_keys = ['idx', 'kickv', 'kickh', 'state', 'custom']
@@ -32,8 +31,8 @@ critical_keys = ['kickv', 'kickh', 'idx']
 
 class Util:
     @staticmethod
-    def load_folders(folders):
-        """ Load folders with kick data into lists and check for config """
+    def check_folders(folders):
+        """ Check folders with kick data into lists """
         files_ll = []
         props_dicts = []
 
@@ -759,9 +758,9 @@ class Kick:
         :param method: Peak finding method - NAFF or FFT
         :param families: Families to perform calculation on - typically H, V, or C
         :param selector: Function that picks correct peak from list
-        :param search_kwargs: Method specific extra parameters to be used in the search,
+        :param search_kwargs: Method specific extra parameters to be used in the search
         :param use_precalculated:
-        :param data_trim: Trim override
+        :param data_trim: Trim override - if not provided, use whatever NAFF object has
         :param pairs:
         :return:
         """
@@ -827,30 +826,33 @@ class Kick:
             # Requires H and V simultaneously
             bpmsh = self.get_bpms(families[0])
             bpmsv = self.get_bpms(families[1])
-            for bpmh, bpmv in zip(bpmsh, bpmsv):
+            for bh, bv in zip(bpmsh, bpmsv):
                 if method == 'NAFF':
                     n_components = search_kwargs.get('n_components', 2)
+                    # Allow for variations in H/V component number
+                    if isinstance(n_components, int):
+                        n_components = (n_components, n_components)
                     results = []
-                    for bpm in [bpmh, bpmv]:
+                    for bpm, nc in zip([bh, bv], n_components):
                         if data_trim:
                             # Use provided trims
                             nfresult = naff.run_naff(self.get_bpm_data(bpm, no_trim=True)[data_trim],
-                                                     n_components=n_components, data_trim=np.s_[:])
+                                                     n_components=nc, data_trim=np.s_[:])
                         else:
                             # Use NAFF trims
-                            nfresult = naff.run_naff(self.get_bpm_data(bpm, no_trim=True), n_components=n_components)
+                            nfresult = naff.run_naff(self.get_bpm_data(bpm, no_trim=True), n_components=nc)
                         peaks[bpm] = ([n[0] for n in nfresult], nfresult)
-                        results.append(([n[0] for n in nfresult], nfresult))
+                        results.append(peaks[bpm])
                     if selector:
-                        nux, nuy = selector(self, results, (bpmh, bpmv), search_kwargs)
-                        self.df[bpmh + self.Datatype.NU.value] = nux
-                        self.df[bpmv + self.Datatype.NU.value] = nuy
+                        nux, nuy = selector(self, results, (bh, bv), search_kwargs)
+                        self.df[bh + self.Datatype.NU.value] = nux
+                        self.df[bv + self.Datatype.NU.value] = nuy
                         average_tunes[families[0]].append(nux)
                         average_tunes[families[1]].append(nuy)
                     else:
                         raise Exception('NAFF tune requires a selector method!')
                 else:
-                    raise Exception
+                    raise Exception('For pair peak finding, only NAFF implemented')
         # self.fft_freq = freq
         # self.fft_pwr = pwr
         self.peaks = peaks
