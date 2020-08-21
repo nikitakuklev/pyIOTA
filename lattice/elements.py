@@ -180,9 +180,11 @@ class LatticeContainer:
         if not self.silent: logger.info(f'Transmuted ({len(elements)}) elements')
         return self
 
-    def split_elements(self, elements: Union[Element, Iterable[Element]], n_parts: int = 2) -> LatticeContainer:
+    def split_elements(self, elements: Union[Element, Iterable[Element]], n_parts: int = 2,
+                       return_new_elements: bool = False) -> Union[LatticeContainer, List]:
         """
         Splits elements into several parts, scaling parameters appropriately
+        :param return_new_elements: Instead of box, return list of all new elements
         :param elements: Element or list of elements to be split
         :param n_parts: Number of parts to split into
         :return: LatticeContainer
@@ -198,6 +200,7 @@ class LatticeContainer:
 
         scaled_parameters = ['l', 'k1', 'k2', 'k3', 'k4']
         seq_new = seq.copy()
+        added_elements = []
         for el in elements:
             el_list = [deepcopy(el) for i in range(n_parts)]
             for i, e in enumerate(el_list):
@@ -208,12 +211,16 @@ class LatticeContainer:
             idx = seq_new.index(el)
             seq_new.remove(el)
             seq_new[idx:idx] = el_list  # means insert here
+            added_elements.append(el_list)
         assert len(seq_new) == len(seq) + len(elements) * (n_parts - 1)
         if not self.silent:
             logger.info(f'Split elements ({[el.id for el in elements]}) into ({n_parts}) parts - seq length'
                         f' ({len(seq)}) -> ({len(seq_new)})')
         self.lattice.sequence = seq_new
-        return self
+        if return_new_elements:
+            return added_elements
+        else:
+            return self
 
     def insert_elements(self,
                         elements: Union[Element, Iterable[Element]],
@@ -492,6 +499,20 @@ class LatticeContainer:
 
     # Getters/setters
 
+    def at(self, s):
+        """ Get all elements at position s """
+        assert 0.0 <= s <= self.lattice.totalLen
+        spans = {el: (el.s_start, el.s_end) for el in self.lattice.sequence}
+        selection = []
+        for k, (s1, s2) in spans.items():
+            # Select thin elements exactly at s, and any thick ones that are on top or start there
+            if (k.l == 0.0 and s1 == s2 and np.isclose(s1, s))\
+                    or np.isclose(s1, s)\
+                    or (s1 <= s < s2 and not np.isclose(s, s2)):
+                selection.append(k)
+            #print(s1,s,s2)
+        return selection
+
     def get_first(self,
                   el_name: str = None,
                   el_type: Union[str, type] = None,
@@ -636,14 +657,17 @@ class LatticeContainer:
 
     # Conversion functions
 
-    def to_elegant(self, fpath: Path, lattice_options: Dict, dry_run: bool = False):
+    def to_elegant(self, fpath: Path = None, lattice_options: Dict = None, dry_run: bool = False):
         """
         Calls elegant submodule library to produce elegant lattice.
         Should fail-fast if incompatible features are found.
         :return:
         """
         import pyIOTA.elegant as elegant
-        assert isinstance(fpath, Path) and isinstance(lattice_options, dict)
+        if fpath:
+            assert isinstance(fpath, Path)
+        if lattice_options:
+            assert isinstance(lattice_options, dict)
         wr = elegant.Writer(options=lattice_options)
         return wr.write_lattice_ng(fpath=fpath, box=self, save=not dry_run)
 
@@ -718,6 +742,7 @@ class NLLens(Element):
     cnll - dimensional parameter of lens [m]. The singularities of the potential are located at X=-cnll,+cnll and Y=0.
     tilt - tilt of lens in [rad]
     """
+
     def __init__(self, l=0., knll=0., cnll=0., tilt=0., eid=None):
         Element.__init__(self, eid)
         self.l = l
@@ -726,12 +751,12 @@ class NLLens(Element):
             raise Exception('Dimensional parameter of NLLens must be non-zero!')
         self.cnll = cnll
         self.tilt = tilt
-        self.k1 = 2.0*knll/(cnll*cnll) / l
+        self.k1 = 2.0 * knll / (cnll * cnll) / l
         # DN potential has no sextupolar component
         self.k2 = 0.0
         # There is octupolar field. Could be useful for KickTM.
         # knn/cn^2/bn /. knn -> knll/cnll^2 /. cn -> cnll /Sqrt[bn] = knll/cnll^4
-        self.k3 = 16.0*knll/(cnll*cnll*cnll*cnll) / l
+        self.k3 = 16.0 * knll / (cnll * cnll * cnll * cnll) / l
 
     def __str__(self):
         s = 'NLLens : '
@@ -749,27 +774,38 @@ class OctupoleInsert:
     A collection of octupoles for quasi-integrable insert that can be generated into a sequence
     """
 
-    def __init__(self):
+    def __init__(self, **kwargs):
         self.l0 = self.mu0 = None
         self.seq = []
-        pass
+        self.configure(**kwargs)
 
-    def configure(self, oqK=1.0, run=2, l0=1.8, mu0=0.3, otype=1, olen=0.07, nn=17):
+    def configure(self, oqK: float = 1.0, run: int = 2, l0: float = 1.8, mu0: float = 0.3, otype: int = 1,
+                  olen: float = 0.07, nn: int = 17, ospacing: float = None,
+                  current: float = None, tn=0.4, cn=0.01):
         """
-        Initializes QI configuration
-        :param l: #l0     = 1.8;        # length of the straight section
-        :param mu0: #mu0 = 0.3;  # phase advance over straight section
-        :param run: # which run configuration to use, 1 or 2
+        Initialize QI configuration. Notation matches that used in original MADX scripts.
+        :param tn:    #tn = 0.4  # strength of nonlinear lens
+        :param cn:    #cn = 0.01  # dimentional parameter of nonlinear lens
+        :param oqK:   Octupole strength scale factor
+        :param l0:    #l0     = 1.8;           # length of the straight section
+        :param mu0:   #mu0 = 0.3;  # phase advance over straight section
+        :param run:   # which run configuration to use, 1 or 2
         :param otype: # type of magnet (0) thin, (1) thick, only works for octupoles (ncut=4)
-        :param olen: #olen = 0.07  # length of octupole for thick option.must be < l0 / nn
-        :param nn: # number of nonlinear elements
+        :param olen:  #olen = 0.07  # length of octupole for thick option.must be < l0 / nn
+        :param nn:    # number of nonlinear elements
         """
         self.l0 = l0
         self.mu0 = mu0
-        tn = 0.4  # strength of nonlinear lens
-        cn = 0.01  # dimentional parameter of nonlinear lens
 
-        if run == 1:
+        if run is None:
+            # Ideal configuration
+            if ospacing:
+                oqSpacing = ospacing
+            else:
+                oqSpacing = (l0 - olen * nn) / nn
+            margin = 0.0
+            positions = l0 / nn * (np.arange(1, nn + 1) - 0.5)
+        elif run == 1:
             # Margins on the sides were present
             oqSpacing = 0.03325  # (1.8-0.022375-0.022375-17*0.07)/17
             margin = 0.022375  # extra margin at the start and end of insert
@@ -780,20 +816,26 @@ class OctupoleInsert:
             margin = 0.0
             positions = l0 / nn * (np.arange(1, nn + 1) - 0.5)
         else:
-            raise Exception
+            raise Exception(f"Run ({run}) is unrecognized")
 
         # musect = mu0 + 0.5
         f0, betae, alfae, betas = self.calculate_optics_parameters()
+        self.beta_star = betas
+        self.beta_edge = betae
+        self.alpha_edge = alfae
 
-        print(
-            f"QI optics: mu0:{mu0:.3f}|f0:{f0:.3f}|1/f0:{1 / f0:.3f}|"
-            f"betaedge:{betae:.3f}|alphaedge:{alfae:.3f}|betastar:{betas:.3f}")
+        #print(f"QI optics: mu0:{mu0:.3f}|f0:{f0:.3f}|1/f0:{1 / f0:.3f}|"
+        #      f"betaedge:{betae:.3f}|alphaedge:{alfae:.3f}|betastar:{betas:.3f}")
         # value, , oqK, nltype, otype;
 
-        self.seq = seq = []
-        seq.append(Drift(l=margin, eid='oQImargin'))
-        for i in range(1, nn + 1):
-            sn = positions[i - 1]
+        if current:
+            # Use current-based setting via central current
+            cal_factor = self.calculate_strength_factor(energy=100.0)
+            scale_factor = self.beta(positions)**-3 / self.beta_star**-3
+            k3_arr = current * cal_factor * scale_factor
+        else:
+            # Use DN formalism to derive k3 from t-strength
+            sn = positions
             bn = l0 * (1 - sn * (l0 - sn) / l0 / f0) / np.sqrt(1.0 - (1.0 - l0 / 2.0 / f0) ** 2)
             knn = tn * l0 / nn / bn ** 2
             cnll = cn * np.sqrt(bn)
@@ -801,14 +843,18 @@ class OctupoleInsert:
             k1 = knn * 2  # 1 * 2!
             k3 = knn / cn ** 2 / bn * 16  # 2 / 3 * 4!
             k3scaled = k3 * oqK
+            k3_arr = k3scaled / olen
 
+        self.seq = seq = []
+        seq.append(Drift(l=margin, eid='oQImargin'))
+        for i, k3 in zip(range(1, nn + 1), k3_arr):
             if otype == 1:
                 seq.append(Drift(l=oqSpacing / 2, eid=f'oQI{i:02}l'))
-                seq.append(Octupole(l=olen, k3=k3scaled / olen, eid=f'QI{i:02}'))
+                seq.append(Octupole(l=olen, k3=k3, eid=f'QI{i:02}'))
                 seq.append(Drift(l=oqSpacing / 2, eid=f'oQI{i:02}r'))
             elif otype == 0:
                 seq.append(Drift(l=oqSpacing / 2 + olen / 2, eid=f'oQI{i:02}l'))
-                seq.append(Multipole(kn=[0., 0., 0., k3scaled], eid=f'QI{i:02}'))
+                seq.append(Multipole(kn=[0., 0., 0., k3 * olen], eid=f'QI{i:02}'))
                 seq.append(Drift(l=oqSpacing / 2 + olen / 2, eid=f'oQI{i:02}r'))
             # value, i, bn, sn, k3, k3scaled, (betas ^ 3 / bn ^ 3);
         seq.append(Drift(l=margin, eid='oQImargin'))
@@ -837,6 +883,41 @@ class OctupoleInsert:
         alfae = l0 / 2.0 / f0 / np.sqrt(1.0 - (1.0 - l0 / 2.0 / f0) ** 2)
         betas = l0 * (1 - l0 / 4.0 / f0) / np.sqrt(1.0 - (1.0 - l0 / 2.0 / f0) ** 2)
         return f0, betae, alfae, betas
+
+    def calculate_strength_factor(self, energy=100.0):
+        """ Compute IOTA-specific scaling factor """
+        import scipy.constants
+        # Gradient 0.7kG/cm^3 @1A in IOTA octupoles
+        # cal_factor means K3 in m^-4 for 1A current in central octupole
+        cal_factor = (0.75 / 10 * 100 * 100 * 100) / (energy / (scipy.constants.c * 1e-6))
+        return cal_factor
+
+
+    def beta(self, s):
+        """ Return beta-function at position s in the insert """
+        assert np.all(0 <= s) and np.all(s <= self.l0)
+        s = s - self.l0 / 2
+        return self.beta_star + s * s / self.beta_star
+
+    def alpha(self, s):
+        """ Return alpha-function at position s in the insert """
+        assert np.all(0 <= s) and np.all(s <= self.l0)
+        s = s - self.l0 / 2
+        return -s / self.beta_star
+
+    def integral_invbeta3(self, s0, s1):
+        """ Computes integral of 1/beta^3 (i.e. integrated potential) based on Mathematica derivation """
+        assert s0 < s1
+        assert 0 < s0 < self.l0 and 0 < s1 < self.l0
+        s0 -= self.l0 / 2
+        s1 -= self.l0 / 2
+        l2 = self.l0 / 2
+        mu = self.mu0
+        bs = l2 / np.tan(mu * np.pi)
+        res = (-((bs * s0 * (5 * bs ** 2 + 3 * s0 ** 2)) / (bs ** 2 + s0 ** 2) ** 2) + (2 * bs ** 3 * s1) / (
+                    bs ** 2 + s1 ** 2) ** 2 + (3 * bs * s1) / (bs ** 2 + s1 ** 2) - 3 * np.arctan(
+            s0 / bs) + 3 * np.arctan(s1 / bs)) / (8. * bs ** 2)
+        return res
 
     def set_current(self):
         pass
@@ -867,8 +948,8 @@ class NLInsert:
         self.l0 = l0
         self.mu0 = mu0
         tn = t
-        #tn = 0.4  # strength of nonlinear lens
-        #cn = 0.01  # dimentional parameter of nonlinear lens
+        # tn = 0.4  # strength of nonlinear lens
+        # cn = 0.01  # dimentional parameter of nonlinear lens
 
         if run == 1:
             # Margins on the sides were present

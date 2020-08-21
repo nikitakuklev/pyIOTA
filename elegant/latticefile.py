@@ -381,7 +381,7 @@ class Writer:
             for el in octupoles:
                 if self._check_if_already_defined(el, elements): continue
                 sl.append(
-                    f'{el.id:<10}: KOCT, l={el.l}, k3={0:.10e},'
+                    f'{el.id:<10}: KOCT, l={el.l}, k3={el.k3:.10e},'
                     f' N_KICKS="oct_kicks", ISR="flag_isr", SYNCH_RAD="flag_synch"\n')
             sl.append('\n')
 
