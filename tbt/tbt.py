@@ -44,7 +44,7 @@ class Util:
                         return d
                     except JSONDecodeError:
                         logger.error(f'JSON file {p} failed to parse, ignoring')
-                        return {}
+            return {}
 
         for folder in folders:
             # Return in name sorted order - should be time ordered too since all names have timestamp
@@ -83,6 +83,7 @@ class Kick:
     def __init__(self,
                  df: pd.DataFrame,
                  kick_id: int = -1,
+                 id_offset: int = 0,
                  bpm_list: Optional[Iterable] = None,
                  parent_sequence: Optional['KickSequence'] = None,
                  file_name: str = None,
@@ -104,7 +105,10 @@ class Kick:
 
         self.df = df
         self.idx = kick_id
-        self.set('idx', kick_id)
+        self.idx_offset = id_offset
+        self.idxg = kick_id + id_offset
+        self.set('idx', self.idx)
+        self.set('idxg', self.idxg)
         self.ks = parent_sequence
         self.file_name = file_name
         self.matrix_cache = {}  # old way of caching BPM matrices
@@ -116,7 +120,8 @@ class Kick:
                 bpm_list = set([k[:-1] for k in pyIOTA.iota.run2.BPMS.ALLA])
                 logger.info(f'BPM list not specified - deducing ({len(bpm_list)}) IOTA BPMs: ({bpm_list})')
             else:
-                bpm_list = set([k[:-1] for k in df.columns if k not in special_keys])
+                bpm_list = set([k[:-1] for k in df.columns if k not in special_keys and k.endswith(('V','H','S','C'))])
+                print('WARN - deducing BPMs')
                 logger.info(f'BPM list not specified - deducing ({len(bpm_list)}) BPMs: ({bpm_list})')
 
         self.H = [i + "H" for i in bpm_list]
@@ -149,7 +154,7 @@ class Kick:
 
     def copy(self) -> 'Kick':
         df2 = self.df.copy(deep=True)
-        kick = Kick(df=df2, kick_id=self.idx, trim=self.trim, parent_sequence=self.ks)
+        kick = Kick(df=df2, kick_id=self.idx, id_offset=self.idx_offset, trim=self.trim, parent_sequence=self.ks)
         kick.H = self.H
         kick.V = self.V
         kick.S = self.S
@@ -165,7 +170,10 @@ class Kick:
         :param column:
         :param value:
         """
-        self.df.iloc[0, self.df.columns.get_loc(column)] = value
+        if column in self.df.columns:
+            self.df.iloc[0, self.df.columns.get_loc(column)] = value
+        else:
+            self.df.loc[:, column] = [value]
 
     def get(self, column: Union[str, int]):
         """
@@ -204,10 +212,10 @@ class Kick:
         return self.df.iloc[0, self.df.columns.get_loc('state')].copy()
 
     def summarize(self):
-        print(f'Kick {self.idx}: ({self.get_turns()}) turns at ({self.kickh:.5f})H ({self.kickv:.5f})V')
+        print(f'Kick idx ({self.idx}) idxglobal ({self.idxg}): ({self.get_turns()}) turns, trim ({self.trim}), at ({self.kickh:.5f})H ({self.kickv:.5f})V')
         self.bpms_summarize_status()
 
-    def set_trim(self, trim: Tuple):
+    def set_trim(self, trim: slice):
         self.trim = trim
 
     def reset_trim(self):
@@ -217,6 +225,7 @@ class Kick:
                      n_refturns: int = 50, verbose: bool = False, silent: bool = True):
         """
         Finds longest signal trim within constraints, based on local SNR
+        :param n_refturns: Initial signal interval past minidx to compare to
         :param min_idx: Starting index
         :param max_idx: Maximum end index
         :param threshold: Minimum signal fraction
@@ -414,11 +423,13 @@ class Kick:
     def get_tune_data(self, bpm: str):
         return self.fft_freq[bpm], self.fft_pwr[bpm], self.peaks[bpm]
 
-    def get_tunes(self, bpms: List[str]):
+    def get_tunes(self, bpms: List[str], i: int = None):
+        i = str(i) if i is not None else ''
+        i = '' if i == 1 else i
         if isinstance(bpms, str):
-            return self.get(bpms + self.Datatype.NU.value)
+            return self.get(bpms + self.Datatype.NU.value + i)
         else:
-            return (*[self.get(b + self.Datatype.NU.value) for b in bpms],)
+            return (*[self.get(b + self.Datatype.NU.value + i) for b in bpms],)
 
     # Import/export
 
@@ -674,6 +685,7 @@ class Kick:
                                  method: str = 'std',
                                  threshold: int = 2,
                                  splits: int = 4,
+                                 data_region: slice = None,
                                  relative: bool = True):
         """
         Tests if first region of signal has specified property, optionally relative to the last region
@@ -683,6 +695,8 @@ class Kick:
         for k, signal in data.items():
             assert len(signal) >= splits
             split_signals = np.array_split(signal, splits)
+            if data_region:
+                split_signals[0] = signal[data_region]
             if method == 'std' or method == 'rms':
                 fun = np.std
             elif method == 'ptp':
@@ -699,7 +713,7 @@ class Kick:
                 val1, val2 = fun(split_signals[0]), fun(split_signals[-1])
                 result = val1 / val2 > threshold
                 results[k] = result
-                results_data[k] = {'test': method + '_relative', 'values': (threshold, val1, val2, val1 / val2,)}
+                results_data[k] = {'test': method + '_relative', 'values': (threshold, val1, val2, val1 / val2)}
         return results, results_data
 
     # Helpers for state categories
@@ -964,7 +978,8 @@ class Kick:
 class KickSequence:
     BPMS_ACTIVE = []
 
-    def __init__(self, kicks: list, demean=True, eid=None):
+    def __init__(self, kicks: list, demean=True, eid=None, props=None):
+        #assert all(k.idx_offset == kicks[0].idx_offset[0] for k in kicks)
         self.kicks = kicks
         # dflist = [k.df for k in self.kicks]
         # self.df = pd.concat(dflist)
@@ -980,6 +995,7 @@ class KickSequence:
         self.kicksH = self.df.loc[:, 'kickh']
         self.naff = None
         self.id = eid or 'GenericKS'
+        self.props = props or {}
 
         # demean data
         # if demean:
@@ -1160,7 +1176,7 @@ class KickSequence:
             self.kicks.remove(k)
         self.update_df()
 
-    def remove_kicks(self, kick_ids: List[Union[int, Kick]]):
+    def remove_kicks(self, kick_ids: List[Union[int, Kick]], local: bool = True):
         """
         Remove specified kicks from sequence
         :param kick_ids: Kick ids or objects themselves
@@ -1169,7 +1185,7 @@ class KickSequence:
         for kid in kick_ids:
             if isinstance(kid, int):
                 try:
-                    k = self.get_kick(kid)
+                    k = self.get_kick(kid, local=local)
                 except:
                     logger.warning(f'Kick ({kid}) not found in KS ({self.id}) - ignoring')
                     continue
@@ -1195,23 +1211,35 @@ class KickSequence:
             raise IndexError(f'Sequence has ({len(self.kicks)}) kicks, so ({item}) out of bounds')
         return self.kicks[item]
 
-    def get_kick(self, kick_id: int) -> Kick:
+    def summarize(self):
+            kv = [k.kickv for k in self.kicks]
+            kh = [k.kickh for k in self.kicks]
+            print(f'KickSequence ({self.id}): ({len(self.kicks)}) kicks, max H ({max(kh):.5f}), max V ({max(kv):.5f})')
+            print(f'Config dictionary: {self.props}')
+
+    def get_kick(self, kick_id: int, local: bool = False) -> Kick:
         """
         Gets kick object in this KickSequence with specified index
         :param kick_id: Kick integer id
         :return: Kick object
         """
-        if kick_id not in self.df.idx.values:
-            raise Exception(f'Kick id ({kick_id}) not in sequence')
-        df_row = self.df.loc[self.df.idx == kick_id]
+        if local:
+            indices = self.df.idx
+        else:
+            indices = self.df.idxg
+        tp = 'local' if local else 'global'
+        if kick_id not in indices.values:
+            raise Exception(f'Kick ({tp}) id ({kick_id}) not found - have ({indices.values})')
+        df_row = self.df.loc[indices == kick_id]
         if df_row.shape[0] != 1:
-            raise Exception(f'Kick id ({kick_id}) did not yield unique kick - result size is ({df_row.shape})')
+            raise Exception(f'Kick ({tp}) id ({kick_id}) is not unique - result size is ({df_row.shape})')
         else:
             return df_row.iloc[0, self.df.columns.get_loc('kick')]
 
-    def get_tune_data(self, families: Union[List[str], str], filter_fun: Callable = None):
+    def get_tune_data(self, families: Union[List[str], str], filter_fun: Callable = None, i: int = None):
         """
         Get previously computed tune data (mean and std) for the specified families.
+        :param i: Which result set to return
         :param families:
         :return:
         """
@@ -1227,8 +1255,8 @@ class KickSequence:
         kicksh = np.array([k.kickh for k in kicks])
         kicksv = np.array([k.kickv for k in kicks])
         for family in families:
-            tunes = np.mean([k.get_tunes(k.get_bpms(family=family)) for k in kicks], axis=1)
-            tunes_std = np.std([k.get_tunes(k.get_bpms(family=family)) for k in kicks], axis=1)
+            tunes = np.mean([k.get_tunes(k.get_bpms(family=family), i=i) for k in kicks], axis=1)
+            tunes_std = np.std([k.get_tunes(k.get_bpms(family=family), i=i) for k in kicks], axis=1)
             nu.append(tunes)
             sig.append(tunes_std)
         return (kicksh, kicksv), nu, sig
@@ -1238,7 +1266,7 @@ class KickSequence:
 
     def update_df(self):
         dflist = [k.df for k in self.kicks]
-        index = [k.idx for k in self.kicks]
+        index = [k.idxg for k in self.kicks]
         self.df = pd.concat(dflist).sort_values(['kickv', 'kickh'])
         self.df.index = index
 

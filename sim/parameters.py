@@ -15,6 +15,7 @@ class Parser:
         pass
 
     def parse(self, file: Path):
+        """ Parse filename to extract parameters """
         roots = str(file.name).split('__')
         assert len(roots) == 2
         sim_name = roots[0]
@@ -28,7 +29,10 @@ class Parser:
         values = []
         for v in values_temp:
             try:
-                values.append(float(v))
+                if '.' in v and 'e' in v and ('+' in v or '-' in v):
+                    values.append(float(v))
+                else:
+                    values.append(int(v))
             except ValueError:
                 values.append(v)
         d = {k: v for (k, v) in zip(keys, values)}
@@ -36,6 +40,7 @@ class Parser:
         return d
 
     def parse_list(self, name_list):
+        """ Parse list of filenames """
         data_dicts = []
         for name in name_list:
             data_dicts.append(self.parse(name))

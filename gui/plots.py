@@ -119,11 +119,21 @@ def plot_simple_grid(*args,
                      demean: bool = False,
                      normalize: bool = False,
                      paired_bpm_mode: bool = False,
-                     fontsize: int = 10):
+                     fontsize: int = 10,
+                     scatter: bool = False,
+                     colorbar: bool = False,
+                     no_title_idx=True,
+                     no_title=False,
+                     sharey=True,
+                     sharex=True,
+                     **kwargs):
     """
     Plot a grid of data sharing x/y axes. Each top level argument creates a new plot grid.
-    Each argument must be a dict or list of dicts. One plot per each entry (after flattening) is produced.
-    All entries my either be arrays (Y), or 2-tuples of arrays (X,Y)
+    Each argument must be a dict or list of dicts or list of arrays or list of tuples.
+    One multi plot per each argument (after flattening) is produced.
+    All lowest level entries must either be arrays (Y), or 2/3-tuples of arrays (X,Y,{Z})
+    Example: {'1': [(x1,y1),(x2,y2)],'2':[(x1,y1),(x2,y2)]} makes 2x1 grid with 2 lines each
+    :param scatter: Toggle scatter plot - requires Z
     :param normalize:
     :param demean: Whether to demean Y data
     :param paired_bpm_mode: IOTA specific - special mode to plot left-right BPM pairs in same columns
@@ -135,7 +145,7 @@ def plot_simple_grid(*args,
     ax_l = []
     for entry in args:
         if isinstance(entry, list):
-            if all(isinstance(v, np.ndarray) for v in entry):
+            if all(isinstance(v, (np.ndarray, pd.Series)) for v in entry):
                 # Have list of arrays
                 entry = {i: v for i, v in enumerate(entry)}
             elif all(isinstance(v, tuple) for v in entry):
@@ -144,17 +154,23 @@ def plot_simple_grid(*args,
             else:
                 # Have list of dicts
                 entry = {k: v for d in entry for k, v in d.items()}
+        elif isinstance(entry, tuple):
+            entry = {1: entry}
         if not isinstance(entry, dict):
-            raise Exception(f'Supplied argument is not a dict: {entry.__class__}')
+            raise Exception(f'Supplied argument is not a dict: {entry}')
         if len(entry) == 0:
             logger.warning('Skipping empty plot')
             continue
         n_rows = math.ceil(len(entry) / nperrow)
         width = nperrow if n_rows > 1 else len(entry)
         fig, ax = plt.subplots(n_rows, width, figsize=(sizes[0] * width, sizes[1] * n_rows),
-                               sharex=True, sharey=True)
+                               sharex=sharex, sharey=sharey)
         fig_l.append(fig)
-        ax_l.append(ax.flatten())
+        # ax_l.append(ax.flatten())
+        if n_rows == width == 1:
+            ax = np.array([[ax]])
+        ax_l.append(ax)
+        # print([ax])
         if paired_bpm_mode:
             keys = [k for k in entry.keys()]
             roots = [k[:-2] for k in keys]
@@ -176,35 +192,68 @@ def plot_simple_grid(*args,
             tuples_list = []
             for i, (k, v) in enumerate(entry.items()):
                 if isinstance(v, tuple):
-                    if all(isinstance(v2, np.ndarray) for v2 in v):
+                    # Tuple of things
+                    if all(isinstance(v2, (np.ndarray, pd.Series, list)) for v2 in v):
+                        # Single (x,y,z) tuple
                         x = v[0]
                         y = v[1]
-                        tuples_list.append(([x], [y], k))
+                        z = v[2] if len(v) == 3 else None
+                        tuples_list.append(([x], [y], [z], k))
                     else:
+                        # Tuple of (x,y,z) tuples
+                        assert all(len(v2) == 2 for v2 in v) or all(len(v2) == 3 for v2 in v)
                         x = [v2[0] if not isinstance(v2, np.ndarray) else np.arange(len(v)) for v2 in v]
                         y = [v2[1] if not isinstance(v2, np.ndarray) else v2 for v2 in v]
-                        tuples_list.append((x, y, k))
+                        z = [v2[2] if not isinstance(v2, np.ndarray) and len(v2) == 3 else None for v2 in v]
+                        tuples_list.append((x, y, z, k))
                 elif isinstance(v, list):
-                    x = [v2[0] if not isinstance(v2, np.ndarray) else np.arange(len(v2)) for v2 in v]
-                    y = [v2[1] if not isinstance(v2, np.ndarray) else v2 for v2 in v]
-                    tuples_list.append((x, y, k))
+                    # List of things
+                    if all(isinstance(v2, (np.ndarray, pd.Series)) for v2 in v):
+                        # List of arrays y
+                        x = [np.arange(len(v2)) for v2 in v]
+                        y = [v2 for v2 in v]
+                        z = [None for v2 in v]
+                        tuples_list.append((x, y, z, k))
+                    else:
+                        # List of tuples (x,y,z)
+                        assert all(len(v2) == 2 for v2 in v) or all(len(v2) == 3 for v2 in v)
+                        x = [v2[0] if not isinstance(v2, np.ndarray) else np.arange(len(v2)) for v2 in v]
+                        y = [v2[1] if not isinstance(v2, np.ndarray) else v2 for v2 in v]
+                        z = [v2[2] if not isinstance(v2, np.ndarray) and len(v2) == 3 else None for v2 in v]
+                        tuples_list.append((x, y, z, k))
                 elif isinstance(v, np.ndarray):
+                    # Just have x
                     x = np.arange(len(v))
                     y = v
-                    tuples_list.append(([x], [y], k))
+                    tuples_list.append(([x], [y], [None], k))
                 else:
                     raise Exception(f'Unknown data type: ({type(v)})')
-                # tuples_list.append(((x, y), k))
+                if scatter:
+                    # must have z
+                    assert all(v[2] is not None for v in tuples_list)
+
             # global_max = np.max([np.max(v[1]) for v in tuples_list])
-            for i, (xl, yl, k) in enumerate(tuples_list):
-                for x, y in zip(xl, yl):
+            for i, (xl, yl, zl, k) in enumerate(tuples_list):
+                for x, y, z in zip(xl, yl, zl):
                     if demean:
                         y = y - np.nanmean(y)
                     if normalize:
                         from sklearn.preprocessing import minmax_scale
                         y = minmax_scale(y)  # (y-np.min(y))/np.linalg.norm(y-np.min(y))
-                    ax[i].plot(x, y)
-                ax[i].set_title(f"{i}|{k}", fontsize=fontsize)
+                    if scatter:
+                        if z is not None:
+                            s = ax[i].scatter(x, y, c=z, **kwargs)
+                        else:
+                            s = ax[i].scatter(x, y, **kwargs)
+                        if colorbar:
+                            fig.colorbar(s, ax=ax[i])
+                    else:
+                        ax[i].plot(x, y)
+                if not no_title:
+                    if no_title_idx:
+                        ax[i].set_title(f"{k}", fontsize=fontsize)
+                    else:
+                        ax[i].set_title(f"{i}|{k}", fontsize=fontsize)
     if len(args) == 1:
         fig = fig_l[0]
         ax = ax_l[0]
@@ -246,7 +295,7 @@ def plot_floor_map(fig=None,
     ax.set_xlabel('X (m)')
     ax.set_ylabel('Y (m)')
     xc = 0.0
-    yc = (max([el.o[1] for el in lattice.sequence])+min(el.o[1] for el in lattice.sequence))/2
+    yc = (max([el.o[1] for el in lattice.sequence]) + min(el.o[1] for el in lattice.sequence)) / 2
     if legend:
         classes = [Quadrupole, SBend, Sextupole]
         handles = []
@@ -285,7 +334,7 @@ def draw_element(ax, el: Element, draw_edges=True, debug=True, **kwargs):
         # Back off by half the virtual bpm length to center box
         # t2 = mpl.transforms.Affine2D().rotate(el.rot_v_ent)
         # t2 = t2.translate(el.o[0] - el.v_ext[0] * l / 2, el.o[1] - el.v_ext[1] * l / 2) + ax.transData
-        p = patches.Rectangle((-l/2, -h / 2), l, h, color="gray", alpha=0.90, **pkw)
+        p = patches.Rectangle((-l / 2, -h / 2), l, h, color="gray", alpha=0.90, **pkw)
         p_list.append(p)
         h = 1.0
         p_list.append(patches.Rectangle((0, -h / 2), 0, h, color="k", alpha=0.80, **pkw))
@@ -310,7 +359,7 @@ def draw_element(ax, el: Element, draw_edges=True, debug=True, **kwargs):
             ocp_maxh = kwargs.get('octupole_scaling', None)
             ocp_sc = kwargs.get('octupoles_scale_factor', None)
             if ocp_maxh and ocp_sc:
-                h = ocp_maxh * el.k3/ocp_sc if el.k3 != 0.0 else 0.2
+                h = ocp_maxh * el.k3 / ocp_sc if el.k3 != 0.0 else 0.2
             else:
                 h = 0.2
             p = patches.Rectangle((0, -h / 2), el.l, h, color="orange", alpha=0.80, **pkw)
