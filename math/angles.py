@@ -1,4 +1,5 @@
 import logging
+from typing import Union
 
 import math
 import numpy as np
@@ -70,7 +71,7 @@ def remove_integer_part(data, minval, maxval):
 
 
 class Wrapper:
-    def __init__(self, minval, maxval):
+    def __init__(self, minval: float, maxval: float):
         assert maxval > minval
         self.minval = minval
         self.maxval = maxval
@@ -79,31 +80,49 @@ class Wrapper:
         minval = minval or self.minval
         maxval = maxval or self.maxval
         assert maxval > minval
+
         span = maxval - minval
         #assert delta < (maxval - minval)
         ret = data + delta
         for i, v in enumerate(ret):
-            if v < minval:
-                ret[i] += span * math.ceil(abs((v-minval) / span))
-                #ret[i] += span
-            if v >= maxval:
-                #ret[i] -= span
-                ret[i] -= span * math.ceil(abs((v-maxval) / span))
-        if np.any((ret < minval) | (ret > maxval)):
-            raise Exception(f'Out of bounds encountered for add: ({delta}) ({minval}->{maxval}): {data} | {ret}')
+            if not np.isnan(v):
+                if v < minval:
+                    ret[i] += span * math.ceil(abs((v-minval) / span))
+                    #ret[i] += span
+                if v >= maxval:
+                    #ret[i] -= span
+                    ret[i] -= span * math.ceil(abs((v-maxval) / span))
+        # if isinstance(data, np.ndarray):
+        #     if np.any(not np.isnan(ret) & ((ret < minval) | (ret > maxval))):
+        #         raise Exception(f'Out of bounds encountered for add: ({delta}) ({minval}->{maxval}): {data} | {ret}')
+        # else:
+        if any(not math.isnan(v) and ((v < minval) or (v > maxval)) for v in ret):
+            bad_data = [v for v in ret if not math.isnan(v) and ((v < minval) or (v > maxval))]
+            raise Exception(f'Out of bounds results: ({delta}) ({minval}->{maxval}): {data} | {ret} | {bad_data}')
         return ret
 
-    def wrap(self, data, minval: float = None, maxval: float = None):
-        ret = data.copy()
+    def wrap(self, data: Union[float, list, np.ndarray], minval: float = None, maxval: float = None):
+        singleton = False
+        if isinstance(data, float):
+            ret = [data]
+            singleton = True
+        elif isinstance(data, (list, np.ndarray)):
+            ret = data.copy()
+        else:
+            raise Exception(f'Unrecognized data: {data}')
         minval = minval or self.minval
         maxval = maxval or self.maxval
         span = maxval - minval
         for i, v in enumerate(ret):
-            if v < minval:
-                ret[i] += span * abs(int(v / span))
-            if v >= maxval:
-                ret[i] -= span * abs(int(v / span))
-        return ret
+            if not np.isnan(v):
+                if v < minval:
+                    ret[i] += span * math.ceil(abs((v-minval) / span))
+                if v >= maxval:
+                    ret[i] -= span * math.ceil(abs((v-maxval) / span))
+        if singleton:
+            return ret[0]
+        else:
+            return ret
 
     def delta(self, data1, data2, minval: float = None, maxval: float = None):
         """

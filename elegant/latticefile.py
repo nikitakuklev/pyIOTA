@@ -19,6 +19,8 @@ class Writer:
         self.options = options or {}
         if 'add_limiting_aperture' not in self.options:
             self.options['add_limiting_aperture'] = True
+        if 'add_mal' not in self.options:
+            self.options['add_mal'] = True
         self.iota = None
         self.verbose = False
 
@@ -274,7 +276,9 @@ class Writer:
                          box: LatticeContainer,
                          debug: bool = True,
                          save: bool = False,
-                         add_limiting_aperture: bool = True):
+                         #add_limiting_aperture: bool = True,
+                         #add_misalignment_el: bool = True
+                         ):
         """
         Writes current lattice to the specified path. DEPRECATED.
         :param path: Full file path
@@ -462,8 +466,6 @@ class Writer:
                 sl.append(f"{el.id:<10}: ILMATRIX, l={el.l}, {', '.join(arg_string)}\n")
             sl.append('\n')
 
-
-
         # names = []
         # for el in markers:
         #     # name = pick_next_name(el['UNIQUENAME'], names)
@@ -477,13 +479,15 @@ class Writer:
         # f.write('IBSELE: IBSCATTER, VERBOSE=0\n')
         #sl.append('\n')
 
-        sl.append('RC: RECIRC \n')
-        sl.append('MAL: MALIGN \n')
-        sl.append('\n')
-        preamble = 'MAL, RC,'
+        preamble = ''
+        if opt.add_mal:
+            sl.append('RC: RECIRC \n')
+            sl.append('MAL: MALIGN \n')
+            sl.append('\n')
+            preamble += 'MAL, RC, '
 
         if opt.add_limiting_aperture:
-            preamble += ' MA1, APER,'
+            preamble += 'MA1, APER, '
             sl.append('!APERTURES\n')
             sl.append('!Default escape criterion is very large (10m), and there are timing issues with CLEAN\n')
             sl.append('!It needs change_t, which doesnt work for 4D tracking (when RF has not been setup)\n')
@@ -491,15 +495,22 @@ class Writer:
             sl.append('!Also add worst restriction point in ring (at IOR)\n')
             sl.append('!Will have to cut bucket escapes in post-processing\n')
             sl.append('!C0: CLEAN, DELTALIMIT=0.1\n')
+            xm, ym = 0.0381, 0.0381  # 1.5x aperture
+            print(f'Global aperture set at {xm:.5f}/{ym:.5f}')
             # f.write('MA1: MAXAMP, X_MAX=0.025, Y_MAX=0.025, ELLIPTICAL=1 \n')
             # f.write('MA1: MAXAMP, X_MAX=0.030, Y_MAX=0.030, ELLIPTICAL=1 \n')
             # f.write('APER: RCOL, X_MAX=0.007, Y_MAX=0.007 \n')
             # f.write('MA1: MAXAMP, X_MAX=0.050, Y_MAX=0.050, ELLIPTICAL=1 \n')
-            sl.append('MA1: MAXAMP, X_MAX=0.0381, Y_MAX=0.0381, ELLIPTICAL=1 \n')  # 1.5x aperture
+            # sl.append('MA1: MAXAMP, X_MAX=0.0381, Y_MAX=0.0381, ELLIPTICAL=1 \n')  # 1.5x aperture
             # f.write('APER: ECOL, X_MAX=0.008, Y_MAX=0.008 \n')
             # sl.append('APER: ECOL, X_MAX=0.005925, Y_MAX=0.00789 \n')  # 1.5x actual NL aperture
+            if xm == ym:
+                sl.append(f'MA1: MAXAMP, X_MAX={xm}, Y_MAX={ym} \n')
+            else:
+                sl.append(f'MA1: MAXAMP, X_MAX={xm}, Y_MAX={ym}, ELLIPTICAL=1 \n')
+
             if opt.aperture_scale != 1:
-                print(f'Lattice aperture scaled by ({opt.aperture_scale})')
+                print(f'Limiting aperture scaled by ({opt.aperture_scale})')
                 sl.append(f'! Limiting aperture scaled by ({opt.aperture_scale}) from actual\n')
                 sl.append(
                     f'APER: ECOL, X_MAX={3.9446881e-3 * opt.aperture_scale}, Y_MAX={5.25958413e-3 * opt.aperture_scale} \n')
