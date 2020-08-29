@@ -382,7 +382,7 @@ class Writer:
             sl.append('\n')
 
         if octupoles:
-            sl.append('!Nonlinear quasi-integrable insert - strengths set with param file later\n')
+            sl.append('!OCTUPOLES + quasi-integrable insert\n')
             for el in octupoles:
                 if self._check_if_already_defined(el, elements): continue
                 sl.append(
@@ -398,7 +398,7 @@ class Writer:
             sl.append('\n')
 
         if nllenses:
-            sl.append('!NL MAGNET\n')
+            sl.append('!Danilov-Nagaitsev nonlinear magnet\n')
             for el in nllenses:
                 if self._check_if_already_defined(el, elements): continue
                 sl.append(f'{el.id:<10}: EDRIFT, l={el.l}\n')

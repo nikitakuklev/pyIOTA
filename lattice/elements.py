@@ -198,7 +198,8 @@ class LatticeContainer:
         else:
             raise Exception(f'Both new and old parameters must be lists or Element')
 
-        scaled_parameters = ['l', 'k1', 'k2', 'k3', 'k4']
+        scaled_parameters = ['l']
+        preserved_parameters = ['k1', 'k2', 'k3', 'k4']  # Not k1l, etc.
         seq_new = seq.copy()
         added_elements = []
         for el in elements:
@@ -207,6 +208,9 @@ class LatticeContainer:
                 for s in scaled_parameters:
                     if hasattr(e, s):
                         setattr(e, s, getattr(e, s) / n_parts)
+                for s in preserved_parameters:
+                    if hasattr(e, s):
+                        setattr(e, s, getattr(e, s))
                 e.id = el.id + f'_{i}'
             idx = seq_new.index(el)
             seq_new.remove(el)
