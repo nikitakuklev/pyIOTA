@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-__all__ = ['LatticeContainer', 'NLLens', 'HKPoly', 'ILMatrix', 'OctupoleInsert', 'NLInsert']
+__all__ = ['LatticeContainer', 'NLLens', 'HKPoly', 'ILMatrix', 'OctupoleInsert', 'NLInsert', 'Recirculator']
 
 import logging
 from pathlib import Path
@@ -694,6 +694,14 @@ class HKPoly(Element):
         self.hkpoly_args = kwargs
 
 
+class Recirculator(Element):
+    """
+    RECIRC element for ELEGANT
+    """
+    def __init__(self, eid: str = None):
+        Element.__init__(self, eid)
+
+
 class ILMatrix(Matrix):
     """
     ILMATRIX element for ELEGANT
@@ -781,7 +789,7 @@ class OctupoleInsert:
 
     def configure(self, oqK: float = 1.0, run: int = 2, l0: float = 1.8, mu0: float = 0.3, otype: int = 1,
                   olen: float = 0.07, nn: int = 17, ospacing: float = None,
-                  current: float = None, tn=0.4, cn=0.01):
+                  current: float = None, tn=0.4, cn=0.01, debug: bool = False):
         """
         Initialize QI configuration. Notation matches that used in original MADX scripts.
         :param tn:    #tn = 0.4  # strength of nonlinear lens
@@ -892,7 +900,6 @@ class OctupoleInsert:
         cal_factor = (0.75 / 10 * 100 * 100 * 100) / (energy / (scipy.constants.c * 1e-6))
         return cal_factor
 
-
     def beta(self, s):
         """ Return beta-function at position s in the insert """
         assert np.all(0 <= s) and np.all(s <= self.l0)
@@ -918,6 +925,39 @@ class OctupoleInsert:
                     bs ** 2 + s1 ** 2) ** 2 + (3 * bs * s1) / (bs ** 2 + s1 ** 2) - 3 * np.arctan(
             s0 / bs) + 3 * np.arctan(s1 / bs)) / (8. * bs ** 2)
         return res
+
+    def integral_invbeta(self, s0, s1):
+        """ Computes integral of 1/beta (i.e. potential*detuning) based on Mathematica derivation """
+        assert s0 < s1
+        assert 0 < s0 < self.l0 and 0 < s1 < self.l0
+        s0 -= self.l0 / 2
+        s1 -= self.l0 / 2
+        l2 = self.l0 / 2
+        mu = self.mu0
+        bs = l2 / np.tan(mu * np.pi)
+        res = -np.arctan(s0/bs) + np.arctan(s1/bs)
+        return res
+
+    def integral_beta2(self, s0, s1):
+        """ Computes integral of beta^2 (i.e. detuning) based on Mathematica derivation """
+        assert s0 < s1
+        assert 0 < s0 < self.l0 and 0 < s1 < self.l0
+        s0 -= self.l0 / 2
+        s1 -= self.l0 / 2
+        l2 = self.l0 / 2
+        mu = self.mu0
+        bs = l2 / np.tan(mu * np.pi)
+        res = bs**2 * (-s0 + s1) - (2.0*(s0**3 - s1**3))/3.0 + (-s0**5 + s1**5)/(5.0 * bs**2)
+        return res
+
+    def compute_relative_detuning(self):
+        """ Computes relative dQ = (integral of beta^2 in magnet) * k3l (constant field approximation) """
+        box = LatticeContainer('test', self.seq, reset_elements_to_defaults=False)
+        box.update_element_positions()
+        els = [el for el in box.lattice.sequence if isinstance(el, Octupole)]
+        detuning_str = np.array([self.integral_beta2(el.s_start, el.s_end) / el.l for el in els])
+        central_k3_str = np.array([1 / (self.beta(el.s_mid) ** 3) * el.l for el in els])
+        return np.sum(detuning_str*central_k3_str)
 
     def set_current(self):
         pass

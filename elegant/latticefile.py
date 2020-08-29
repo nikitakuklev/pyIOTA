@@ -11,7 +11,7 @@ import numpy as np
 import pyIOTA
 from ocelot import Sextupole, Hcor, Vcor, Element, Edge, Marker, Octupole, Matrix, Quadrupole, SBend, Drift, Solenoid, \
     Cavity, Monitor
-from pyIOTA.lattice.elements import LatticeContainer, NLLens, HKPoly, ILMatrix
+from pyIOTA.lattice.elements import LatticeContainer, NLLens, HKPoly, ILMatrix, Recirculator
 
 
 class Writer:
@@ -309,6 +309,7 @@ class Writer:
         nllenses = view.get_elements(NLLens)
         matrices = view.get_elements(Matrix)
         ilmatrices = view.get_elements(ILMatrix)
+        recirculators = view.get_elements(Recirculator)
 
         # The edges in sequences are ocelot-based, and so can be ignored
         if len(dipoles) != len(edges)//2:
@@ -466,6 +467,23 @@ class Writer:
                 sl.append(f"{el.id:<10}: ILMATRIX, l={el.l}, {', '.join(arg_string)}\n")
             sl.append('\n')
 
+        preamble = ''
+        if recirculators:
+            if opt.add_mal:
+                raise Exception('Legacy add_mal option specified but custom recirculators also present!')
+            sl.append('!RECIRC \n')
+            for el in recirculators:
+                if self._check_if_already_defined(el, elements): continue
+                sl.append(f"{el.id:<10}: RECIRC \n")
+            sl.append('\n')
+        else:
+            if opt.add_mal:
+                sl.append('RC: RECIRC \n')
+                sl.append('MAL: MALIGN \n')
+                sl.append('\n')
+                preamble += 'MAL, RC, '
+
+
         # names = []
         # for el in markers:
         #     # name = pick_next_name(el['UNIQUENAME'], names)
@@ -479,12 +497,7 @@ class Writer:
         # f.write('IBSELE: IBSCATTER, VERBOSE=0\n')
         #sl.append('\n')
 
-        preamble = ''
-        if opt.add_mal:
-            sl.append('RC: RECIRC \n')
-            sl.append('MAL: MALIGN \n')
-            sl.append('\n')
-            preamble += 'MAL, RC, '
+
 
         if opt.add_limiting_aperture:
             preamble += 'MA1, APER, '
@@ -559,10 +572,9 @@ class Writer:
         if save:
             if not fpath:
                 raise Exception(f'A path has to be specified if save is requested')
-            print(f'Writing to: {fpath}')
+            print(f'Writing lattice to: {fpath}')
             with open(str(fpath), 'w', newline='\n') as f:
                 f.write(''.join(sl))
-            print('Write complete')
 
         return ''.join(sl)
 

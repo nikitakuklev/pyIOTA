@@ -222,7 +222,7 @@ class Kick:
         self.trim = self.default_trim
 
     def suggest_trim(self, min_idx: int, max_idx: int, threshold: float = 0.2,
-                     n_refturns: int = 50, verbose: bool = False, silent: bool = True):
+                     n_refturns: int = 50, families: list = None, verbose: bool = False, silent: bool = True):
         """
         Finds longest signal trim within constraints, based on local SNR
         :param n_refturns: Initial signal interval past minidx to compare to
@@ -233,7 +233,7 @@ class Kick:
         :return: Trim tuple
         """
         offsets = {}
-        families = ['H', 'V']
+        families = families or ['H', 'V']
         for fam in families:
             for k, v in self.get_bpm_data(family=fam, no_trim=True).items():
                 v = v[min_idx:max_idx] - np.mean(v[min_idx:max_idx])
@@ -1255,8 +1255,8 @@ class KickSequence:
         kicksh = np.array([k.kickh for k in kicks])
         kicksv = np.array([k.kickv for k in kicks])
         for family in families:
-            tunes = np.mean([k.get_tunes(k.get_bpms(family=family), i=i) for k in kicks], axis=1)
-            tunes_std = np.std([k.get_tunes(k.get_bpms(family=family), i=i) for k in kicks], axis=1)
+            tunes = np.nanmean([k.get_tunes(k.get_bpms(family=family), i=i) for k in kicks], axis=1)
+            tunes_std = np.nanstd([k.get_tunes(k.get_bpms(family=family), i=i) for k in kicks], axis=1)
             nu.append(tunes)
             sig.append(tunes_std)
         return (kicksh, kicksv), nu, sig

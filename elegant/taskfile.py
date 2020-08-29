@@ -163,7 +163,17 @@ class Task:
         return strings
 
     @task(name='bunched_beam')
-    def setup_bunched_beam(self, *args, mode=None, create_file=False, gridspec=None, **kwargs):
+    def setup_bunched_beam(self, *args, mode=None, create_file=False, gridspec=None, latspec=None, **kwargs):
+        """
+        Bunched beam generation in elegant.
+        :param args:
+        :param mode:
+        :param create_file:
+        :param gridspec: maxima and number of points
+        :param latspec: optics functions for non-DA distributions to enable computing real dimensions
+        :param kwargs:
+        :return:
+        """
         if not mode:
             return []
         strings = []
@@ -185,6 +195,29 @@ class Task:
                             f'emit_y = {y ** 2:10e}',
                             f'distribution_type[0] = "dynamic-aperture","dynamic-aperture","hard-edge"',
                             f'distribution_cutoff[0] = {nx}, {ny}, 1'])
+        elif mode in ['HE_upperright', 'SH_upperright']:
+            assert gridspec, latspec
+            if mode.startswith('HE'):
+                dist = 'hard-edge'
+            elif mode.startswith('SH'):
+                dist = 'shell'
+            else:
+                raise Exception(f'Bad mode {mode}')
+            x, nx, y, ny = gridspec
+            beta_x, beta_y = latspec
+            x = x / 2
+            y = y / 2
+            strings.append(f'centroid[0] = {x + 2 * x / nx:10e}, 0, {y + 2 * y / ny:10e}, 0, 0, 0, !shift to upper right quadrant and off zeroes')
+            # xmax^2 = emittance*beta
+            strings.extend([f'n_particles_per_bunch = {nx * ny}',
+                            f'beta_x = 1.0',
+                            f'emit_x = {x ** 2 / beta_x:10e}',
+                            f'beta_y = 1.0',
+                            f'emit_y = {y ** 2 / beta_y:10e}',
+                            f'distribution_type[0] = "{dist}","{dist}","hard-edge"',
+                            f'distribution_cutoff[0] = 1, 1, 1'])
+        else:
+            raise Exception
 
         return strings
 
