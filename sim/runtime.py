@@ -68,6 +68,10 @@ class DaskSLURMSim(Sim):
         """
         wi = min(limit, len(tasks))
         print(f'Cluster {self.id} - scaling to {wi} workers')
+        for i in range(1, wi + 1, 10):
+            self.cluster.scale(i)
+            self.client.wait_for_workers(i)
+            print(i)
         self.cluster.scale(wi)
         self.client.wait_for_workers(wi)
         print(f'Cluster {self.id} - starting jobs')
