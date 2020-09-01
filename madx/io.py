@@ -1,8 +1,139 @@
-__all__ = ['MADXOptics']
+__all__ = ['MADXOptics', 'TFS', 'parse_lattice']
 
 from pathlib import Path
 import numpy as np
 import pandas as pd
+from pyIOTA.lattice import NLLens
+from ocelot.cpbd.elements import *
+
+element_mapping = {
+    'MARKER': Marker,
+    'MONITOR': Monitor,
+    'DRIFT': Drift,
+    'KICKER': Drift,
+    'VKICKER': Drift,
+    'SBEND': SBend,
+    'DIPEDGE': Edge,
+    'QUADRUPOLE': Quadrupole,
+    'SEXTUPOLE': Sextupole,
+    'OCTUPOLE': Octupole,
+    'NLLENS': NLLens,
+    'SOLENOID': Drift,
+    'RFCAVITY': Cavity,
+}
+
+unit = lambda x: x
+nz = lambda x: x if x != 0.0 else None
+nz2 = lambda x: 2.0 * x if x != 0.0 else None
+
+attribute_mapping = {'L': ('l', unit),
+                     'ANGLE': ('angle', nz),
+                     'TILT': ('tilt', nz),
+                     'VOLT': ('v', nz),  # MV->MV
+                     'HGAP': ('gap', nz2)}
+attribute_mapping.update({f'K{i}': (f'k{i}', nz) for i in range(1, 4)})
+attribute_mapping.update({f'K{i}L': (f'k{i}', nz) for i in range(1, 4)})
+
+critical_columns = ['NAME', 'KEYWORD']
+
+
+def parse_lattice(fpath: Path, verbose: bool = False):
+    """
+    Parse MADX TFS file (TWISS output) into native lattice
+    :param fpath: Full file path
+    :param verbose:
+    :return:
+    """
+    tf = TFS(fpath)
+    df = tf.df
+    s = 0.0
+    seq = []
+    # Basic logic - parse one element per line, assign any attributes from columns
+    columns = [c for c in df.columns if c not in critical_columns and c in attribute_mapping]
+    if not df.NAME.is_unique:
+        print('WARN - Element names are not unique, this might cause issues')
+    for n_row in range(len(df)):
+        r = next(df.iloc[[n_row]].itertuples())
+        l = r.L
+        s += l
+
+        assert np.isclose(s, r.S)
+        etype = r.KEYWORD.upper()
+
+        if etype in element_mapping:
+            #print(element_mapping[etype])
+            el = element_mapping[etype](eid=r.NAME)
+            el.l = 0.
+            el.tilt = 0.
+            el.angle = 0.
+            el.k1 = 0.
+            el.k2 = 0.
+            el.dx = 0.
+            el.dy = 0.
+            el.dtilt = 0.
+            for col in columns:
+                attr_name, filter_fun = attribute_mapping[col]
+                v = filter_fun(getattr(r, col))
+                if v is not None and not isinstance(el, Marker):
+                    setattr(el, attr_name, v)
+            seq.append(el)
+        else:
+            raise Exception(f'Unrecognized element {r.NAME} of type {etype}')
+
+    # Handle edges
+    seq_temp = seq.copy()
+    edge_count = 0
+    for i, el in enumerate(seq_temp):
+        if isinstance(el, Edge):
+            # Can't have unpaired edges
+            edge_count += 1
+            assert isinstance(seq_temp[i + 1], SBend) or isinstance(seq_temp[i - 1], SBend)
+        elif isinstance(el, SBend):
+            e1 = seq_temp[i - 1]
+            e2 = seq_temp[i + 1]
+            if isinstance(e1, Edge) and isinstance(e2, Edge):
+                assert e1.gap == e2.gap
+                assert e1.fint == e2.fint
+                el.fint = e1.fint
+                el.fintx = e2.fint
+                seq.remove(e1)
+                seq.remove(e2)
+                edge_count -= 2
+            elif isinstance(e1, Edge):
+                el.fint = e1.fint
+                el.fintx = 0.0
+                seq.remove(e1)
+                edge_count -= 1
+            elif isinstance(e2, Edge):
+                el.fint = 0.0
+                el.fintx = e2.fint
+                seq.remove(e2)
+                edge_count -= 1
+            else:
+                el.fint = el.fintx = 0.0
+                el.gap = 0.0
+    assert edge_count == 0
+
+    return seq, None, None, None, None
+
+
+class TFS:
+    def __init__(self, fpath: Path):
+        from tfs import read, write
+        self.path = fpath
+        self.df = read(fpath)
+        self.ro = True
+
+    def reload(self):
+        from tfs import read, write
+        self.df = read(self.path)
+
+    def commit(self):
+        if not self.ro:
+            from tfs import read, write
+            write(self.path, self.df)
+        else:
+            raise Exception("File is read-only")
 
 
 class MADXOptics:
