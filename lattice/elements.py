@@ -755,7 +755,7 @@ class NLLens(Element):
     tilt - tilt of lens in [rad]
     """
 
-    def __init__(self, l=0., knll=0., cnll=0., tilt=0., eid=None):
+    def __init__(self, l=0., knll=0., cnll=0.1, tilt=0., eid=None):
         Element.__init__(self, eid)
         self.l = l
         self.knll = knll
@@ -763,12 +763,12 @@ class NLLens(Element):
             raise Exception('Dimensional parameter of NLLens must be non-zero!')
         self.cnll = cnll
         self.tilt = tilt
-        self.k1 = 2.0 * knll / (cnll * cnll) / l
+        self.k1 = 2.0 * knll / (cnll * cnll) / l if l > 0.0 else 0.0
         # DN potential has no sextupolar component
         self.k2 = 0.0
         # There is octupolar field. Could be useful for KickTM.
         # knn/cn^2/bn /. knn -> knll/cnll^2 /. cn -> cnll /Sqrt[bn] = knll/cnll^4
-        self.k3 = 16.0 * knll / (cnll * cnll * cnll * cnll) / l
+        self.k3 = 16.0 * knll / (cnll * cnll * cnll * cnll) / l if l > 0.0 else 0.0
 
     def __str__(self):
         s = 'NLLens : '
