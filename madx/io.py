@@ -27,11 +27,16 @@ unit = lambda x, el: x
 nz = lambda x, el: x if x != 0.0 else None
 nz2 = lambda x, el: 2.0 * x if x != 0.0 else None
 nzdivl = lambda x, el: (x / el.l if el.l > 0.0 else x) if x != 0.0 else None
+nz360 = lambda x, el: x*360.0 if x != 0.0 else None
+nzdiv1e3 = lambda x, el: x*1.0e-3 if x != 0.0 else None
+nz1e6 = lambda x, el: x*1.0e6 if x != 0.0 else None
 
 attribute_mapping = {'L': ('l', unit),
                      'ANGLE': ('angle', nz),
                      'TILT': ('tilt', nz),
-                     'VOLT': ('v', nz),  # MV->MV
+                     'VOLT': ('v', nzdiv1e3),  # MV->GV
+                     'FREQ': ('freq', nz1e6), # MHz -> Hz
+                     'LAG': ('phi', nz360),
                      'HGAP': ('gap', nz2),
                      'FINT': ('fint', nz)}
 attribute_mapping.update({f'K{i}L': (f'k{i}', nzdivl) for i in range(1, 4)})
