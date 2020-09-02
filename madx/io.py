@@ -120,7 +120,7 @@ def parse_lattice(fpath: Path, verbose: bool = False):
                 el.fint = el.fintx = el.gap = 0.0
     assert edge_count == 0
 
-    return seq, None, None, None, None
+    return seq, None, None, None, None, df.headers['PC']*1e3
 
 
 class TFS:
