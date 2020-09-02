@@ -21,6 +21,7 @@ class LatticeContainer:
                  correctors: List = None,
                  monitors: List = None,
                  reset_elements_to_defaults: bool = True,
+                 reset_cavities: bool = True,
                  info: Dict = None,
                  variables: Dict = None,
                  method: MethodTM = None,
@@ -38,15 +39,24 @@ class LatticeContainer:
         self.silent = silent
         self.method = method
 
+        # These are often customized later anyways
         if reset_elements_to_defaults:
-            logger.warning(f'Resetting any nonlinear elements to 0')
-            elems = [l for l in self.lattice_list if isinstance(l, Sextupole)]
-            for el in elems:
-                el.k2 = 0
+            elems_sex = [l for l in self.lattice_list if isinstance(l, Sextupole)]
+            elems_oct = [l for l in self.lattice_list if isinstance(l, Octupole)]
+            if elems_oct or elems_sex:
+                logger.warning(f'Resetting any nonlinear elements to 0')
+                for el in elems_sex:
+                    el.k3 = 0
+                for el in elems_oct:
+                    el.k2 = 0
 
-            elems = [l for l in self.lattice_list if isinstance(l, Octupole)]
-            for el in elems:
-                el.k3 = 0
+        # This is to avoid having to specify energy in Twiss
+        if reset_cavities:
+            elems = [l for l in self.lattice_list if isinstance(l, Cavity)]
+            if elems:
+                logger.warning(f'Resetting cavities to 0 to please Twiss gods')
+                for el in elems:
+                    el.v = 0.0
 
         if not method:
             self.lattice = MagneticLattice(tuple(self.lattice_list))
@@ -331,7 +341,7 @@ class LatticeContainer:
         if update_maps:
             self.lattice.update_transfer_maps()
         return twiss(self.lattice, nPoints=n_points, tws0=tws0)
-    
+
     twiss = update_twiss
 
     def insert_extra_markers(self, spacing: float = 1.0):
