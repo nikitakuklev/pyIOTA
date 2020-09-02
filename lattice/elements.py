@@ -145,6 +145,9 @@ class LatticeContainer:
         :param verbose:
         :return: LatticeContainer
         """
+        if not elements:
+            logger.warning('Empty element list supplied, skipping')
+            return self
         seq = self.lattice.sequence
         l_seq = len(seq)
         if isinstance(elements, List) and isinstance(elements, List):
@@ -171,9 +174,10 @@ class LatticeContainer:
                 if verbose: print(f'Transmuted ({new_el.id}) at pos ({i}) from ({matches[0].__class__.__name__}) '
                                   f'to ({seq[i].__class__.__name__})')
                 # Preserve references
-                for m in self.monitors:
-                    if m.ref_el == target:
-                        m.ref_el = new_el
+                if self.monitors is not None:
+                    for m in self.monitors:
+                        if m.ref_el == target:
+                            m.ref_el = new_el
         assert l_seq == len(seq)
 
         # if not self.silent: print(f'Transmuted ({len(elements)}) elements')

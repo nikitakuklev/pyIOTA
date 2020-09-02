@@ -20,19 +20,22 @@ element_mapping = {
     'NLLENS': NLLens,
     'SOLENOID': Drift,
     'RFCAVITY': Cavity,
+    'MULTIPOLE': Multipole,
 }
 
-unit = lambda x: x
-nz = lambda x: x if x != 0.0 else None
-nz2 = lambda x: 2.0 * x if x != 0.0 else None
+unit = lambda x, el: x
+nz = lambda x, el: x if x != 0.0 else None
+nz2 = lambda x, el: 2.0 * x if x != 0.0 else None
+nzdivl = lambda x, el: (x / el.l if el.l > 0.0 else x) if x != 0.0 else None
 
 attribute_mapping = {'L': ('l', unit),
                      'ANGLE': ('angle', nz),
                      'TILT': ('tilt', nz),
                      'VOLT': ('v', nz),  # MV->MV
-                     'HGAP': ('gap', nz2)}
-attribute_mapping.update({f'K{i}': (f'k{i}', nz) for i in range(1, 4)})
-attribute_mapping.update({f'K{i}L': (f'k{i}', nz) for i in range(1, 4)})
+                     'HGAP': ('gap', nz2),
+                     'FINT': ('fint', nz)}
+attribute_mapping.update({f'K{i}L': (f'k{i}', nzdivl) for i in range(1, 4)})
+k_attrs = [f'k{i}' for i in range(1, 4)]
 
 critical_columns = ['NAME', 'KEYWORD']
 
@@ -52,30 +55,27 @@ def parse_lattice(fpath: Path, verbose: bool = False):
     columns = [c for c in df.columns if c not in critical_columns and c in attribute_mapping]
     if not df.NAME.is_unique:
         print('WARN - Element names are not unique, this might cause issues')
-    for n_row in range(len(df)):
-        r = next(df.iloc[[n_row]].itertuples())
-        l = r.L
+    for r in df.itertuples():
+        r = r._asdict()
+        l = r['L']
+        etype = r['KEYWORD'].upper()
         s += l
-
-        assert np.isclose(s, r.S)
-        etype = r.KEYWORD.upper()
-
+        assert np.isclose(s, r['S'])
         if etype in element_mapping:
-            #print(element_mapping[etype])
-            el = element_mapping[etype](eid=r.NAME)
-            el.l = 0.
-            el.tilt = 0.
-            el.angle = 0.
-            el.k1 = 0.
-            el.k2 = 0.
-            el.dx = 0.
-            el.dy = 0.
-            el.dtilt = 0.
+            el = element_mapping[etype](eid=r['NAME'])
             for col in columns:
                 attr_name, filter_fun = attribute_mapping[col]
-                v = filter_fun(getattr(r, col))
-                if v is not None and not isinstance(el, Marker):
+                v = filter_fun(r[col], el)
+                if v is not None:
                     setattr(el, attr_name, v)
+            if isinstance(el, Multipole):
+                ks = [getattr(el, ka, None) for ka in k_attrs]
+                while ks[-1] == 0.0:
+                    ks.pop()
+                while len(ks) < 2:
+                    ks.append(0.0)
+                el.kn = np.ndarray(ks)
+                el.n = len(ks)
             seq.append(el)
         else:
             raise Exception(f'Unrecognized element {r.NAME} of type {etype}')
@@ -93,25 +93,26 @@ def parse_lattice(fpath: Path, verbose: bool = False):
             e2 = seq_temp[i + 1]
             if isinstance(e1, Edge) and isinstance(e2, Edge):
                 assert e1.gap == e2.gap
-                assert e1.fint == e2.fint
                 el.fint = e1.fint
                 el.fintx = e2.fint
+                el.gap = e1.gap
                 seq.remove(e1)
                 seq.remove(e2)
                 edge_count -= 2
             elif isinstance(e1, Edge):
                 el.fint = e1.fint
                 el.fintx = 0.0
+                el.gap = e1.gap
                 seq.remove(e1)
                 edge_count -= 1
             elif isinstance(e2, Edge):
                 el.fint = 0.0
                 el.fintx = e2.fint
+                el.gap = e2.gap
                 seq.remove(e2)
                 edge_count -= 1
             else:
-                el.fint = el.fintx = 0.0
-                el.gap = 0.0
+                el.fint = el.fintx = el.gap = 0.0
     assert edge_count == 0
 
     return seq, None, None, None, None
