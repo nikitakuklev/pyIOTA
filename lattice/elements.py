@@ -7,7 +7,7 @@ from pathlib import Path
 
 from typing import Union, List, Dict, Type, Iterable, Callable, Optional
 from ocelot.cpbd.elements import *
-from ocelot import MagneticLattice, twiss, MethodTM
+from ocelot import MagneticLattice, twiss, MethodTM, Twiss
 
 logger = logging.getLogger(__name__)
 
@@ -327,10 +327,12 @@ class LatticeContainer:
             slist.append(el.s_mid)
         return slist
 
-    def update_twiss(self, n_points: int = None, update_maps: bool = True):
+    def update_twiss(self, n_points: int = None, update_maps: bool = True, tws0: Twiss = None):
         if update_maps:
             self.lattice.update_transfer_maps()
-        return twiss(self.lattice, nPoints=n_points)
+        return twiss(self.lattice, nPoints=n_points, tws0=tws0)
+    
+    twiss = update_twiss
 
     def insert_extra_markers(self, spacing: float = 1.0):
         """
