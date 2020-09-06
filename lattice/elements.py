@@ -195,7 +195,7 @@ class LatticeContainer:
         return self
 
     def split_elements(self, elements: Union[Element, Iterable[Element]], n_parts: int = 2,
-                       return_new_elements: bool = False) -> Union[LatticeContainer, List]:
+                       return_new_elements: bool = False, at: float = None) -> Union[LatticeContainer, List]:
         """
         Splits elements into several parts, scaling parameters appropriately
         :param return_new_elements: Instead of box, return list of all new elements
@@ -217,15 +217,27 @@ class LatticeContainer:
         seq_new = seq.copy()
         added_elements = []
         for el in elements:
-            el_list = [deepcopy(el) for i in range(n_parts)]
-            for i, e in enumerate(el_list):
-                for s in scaled_parameters:
-                    if hasattr(e, s):
-                        setattr(e, s, getattr(e, s) / n_parts)
-                for s in preserved_parameters:
-                    if hasattr(e, s):
-                        setattr(e, s, getattr(e, s))
-                e.id = el.id + f'_{i}'
+            if at is not None:
+                assert at < el.l and n_parts == 2
+                el_list = [deepcopy(el) for i in range(n_parts)]
+                for i, (e, ratio) in enumerate(zip(el_list, [at/el.l, (el.l-at)/el.l])):
+                    for s in scaled_parameters:
+                        if hasattr(e, s):
+                            setattr(e, s, getattr(e, s) * ratio)
+                    for s in preserved_parameters:
+                        if hasattr(e, s):
+                            setattr(e, s, getattr(e, s))
+                    e.id = el.id + f'_{i}'
+            else:
+                el_list = [deepcopy(el) for i in range(n_parts)]
+                for i, e in enumerate(el_list):
+                    for s in scaled_parameters:
+                        if hasattr(e, s):
+                            setattr(e, s, getattr(e, s) / n_parts)
+                    for s in preserved_parameters:
+                        if hasattr(e, s):
+                            setattr(e, s, getattr(e, s))
+                    e.id = el.id + f'_{i}'
             idx = seq_new.index(el)
             seq_new.remove(el)
             seq_new[idx:idx] = el_list  # means insert here
@@ -809,7 +821,8 @@ class OctupoleInsert:
 
     def configure(self, oqK: float = 1.0, run: int = 2, l0: float = 1.8, mu0: float = 0.3, otype: int = 1,
                   olen: float = 0.07, nn: int = 17, ospacing: float = None,
-                  current: float = None, tn=0.4, cn=0.01, debug: bool = False):
+                  current: float = None, tn=0.4, cn=0.01, debug: bool = False,
+                  positions: np.ndarray = None):
         """
         Initialize QI configuration. Notation matches that used in original MADX scripts.
         :param tn:    #tn = 0.4  # strength of nonlinear lens
@@ -825,26 +838,32 @@ class OctupoleInsert:
         self.l0 = l0
         self.mu0 = mu0
 
-        if run is None:
-            # Ideal configuration
-            if ospacing:
-                oqSpacing = ospacing
-            else:
+        if positions is None:
+            perturbed_mode = False
+            if run is None:
+                # Ideal configuration
+                if ospacing:
+                    oqSpacing = ospacing
+                else:
+                    oqSpacing = (l0 - olen * nn) / nn
+                margin = 0.0
+                positions = l0 / nn * (np.arange(1, nn + 1) - 0.5)
+            elif run == 1:
+                # Margins on the sides were present
+                oqSpacing = 0.03325  # (1.8-0.022375-0.022375-17*0.07)/17
+                margin = 0.022375  # extra margin at the start and end of insert
+                positions = margin + (l0 - 2 * margin) / nn * (np.arange(1, nn + 1) - 0.5)
+            elif run == 2:
+                # Perfect spacing with half drift on each end
                 oqSpacing = (l0 - olen * nn) / nn
-            margin = 0.0
-            positions = l0 / nn * (np.arange(1, nn + 1) - 0.5)
-        elif run == 1:
-            # Margins on the sides were present
-            oqSpacing = 0.03325  # (1.8-0.022375-0.022375-17*0.07)/17
-            margin = 0.022375  # extra margin at the start and end of insert
-            positions = margin + (l0 - 2 * margin) / nn * (np.arange(1, nn + 1) - 0.5)
-        elif run == 2:
-            # Perfect spacing with half drift on each end
-            oqSpacing = (l0 - olen * nn) / nn
-            margin = 0.0
-            positions = l0 / nn * (np.arange(1, nn + 1) - 0.5)
+                margin = 0.0
+                positions = l0 / nn * (np.arange(1, nn + 1) - 0.5)
+            else:
+                raise Exception(f"Run ({run}) is unrecognized")
         else:
-            raise Exception(f"Run ({run}) is unrecognized")
+            perturbed_mode = True
+            assert len(positions) == nn
+            assert np.all(positions + olen/2 < l0) and np.all(positions - olen/2 > 0.0)
 
         # musect = mu0 + 0.5
         f0, betae, alfae, betas = self.calculate_optics_parameters()
@@ -874,30 +893,43 @@ class OctupoleInsert:
             k3_arr = k3scaled / olen
 
         self.seq = seq = []
-        seq.append(Drift(l=margin, eid='oQImargin'))
-        for i, k3 in zip(range(1, nn + 1), k3_arr):
-            if otype == 1:
-                seq.append(Drift(l=oqSpacing / 2, eid=f'oQI{i:02}l'))
-                seq.append(Octupole(l=olen, k3=k3, eid=f'QI{i:02}'))
-                seq.append(Drift(l=oqSpacing / 2, eid=f'oQI{i:02}r'))
-            elif otype == 0:
-                seq.append(Drift(l=oqSpacing / 2 + olen / 2, eid=f'oQI{i:02}l'))
-                seq.append(Multipole(kn=[0., 0., 0., k3 * olen], eid=f'QI{i:02}'))
-                seq.append(Drift(l=oqSpacing / 2 + olen / 2, eid=f'oQI{i:02}r'))
-            # value, i, bn, sn, k3, k3scaled, (betas ^ 3 / bn ^ 3);
-        seq.append(Drift(l=margin, eid='oQImargin'))
+        if perturbed_mode:
+            seq.append(Drift(l=positions[0]-olen/2, eid='Dmargin'))
+            for i, k3 in zip(range(0, nn), k3_arr):
+                if otype == 1:
+                    seq.append(Octupole(l=olen, k3=k3, eid=f'QI{i+1:02}'))
+                    if i < nn-1:
+                        seq.append(Drift(l=(positions[i+1]-positions[i])-olen, eid=f'D{i+1:02}'))
+                else:
+                    raise
+            seq.append(Drift(l=l0-positions[-1]-olen/2, eid='Dmargin'))
+        else:
+            seq.append(Drift(l=margin, eid='oQImargin'))
+            for i, k3 in zip(range(1, nn + 1), k3_arr):
+                if otype == 1:
+                    seq.append(Drift(l=oqSpacing / 2, eid=f'oQI{i:02}l'))
+                    seq.append(Octupole(l=olen, k3=k3, eid=f'QI{i:02}'))
+                    seq.append(Drift(l=oqSpacing / 2, eid=f'oQI{i:02}r'))
+                elif otype == 0:
+                    seq.append(Drift(l=oqSpacing / 2 + olen / 2, eid=f'oQI{i:02}l'))
+                    seq.append(Multipole(kn=[0., 0., 0., k3 * olen], eid=f'QI{i:02}'))
+                    seq.append(Drift(l=oqSpacing / 2 + olen / 2, eid=f'oQI{i:02}r'))
+                # value, i, bn, sn, k3, k3scaled, (betas ^ 3 / bn ^ 3);
+            seq.append(Drift(l=margin, eid='oQImargin'))
         l_list = [e.l for e in seq]
+        #print(seq, l_list, sum(l_list))
         assert np.isclose(sum(l_list), l0)
 
-        s_list = []
-        s = 0
-        for e in seq:
-            s += e.l / 2
-            s_list.append(s)
-            s += e.l / 2
+        if not perturbed_mode:
+            s_list = []
+            s = 0
+            for e in seq:
+                s += e.l / 2
+                s_list.append(s)
+                s += e.l / 2
 
-        s_oct = [s for e, s in zip(seq, s_list) if not isinstance(e, Drift)]
-        assert np.allclose(np.diff(np.array(s_oct)), oqSpacing + olen)
+            s_oct = [s for e, s in zip(seq, s_list) if not isinstance(e, Drift)]
+            assert np.allclose(np.diff(np.array(s_oct)), oqSpacing + olen)
 
     def calculate_optics_parameters(self):
         """
