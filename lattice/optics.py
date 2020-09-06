@@ -129,7 +129,7 @@ class NLKickTM(TransferMap):
         """ This is what OCELOT uses in KickTM """
         X[0] += X[1] * l
         X[2] += X[3] * l
-        X[4] += X[5] * l * igammabeta * igammabeta
+        X[4] -= X[5] * l * igammabeta * igammabeta
 
     def map_drift_4D(self, X: np.ndarray, ibeta: float, igammabeta: float, l: float):
         """ Linear 4D case """
