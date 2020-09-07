@@ -327,12 +327,13 @@ class Task:
         return strings
 
     @task(name='insert_elements')
-    def action_insert_watch(self, *args, name, label, mode, seq_num=0, start_pass=0, end_pass=-1, loc_name=None,
-                            loc_type=None):
-        assert loc_type or loc_name
+    def action_insert_watch(self, *args, name, label, mode, seq_num=0, start_pass=0, end_pass=-1,
+                            loc_name=None, loc_type=None):
         strings = [
             f'element_def = "{name}: watch, filename="{self.rf}/%s-{label}-{seq_num:02d}.sdds",mode="{mode}",start_pass={start_pass},end_pass={end_pass}"',
             f'verbose = 1']
+        if not loc_name and not loc_type:
+            raise Exception('Elegant requires name or type to be given')
         strings.append(f'type = {loc_type}') if loc_type else strings.append(f'type = "*"')
         strings.append(f'name = {loc_name}') if loc_name else strings.append(f'name = "*"')
         return strings

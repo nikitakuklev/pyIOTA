@@ -10,7 +10,7 @@ from typing import Dict
 import numpy as np
 import pyIOTA
 from ocelot import Sextupole, Hcor, Vcor, Element, Edge, Marker, Octupole, Matrix, Quadrupole, SBend, Drift, Solenoid, \
-    Cavity, Monitor
+    Cavity, Monitor, Multipole
 from pyIOTA.lattice.elements import LatticeContainer, NLLens, HKPoly, ILMatrix, Recirculator
 
 
@@ -310,6 +310,7 @@ class Writer:
         matrices = view.get_elements(Matrix)
         ilmatrices = view.get_elements(ILMatrix)
         recirculators = view.get_elements(Recirculator)
+        multipoles = view.get_elements(Multipole)
 
         # The edges in sequences are ocelot-based, and so can be ignored
         if len(dipoles) != len(edges)//2:
@@ -377,6 +378,8 @@ class Writer:
             sl.append('!SEXTUPOLES\n')
             for el in sextupoles:
                 if self._check_if_already_defined(el, elements): continue
+                if el.l == 0.0:
+                    raise Exception("Thin integrator element found - this will have no effect, use MULT or HKPOLY")
                 sl.append(f'{el.id:<10}: KSEXT, l={el.l}, k2={el.k2:+.10e},'
                           f' N_KICKS="sext_kicks", ISR="flag_isr", SYNCH_RAD="flag_synch"\n')
             sl.append('\n')
@@ -385,9 +388,29 @@ class Writer:
             sl.append('!OCTUPOLES + quasi-integrable insert\n')
             for el in octupoles:
                 if self._check_if_already_defined(el, elements): continue
+                if el.l == 0.0:
+                    raise Exception("Thin integrator element found - this will have no effect, use MULT or HKPOLY")
                 sl.append(
                     f'{el.id:<10}: KOCT, l={el.l}, k3={el.k3:.10e},'
                     f' N_KICKS="oct_kicks", ISR="flag_isr", SYNCH_RAD="flag_synch"\n')
+            sl.append('\n')
+
+        if multipoles:
+            sl.append('!MULTIPOLES\n')
+            for el in multipoles:
+                kn = np.array(el.kn)
+                if np.sum(kn != 0.0) > 1:
+                    raise Exception('Elegant MULT only supports a single multipole order - use HKPOLY')
+                order = np.argmax(kn > 0.0)
+                assert order >= 2
+                if self._check_if_already_defined(el, elements): continue
+                if getattr(el, 'extra_args', None):
+                    n_kicks = el.extra_args.get('N_KICKS', 1)
+                else:
+                    n_kicks = 1
+                sl.append(
+                    f'{el.id:<10}: MULT, l={el.l}, knl={el.kn[order]:.10e}, order={order},'
+                    f' N_KICKS={n_kicks}, SYNCH_RAD="flag_synch"\n')
             sl.append('\n')
 
         if solenoids:
@@ -435,7 +458,7 @@ class Writer:
             sl.append('!DRIFTS\n')
             for el in drifts:
                 if self._check_if_already_defined(el, elements): continue
-                sl.append(f'{el.id:<10}: EDRIFT, l={el.l}\n')
+                sl.append(f'{el.id:<10}: EDRIFT, l={el.l:.10e}\n')
             sl.append('\n')
 
         if matrices:
@@ -533,7 +556,7 @@ class Writer:
             # f.write('W1: WATCH, MODE="coordinate", INTERVAL=1, FILENAME="%s_w1.track"')
             sl.append('\n')
 
-        sl.append('!Full line has everything, might be slow due to markers? \n')
+        sl.append('!Full line has everything\n')
 
         # seq = list(iota.sequence)
         # markerdict = markers.data
