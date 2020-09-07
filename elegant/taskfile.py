@@ -318,7 +318,7 @@ class Task:
         return strings
 
     @task(name='insert_elements')
-    def action_insert(self, *args, definition, location_name=None, location_type=None):
+    def action_insert(self, *args, definition, location_name=None, location_type=None, **kwargs):
         assert location_type or location_name
         strings = [f'element_def = "{definition}"',
                    f'verbose = 1']
@@ -328,9 +328,10 @@ class Task:
 
     @task(name='insert_elements')
     def action_insert_watch(self, *args, name, label, mode, seq_num=0, start_pass=0, end_pass=-1,
-                            loc_name=None, loc_type=None):
+                            loc_name=None, loc_type=None, **kwargs):
         strings = [
-            f'element_def = "{name}: watch, filename="{self.rf}/%s-{label}-{seq_num:02d}.sdds",mode="{mode}",start_pass={start_pass},end_pass={end_pass}"',
+            f'element_def = "{name}: watch, filename="{self.rf}/%s-{label}-{seq_num:02d}.sdds",'
+            f'mode="{mode}",start_pass={start_pass},end_pass={end_pass}"',
             f'verbose = 1']
         if not loc_name and not loc_type:
             raise Exception('Elegant requires name or type to be given')
