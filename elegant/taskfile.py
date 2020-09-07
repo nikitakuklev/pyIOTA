@@ -322,8 +322,8 @@ class Task:
         assert location_type or location_name
         strings = [f'element_def = "{definition}"',
                    f'verbose = 1']
-        strings.append(f'type = {location_type}') if location_type else strings.append(f'type = "*"')
-        strings.append(f'name = {location_name}') if location_name else strings.append(f'name = "*"')
+        strings.append(f'type = "{location_type}"') if location_type else strings.append(f'type = "*"')
+        strings.append(f'name = "{location_name}"') if location_name else strings.append(f'name = "*"')
         return strings
 
     @task(name='insert_elements')
@@ -335,8 +335,8 @@ class Task:
             f'verbose = 1']
         if not loc_name and not loc_type:
             raise Exception('Elegant requires name or type to be given')
-        strings.append(f'type = {loc_type}') if loc_type else strings.append(f'type = "*"')
-        strings.append(f'name = {loc_name}') if loc_name else strings.append(f'name = "*"')
+        strings.append(f'type = "{loc_type}"') if loc_type else strings.append(f'type = "*"')
+        strings.append(f'name = "{loc_name}"') if loc_name else strings.append(f'name = "*"')
         return strings
 
     # Errors
