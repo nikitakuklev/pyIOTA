@@ -532,7 +532,12 @@ class LatticeContainer:
     # Getters/setters
 
     def at(self, s):
-        """ Get all elements at position s """
+        """
+        Get all elements at position s. Element is considered to be present if it is thick and intersects
+        the location, or if element starts there (regardless of length). Results are in sequence order.
+        :param s:
+        :return:
+        """
         assert 0.0 <= s <= self.lattice.totalLen
         spans = {el: (el.s_start, el.s_end) for el in self.lattice.sequence}
         selection = []
@@ -544,6 +549,24 @@ class LatticeContainer:
                 selection.append(k)
             #print(s1,s,s2)
         return selection
+
+    def is_gap(self, s):
+        """
+        Determines if the location is gap in lattice - i.e. whether it is not contained in any element.
+        If so, returns elements before and after the gap. Else, False.
+        :param s:
+        :return:
+        """
+        assert 0.0 <= s <= self.lattice.totalLen
+        for i, el in enumerate(self.lattice.sequence):
+            if np.isclose(s, el.s_start):
+                return self.lattice.sequence[i-1], el
+            else:
+                if el.s_start > s:
+                    return False
+                else:
+                    continue
+        raise Exception("You shouldn't be here?")
 
     def get_first(self,
                   el_name: str = None,
@@ -720,10 +743,19 @@ class HKPoly(Element):
     Arbitrary Hamiltonian element for ELEGANT
     """
 
-    def __init__(self, l: float = 0.0, eid: str = None, **kwargs: float):
+    def __init__(self, l: float = 0.0, eid: str = None, **kwargs):
         Element.__init__(self, eid)
         self.l = l
         self.hkpoly_args = kwargs
+
+    def __getitem__(self, key):
+        if key in self.hkpoly_args:
+            return self.hkpoly_args[key]
+        else:
+            raise KeyError
+
+    def __setitem__(self, key, value):
+        self.hkpoly_args[key] = value
 
 
 class Recirculator(Element):
@@ -819,10 +851,12 @@ class OctupoleInsert:
         self.seq = []
         self.configure(**kwargs)
 
-    def configure(self, oqK: float = 1.0, run: int = 2, l0: float = 1.8, mu0: float = 0.3, otype: int = 1,
+    def configure(self, oqK: Union[float, np.ndarray] = 1.0,
+                  run: int = 2, l0: float = 1.8, mu0: float = 0.3, otype: int = 1,
                   olen: float = 0.07, nn: int = 17, ospacing: float = None,
                   current: float = None, tn=0.4, cn=0.01, debug: bool = False,
-                  positions: np.ndarray = None):
+                  positions: np.ndarray = None,
+                  olen_eff: float = None):
         """
         Initialize QI configuration. Notation matches that used in original MADX scripts.
         :param tn:    #tn = 0.4  # strength of nonlinear lens
@@ -831,12 +865,16 @@ class OctupoleInsert:
         :param l0:    #l0     = 1.8;           # length of the straight section
         :param mu0:   #mu0 = 0.3;  # phase advance over straight section
         :param run:   # which run configuration to use, 1 or 2
-        :param otype: # type of magnet (0) thin, (1) thick, only works for octupoles (ncut=4)
+        :param otype: # type of magnet (0) thin, (1) thick, (2) HKPoly, only works for octupoles (ncut=4)
         :param olen:  #olen = 0.07  # length of octupole for thick option.must be < l0 / nn
         :param nn:    # number of nonlinear elements
         """
         self.l0 = l0
         self.mu0 = mu0
+        self.otype = otype
+        if isinstance(oqK, np.ndarray):
+            assert len(oqK) == nn
+        olen_eff = olen_eff or olen
 
         if positions is None:
             perturbed_mode = False
@@ -889,33 +927,48 @@ class OctupoleInsert:
             knll = knn * cnll ** 2
             k1 = knn * 2  # 1 * 2!
             k3 = knn / cn ** 2 / bn * 16  # 2 / 3 * 4!
-            k3scaled = k3 * oqK
-            k3_arr = k3scaled / olen
+            k3scaled = k3 * oqK # Can be an array
+            k3_arr = k3scaled / olen_eff
 
         self.seq = seq = []
+        #print(k3_arr)
         if perturbed_mode:
-            seq.append(Drift(l=positions[0]-olen/2, eid='Dmargin'))
+            seq.append(Drift(l=positions[0]-olen/2, eid='DmarginL'))
             for i, k3 in zip(range(0, nn), k3_arr):
-                if otype == 1:
+                k3l = k3 * olen_eff
+                if otype == 0:
+                    assert olen == 0.0
+                    seq.append(Multipole(kn=[0., 0., 0., k3l], eid=f'QI{i+1:02}'))
+                elif otype == 1:
                     seq.append(Octupole(l=olen, k3=k3, eid=f'QI{i+1:02}'))
-                    if i < nn-1:
-                        seq.append(Drift(l=(positions[i+1]-positions[i])-olen, eid=f'D{i+1:02}'))
+                elif otype == 2:
+                    assert olen == 0.0
+                    seq.append(HKPoly(K40=k3l / 24., K22=k3l / 4., K04=k3l / 24., eid=f'QI{i+1:02}'))
                 else:
                     raise
-            seq.append(Drift(l=l0-positions[-1]-olen/2, eid='Dmargin'))
+                if i < nn - 1:
+                    seq.append(Drift(l=(positions[i + 1] - positions[i]) - olen, eid=f'D{i + 1:02}'))
+            seq.append(Drift(l=l0-positions[-1]-olen/2, eid='DmarginR'))
         else:
-            seq.append(Drift(l=margin, eid='oQImargin'))
+            seq.append(Drift(l=margin, eid='oQImarginL'))
             for i, k3 in zip(range(1, nn + 1), k3_arr):
-                if otype == 1:
+                k3l = k3 * olen_eff
+                if otype == 0:
+                    assert olen == 0.0
+                    seq.append(Drift(l=oqSpacing / 2 + olen / 2, eid=f'oQI{i:02}l'))
+                    seq.append(Multipole(kn=[0., 0., 0., k3l], eid=f'QI{i:02}'))
+                    seq.append(Drift(l=oqSpacing / 2 + olen / 2, eid=f'oQI{i:02}r'))
+                elif otype == 1:
                     seq.append(Drift(l=oqSpacing / 2, eid=f'oQI{i:02}l'))
                     seq.append(Octupole(l=olen, k3=k3, eid=f'QI{i:02}'))
                     seq.append(Drift(l=oqSpacing / 2, eid=f'oQI{i:02}r'))
-                elif otype == 0:
+                elif otype == 2:
+                    assert olen == 0.0
                     seq.append(Drift(l=oqSpacing / 2 + olen / 2, eid=f'oQI{i:02}l'))
-                    seq.append(Multipole(kn=[0., 0., 0., k3 * olen], eid=f'QI{i:02}'))
+                    seq.append(HKPoly(K40=k3l / 24., K22=k3l / 4., K04=k3l / 24., eid=f'QI{i:02}'))
                     seq.append(Drift(l=oqSpacing / 2 + olen / 2, eid=f'oQI{i:02}r'))
                 # value, i, bn, sn, k3, k3scaled, (betas ^ 3 / bn ^ 3);
-            seq.append(Drift(l=margin, eid='oQImargin'))
+            seq.append(Drift(l=margin, eid='oQImarginR'))
         l_list = [e.l for e in seq]
         #print(seq, l_list, sum(l_list))
         assert np.isclose(sum(l_list), l0)
@@ -1006,10 +1059,42 @@ class OctupoleInsert:
         """ Computes relative dQ = (integral of beta^2 in magnet) * k3l (constant field approximation) """
         box = LatticeContainer('test', self.seq, reset_elements_to_defaults=False)
         box.update_element_positions()
-        els = [el for el in box.lattice.sequence if isinstance(el, Octupole)]
-        detuning_str = np.array([self.integral_beta2(el.s_start, el.s_end) / el.l for el in els])
-        central_k3_str = np.array([1 / (self.beta(el.s_mid) ** 3) * el.l for el in els])
-        return np.sum(detuning_str*central_k3_str)
+        if self.otype == 0:
+            # Multipoles are thin elements - sum their beta^2 * k3l directly
+            els = [el for el in box.lattice.sequence if isinstance(el, Multipole)]
+            detuning_str = np.array([self.beta(el.s_mid) ** 2 for el in els])
+            central_k3_str = np.array([el.kn[3] for el in els])  # k3l
+            return np.sum(detuning_str * central_k3_str)
+        elif self.otype == 1:
+            els = [el for el in box.lattice.sequence if isinstance(el, Octupole)]
+            detuning_str = np.array([self.integral_beta2(el.s_start, el.s_end) / el.l for el in els])
+            #central_k3_str = np.array([1 / (self.beta(el.s_mid) ** 3) * el.l for el in els])
+            central_k3_str = np.array([el.k3 * el.l for el in els]) #k3l
+            return np.sum(detuning_str * central_k3_str)
+        elif self.otype == 2:
+            # HKpoly are thin elements - sum their beta^2 * K40 * 24 directly
+            els = [el for el in box.lattice.sequence if isinstance(el, HKPoly)]
+            detuning_str = np.array([self.beta(el.s_mid) ** 2 for el in els])
+            central_k3_str = np.array([el['K40'] * 24.0 for el in els])  # k3l
+            return np.sum(detuning_str * central_k3_str)
+        else:
+            raise Exception("Unsuitable otype!")
+
+    def scale_strength(self, factor):
+        for el in self.seq:
+            if self.otype == 0:
+                if isinstance(el, Multipole):
+                    el.kn = list(np.array(el.kn)*factor)
+            elif self.otype == 1:
+                if isinstance(el, Octupole):
+                    el.k3 *= factor
+            elif self.otype == 2:
+                if isinstance(el, HKPoly):
+                    el['K40'] *= factor
+                    el['K22'] *= factor
+                    el['K04'] *= factor
+            else:
+                raise Exception("Unsupported otype")
 
     def set_current(self):
         pass
