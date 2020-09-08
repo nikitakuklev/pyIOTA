@@ -67,13 +67,9 @@ class DaskSLURMSim(Sim):
         Executes the tasks (functions) on the cluster
         """
         wi = min(limit, len(tasks))
-        print(f'Cluster {self.id} - scaling to {wi} workers')
-        for i in range(1, wi + 1, 10):
-            self.cluster.scale(i)
-            self.client.wait_for_workers(i)
-            print(i)
-        self.cluster.scale(wi)
-        self.client.wait_for_workers(wi)
+        print(f'Cluster {self.id} - scaling to 1')
+        self.cluster.scale(1)
+        self.client.wait_for_workers(1, timeout=60)
         print(f'Cluster {self.id} - starting jobs')
         futures = []
         for f in tasks:
@@ -84,6 +80,14 @@ class DaskSLURMSim(Sim):
                 futures.append(future)
         if fnf:
             del future
+        print(f'Cluster {self.id} - scaling to {wi} workers')
+        for i in range(min(5, wi), wi + 1, 10):
+            self.cluster.scale(i)
+            self.client.wait_for_workers(i, timeout=60)
+            print(i)
+        self.cluster.scale(wi)
+        self.client.wait_for_workers(wi)
+
         ad = self.cluster.adapt(minimum=0, maximum=wi, target_duration=3)
         self.adaptive = ad
         return futures or None
