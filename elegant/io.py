@@ -1,4 +1,5 @@
-__all__ = ['SDDS', 'read_parameters_to_df', 'write_df_to_parameter_file', 'prepare_folders', 'prepare_folder_structure',
+__all__ = ['SDDS', 'SDDSTrack',
+           'read_parameters_to_df', 'write_df_to_parameter_file', 'prepare_folders', 'prepare_folder_structure',
            'write_df_to_parameter_file_v2']
 
 """
@@ -12,6 +13,7 @@ from pathlib import Path
 from typing import Optional, List
 import numpy as np
 import pandas as pd
+from time import perf_counter
 
 try:
     import sdds
@@ -77,11 +79,16 @@ class SDDS:
         :return:
         """
         if name not in self.cname:
-            raise IndexError
-        if p is None:
-            return self.cdata[self.cdict[name]][:, :]
+            if isinstance(name, int):
+                idx = name
+            else:
+                raise IndexError
         else:
-            return self.cdata[self.cdict[name]][p, :]
+            idx = self.cdict[name]
+        if p is None:
+            return self.cdata[idx][:, :]
+        else:
+            return self.cdata[idx][p, :]
 
     def p(self, name: str):
         """
@@ -99,6 +106,138 @@ class SDDS:
         """
         d = {k: v[p, :] for (k, v) in zip(self.cname, self.cdata)}
         return pd.DataFrame(data=d)
+
+
+df_columns = ['PARTICLE', 'N', 'X0i', 'Y0i', 'Z0i', 'X0', 'PX0', 'Y0', 'PY0', 'Z0', 'PZ0', 'E0']
+df_data_columns = ['X0', 'PX0', 'Y0', 'PY0', 'Z0', 'PZ0', 'E0']
+cols = {'X0': 0, 'PX0': 1, 'Y0': 2, 'PY0': 3, 'Z0': 4, 'PZ0': 5, 'E0': 6}
+
+
+class SDDSTrack:
+    """
+    SDDSPython wrapper for track data (which requires special treatment due to memory usage and format)
+    """
+    def __init__(self, path: Path, fast: bool = True):
+        if isinstance(path, Path):
+            path = str(path)
+        if not os.path.exists(path):
+            raise Exception(f'Path {path} is missing you fool!')
+        sd = sdds.SDDS(0)
+        sd.load(path)
+        self.sd = sd
+        self.path = path
+        self.cname = [sd.columnName[i] for i in range(len(sd.columnName))]
+        self.pname = [sd.parameterName[i] for i in range(len(sd.parameterName))]
+        self.cdict = {sd.columnName[i]: i for i in range(len(sd.columnName))}
+        self.pdict = {sd.parameterName[i]: i for i in range(len(sd.parameterName))}
+        if not fast:
+            self.cdef = [sd.columnDefinition[i].copy() for i in range(len(sd.columnName))]
+            self.pdef = [sd.parameterDefinition[i].copy() for i in range(len(sd.parameterName))]
+
+        self.cdata = self._ragged_nested_list_to_array(sd.columnData, idx_col='particleID')
+        print(f'Track data has shape {self.cdata.shape} (cols|entries|pages)')
+        self.pdata = [np.array(sd.parameterData[i]) for i in range(len(sd.parameterName))]
+        if len(self.cname) > 0:
+            self.pagecnt = self.cdata[0].shape[0]
+        else:
+            self.pagecnt = self.pdata[0].shape[0]
+
+        self.to_df()
+
+    def _ragged_nested_list_to_array(self, data, idx_col):
+        n_cols = len(data)
+        n_pages_l = [len(data[i]) for i in range(n_cols)]
+        assert len(np.unique(n_pages_l)) == 1
+        n_pages = n_pages_l[0]
+        n_entries = max([len(v) for v in data[0]])
+        arr = np.full((n_cols, n_entries, n_pages), np.nan, dtype=np.float64)
+        col_idx = self.cdict[idx_col]
+        for page in range(n_pages):
+            entries = np.array(data[col_idx][page]) - 1
+            for j, (name, idx) in enumerate(cols.items()):
+                assert j == idx
+                arr[j, entries, page] = data[idx][page]
+                # if j == 0:
+                #     print(arr[j, :, page])
+        return arr
+
+    def summary(self):
+        """
+        Print a brief file summary
+        """
+        print(f'File:{self.path}')
+        print(f'Pages:{self.pagecnt} | Cols:{len(self.cname)} | Pars:{len(self.pname)}')
+
+    def __getitem__(self, name: str):
+        """
+        Key access method. Prioritizes columns over parameters, and returns page 0 only.
+        :param name:
+        :return:
+        """
+        if name in self.cname:
+            return self.c(name)
+        elif name in self.pname:
+            return self.p(name)
+        else:
+            raise IndexError
+
+    def c(self, name: str, p: int = None) -> np.ndarray:
+        """
+        Get SDDS column.
+        :param name:
+        :param p: Particle number
+        """
+        if name not in self.cname:
+            if isinstance(name, int):
+                idx = name
+            else:
+                raise IndexError
+        else:
+            idx = self.cdict[name]
+        if p is None:
+            return self.cdata[idx][:, :]
+        else:
+            return self.cdata[idx][p, :]
+
+    def by_turn(self, col, nturn):
+        return self.cdata[col][:, nturn]
+
+    def p(self, name: str):
+        """
+        Get SDDS parameter.
+        :param name:
+        :return:
+        """
+        return self.pdata[self.pdict[name]]
+
+    def to_df(self):
+        arr = self.cdata
+        (n_cols, n_particles, n_turns) = arr.shape
+        df = pd.DataFrame(columns=df_columns, index=range(1, n_particles + 1), dtype=np.float64)
+        # print(len(df), df.dtypes)
+        # df = df.astype(dtype= {'PARTICLE':np.int32,'N':np.int32,'X0i':np.float64,'Y0i':np.float64,'Z0i':np.float64})
+        # print(len(df), df.dtypes)
+        df.loc[:, 'PARTICLE'] = np.array(range(n_particles)) + 1
+        # print(len(df), df.dtypes)
+        for i, c in enumerate(cols.keys()):
+            df.loc[:, c] = pd.Series([l[~np.isnan(l)] for l in arr[i, ...]], index=range(1, n_particles + 1))
+            # print([l[~np.isnan(l)] for l in list(arr[...,i])][0], len(df.loc[:,c]))
+        # print(len(df), df.iloc[0:1])
+        # return df
+        # print(len(df), df.iloc[0:1])
+        # print(df.loc[df.X0 == np.nan,:])
+        # print(df.loc[(df.X0 == 0.0),:])
+        del arr
+        self.cdata = None
+        df.loc[:, 'X0i'] = df.loc[:, 'X0'].apply(lambda x: x[0])
+        df.loc[:, 'Y0i'] = df.loc[:, 'Y0'].apply(lambda x: x[0])
+        df.loc[:, 'Z0i'] = df.loc[:, 'Z0'].apply(lambda x: x[0])
+        df.loc[:, 'N'] = df.loc[:, 'X0'].apply(lambda x: len(x))
+        Nmax = df.loc[:, 'N'].max()
+        # print(len(df), df.dtypes)
+        df = df.astype(dtype={'PARTICLE': np.int32, 'N': np.int32})
+        self.df = df
+        return df
 
 
 def read_parameters_to_df(knob: Path,
