@@ -506,7 +506,6 @@ class Writer:
                 sl.append('\n')
                 preamble += 'MAL, RC, '
 
-
         # names = []
         # for el in markers:
         #     # name = pick_next_name(el['UNIQUENAME'], names)
@@ -515,12 +514,6 @@ class Writer:
         #     # print(el['INDEX'],el['UNIQUENAME'],name)
         #     # iota.RenameElement(el['INDEX'], name)
         # sl.append('\n')
-
-        # Finishing touches
-        # f.write('IBSELE: IBSCATTER, VERBOSE=0\n')
-        #sl.append('\n')
-
-
 
         if opt.add_limiting_aperture:
             preamble += 'MA1, APER, '
@@ -570,7 +563,7 @@ class Writer:
         #             seq2.append(s)
         #             # print(s)
         # wrapstr = 'iota: LINE=(CHRG, MAL, RC, MA1, APER, {})\n'.format(', '.join(seq2))
-        # wrapstr = 'iota: LINE=(CHRG, MAL, RC, MA1, APER, {})\n'.format(', '.join([el.id for el in lat.sequence]))
+
         seq_mod = [el.id for el in lat.sequence if not isinstance(el, Edge)]
         wrapstr = f"iota: LINE=({preamble} {', '.join(seq_mod)})\n"
         sl.append(textwrap.fill(wrapstr, break_long_words=False, break_on_hyphens=False).replace('\n', ' &\n'))
