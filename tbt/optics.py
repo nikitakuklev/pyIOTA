@@ -13,14 +13,14 @@ import pyIOTA.math as pmath
 
 class Routines:
     @staticmethod
-    def linear_optics_2D_SVD(kick: Kick, family:str = 'H'):
+    def linear_optics_2D_SVD(kick: Kick, family: str = 'H'):
         svd = SVD()
         U, S, V, vh = svd.get_data_2D(kick, family)
         Vf = U @ np.diag(S)
         wrap = pmath.Wrapper(-np.pi, np.pi)
         phases_exp_rel = Phase.calc_from_modes(mode2=Vf[:, 1], mode1=Vf[:, 0])
         phases_exp_abs = Phase.relative_to_absolute(phases_exp_rel)
-        betax_exp_unscaled = Twiss.from_SVD(U,S,V)
+        betax_exp_unscaled = Twiss.from_SVD(U, S, V)
         return phases_exp_rel, betax_exp_unscaled
 
 
@@ -54,7 +54,7 @@ class Coordinates:
         return x / np.sqrt(beta)
 
     @staticmethod
-    def normalize(x: np.ndarray, px: np.ndarray, beta: float, alpha: float) -> Tuple[np.ndarray,np.ndarray]:
+    def normalize(x: np.ndarray, px: np.ndarray, beta: float, alpha: float) -> Tuple[np.ndarray, np.ndarray]:
         """
         Compute normalized transverse position and momentum from local (x,px) and twiss functions
         """
@@ -133,7 +133,7 @@ class Twiss:
 
     @staticmethod
     def from_amplitudes(data: List[np.ndarray]):
-        return np.array([np.mean(np.abs(v-np.mean(v))) for v in data])
+        return np.array([np.mean(np.abs(v - np.mean(v))) for v in data])
 
 
 class Envelope:
@@ -158,37 +158,38 @@ class Envelope:
     @staticmethod
     def budkerfit_norm(xdata: np.ndarray,
                        tau: float, c2: float, freq: float, ofsx: float, ofsy: float, c3: float):
-        xo = (xdata - ofsx) #* (1 + c3 * np.arange(len(xdata)))
-        ans = np.exp(-tau * (xo**2) - c2 * (1-np.cos(freq * xo))) + ofsy
+        xo = (xdata - ofsx)  # * (1 + c3 * np.arange(len(xdata)))
+        ans = np.exp(-tau * (xo ** 2) - c2 * (1 - np.cos(freq * xo))) + ofsy
         ans = ans * (1 + c3 * np.arange(len(ans)))
         return ans / np.max(ans)
 
     @staticmethod
     def budkerfit_norm2(xdata: np.ndarray,
-                       tau: float, c2: float, freq: float, ofsx: float, ofsy: float, c3: float, phase: float):
-        xo = (xdata - ofsx) #* (1 + c3 * np.arange(len(xdata)))
-        ans = np.exp(-tau * (xo**2) - c2 * (1-np.cos(freq * xo + phase))) + ofsy
+                        tau: float, c2: float, freq: float, ofsx: float, ofsy: float, c3: float, phase: float):
+        xo = (xdata - ofsx)  # * (1 + c3 * np.arange(len(xdata)))
+        ans = np.exp(-tau * (xo ** 2) - c2 * (1 - np.cos(freq * xo + phase))) + ofsy
         ans = ans * (1 + c3 * np.arange(len(ans)))
         return ans / np.max(ans)
 
     @staticmethod
-    #@jit(nopython=True, fastmath=True, nogil=True)
+    # @jit(nopython=True, fastmath=True, nogil=True)
     def coupled_envelope(x: np.ndarray,
                          amplitude: float, c1: float, c2: float, c3: float, nu: float, ofsx: float, ofsy: float):
         """
         Envelope that includes chromaticity and octupolar nonlinear decoherence, multiplied by coupling cosine envelope
         In other words, a 2D model with additional coupling 'beating' envelope
         """
-        xsc = (x-ofsx) * c2
+        xsc = (x - ofsx) * c2
         xscsq = xsc ** 2
-        #ans = amplitude * (1 / (1 + xscsq)) * np.exp(-xscsq * (c1 ** 2) / (1 + xscsq)) * np.exp(-((np.sin(nu * x)) * (c3 / nu)) ** 2) + ofsy
-        ans = amplitude * (1 / (1 + xscsq)) * np.exp(-xscsq * c1 / (1 + xscsq)) * np.exp(-((np.sin(nu * x)) * (c3 / nu)) ** 2) + ofsy
+        # ans = amplitude * (1 / (1 + xscsq)) * np.exp(-xscsq * (c1 ** 2) / (1 + xscsq)) * np.exp(-((np.sin(nu * x)) * (c3 / nu)) ** 2) + ofsy
+        ans = amplitude * (1 / (1 + xscsq)) * np.exp(-xscsq * c1 / (1 + xscsq)) * np.exp(
+            -((np.sin(nu * x)) * (c3 / nu)) ** 2) + ofsy
         # ans = ans * (1+c3*np.arange(len(ans)))
         return ans
 
     def find_envelope(self,
                       data_raw: np.ndarray,
-                      normalize:bool=False,
+                      normalize: bool = False,
                       p0=None,
                       lu=None,
                       full=False):
@@ -279,7 +280,7 @@ class SVD:
         return U, S, V, vh
 
     def decompose_kick_2D(self, kick: Kick, tag: str = 'SVD', use_kick_trim: bool = True,
-                          add_virtual_bpms: bool = True, families: List[str]=None):
+                          add_virtual_bpms: bool = True, families: List[str] = None):
         """
         Decompose kick using SVD and store results
         :param add_virtual_bpms: Whether to add resulting components as virtual BPMs
@@ -408,3 +409,24 @@ class ICA:
         U, S, vh = np.linalg.svd(matrix, full_matrices=False)
         V = vh.T  # transpose it back to conventional U @ S @ V.T
         return U, S, V, vh
+
+
+class Interpolator:
+
+    def __init__(self, ratio: int = 10):
+        self.ratio = ratio
+
+    def interpolate(self, x: np.ndarray = None, y: np.ndarray = None, ratio: int = None) -> np.ndarray:
+        import scipy.interpolate
+        
+        assert y
+        if not x:
+            x = np.arange(y)
+        assert len(x) == len(y) and len(x) > 3
+        delta = np.unique(np.diff(x))
+        assert len(delta) == 1  # Check if spacing uniform
+
+        ratio = ratio or self.ratio
+        p = scipy.interpolate.CubicSpline(x, y)
+        x_new = np.linspace(x[0], x[-1], len(x) * ratio, endpoint=True)
+        return p(x_new)
