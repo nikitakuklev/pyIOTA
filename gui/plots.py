@@ -18,6 +18,14 @@ from ocelot import Quadrupole, Bend, SBend, RBend, Vcor, Hcor, Sextupole, Undula
 logger = logging.getLogger(__name__)
 
 
+def plot(*args, **kwargs):
+    return plot_simple(*args, **kwargs)
+
+
+def plot_grid(*args, **kwargs):
+    return plot_simple_grid(*args, **kwargs)
+
+
 def plot_simple(*args,
                 x: Union[List, np.ndarray] = None,
                 fmt: str = None,
@@ -248,7 +256,7 @@ def plot_simple_grid(*args,
                         if colorbar:
                             fig.colorbar(s, ax=ax[i])
                     else:
-                        ax[i].plot(x, y)
+                        ax[i].plot(x, y, **kwargs)
                 if not no_title:
                     if no_title_idx:
                         ax[i].set_title(f"{k}", fontsize=fontsize)
