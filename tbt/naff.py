@@ -100,6 +100,7 @@ class NAFF:
 
     def fft(self,
             data: np.ndarray,
+            spacing: float = 1.0,
             window_power: int = None,
             pad_zeros_power: int = None,
             output_trim: slice = None,
@@ -107,6 +108,7 @@ class NAFF:
         """
         It is me, your personal FFT. Really...just FFT, so I don't have to rewrite same thing 10 times.
 
+        :param spacing:
         :param data: Data
         :param window_power: Uses object default if not specified
         :param pad_zeros_power: Uses object default if not specified
@@ -125,14 +127,7 @@ class NAFF:
         n_turns = len(data_centered)
 
         # Windowing must happen on x[n], original data
-        if window_power == 0:
-            window = np.ones_like(data_centered)
-        else:
-            if (n_turns, window_power) not in self.hann_cache:
-                window = np.hanning(n_turns) ** window_power
-                self.hann_cache[(n_turns, window_power)] = window
-            else:
-                window = self.hann_cache[(n_turns, window_power)]
+        window = self.window(n_turns, window_power)
         data_centered = data_centered * window
 
         if pad_zeros_power is not None:
@@ -146,8 +141,8 @@ class NAFF:
         else:
             len_padded = n_turns
 
-        fft_power = np.abs(np.fft.fft(data_centered, n=len_padded)) ** 2
-        fft_freq = np.fft.fftfreq(len_padded)
+        fft_power = np.abs(np.fft.fft(data_centered, n=len_padded)) ** 2 / (n_turns*n_turns)
+        fft_freq = np.fft.fftfreq(len_padded, d=spacing)
         # Keep half
         fft_power = fft_power[fft_freq >= 0]
         fft_freq = fft_freq[fft_freq >= 0]
@@ -296,8 +291,8 @@ class NAFF:
         else:
             return [r[0] for r in results]
 
-    def run_naff_v2(self, data: np.ndarray, data_trim: slice = None, xatol: float = 1e-6,
-                    n_components: int = 2, full_data: bool = True):
+    def run_naff_v2(self, data: np.ndarray, data_trim: slice = None, xatol: float = 1e-8,
+                    n_components: int = 2, full_data: bool = True, spacing: float = 1.0):
         """
         Numeric analysis of fundamental frequencies
         Iterative method that maximizes inner product of data and oscillatory signal, finding best frequencies
@@ -310,6 +305,7 @@ class NAFF:
         :return:
         """
         # Preprocessing
+        sp = spacing
         data_trim = data_trim or self.data_trim
         if data_trim:
             if data_trim.stop is not None and data_trim.stop > len(data):
@@ -318,11 +314,7 @@ class NAFF:
         data_centered = data - np.mean(data)
         data_centered = data_centered.astype(complex)
         n_turns = len(data_centered)
-        if (n_turns, self.window_power) not in self.hann_cache:
-            window = np.hanning(n_turns) ** self.window_power
-            self.hann_cache[(n_turns, self.window_power)] = window
-        else:
-            window = self.hann_cache[(n_turns, self.window_power)]
+        window = self.window(n_turns, self.window_power)
 
         # Internal functions
 
@@ -340,26 +332,26 @@ class NAFF:
             last_eval = self.compute_correlations_v2(signal, freq, no_trim=True)
             return last_eval[0]
 
-        def freq_projection(fc, tunes, projections, n_freqs):
+        def freq_projection(fc, tunes, projections, n_freqs, window):
             Ai = np.zeros_like(fc, dtype=np.complex128)
             for j in range(0, n_freqs):
                 Ai += projections[j] * np.exp(1.0j * 2 * np.pi * tunes[j] * np.arange(n_turns))
             return np.sum(fc * np.conjugate(Ai) * window) / np.sum(Ai * np.conjugate(Ai) * window)
 
-        def signal_projection(signal, tunes, projections, n_freqs):
+        def signal_projection(signal, tunes, projections, n_freqs, window):
             Ai = np.zeros_like(signal, dtype=np.complex128)
             for j in range(0, n_freqs):
                 Ai += projections[j] * np.exp(1.0j * 2 * np.pi * tunes[j] * np.arange(n_turns))
             return np.sum(signal * np.conjugate(Ai) * window) / np.sum(Ai * np.conjugate(Ai) * window)
 
-        def remove_frequencies(signal, tunes, normalized_amplitudes, i):
+        def remove_frequencies(signal, tunes, normalized_amplitudes, i, window):
             projections = np.zeros(i + 1, dtype=np.complex128)
             normalized_amplitudes.append(projections)  # i.e. projections = normalized_amplitudes[i]
             fc = np.exp(1.0j * 2 * np.pi * tunes[i] * np.arange(n_turns))
 
             # First, compute the frequency correlations
             for j in range(0, i):
-                Pij = freq_projection(fc, tunes, normalized_amplitudes[j], j + 1)
+                Pij = freq_projection(fc, tunes, normalized_amplitudes[j], j + 1, window)
                 for k in range(0, j + 1):
                     normalized_amplitudes[i][k] -= Pij * normalized_amplitudes[j][k]
 
@@ -367,7 +359,7 @@ class NAFF:
             normalized_amplitudes[i][i] = 1.0
 
             # Scale frequency amplitudes by actual signal factor, except last (self) one
-            freq_amp = signal_projection(signal, tunes, projections, i + 1)
+            freq_amp = signal_projection(signal, tunes, projections, i + 1, window)
             for k in range(0, i + 1):
                 normalized_amplitudes[i][k] *= freq_amp
 
@@ -406,13 +398,14 @@ class NAFF:
 
             # Remove frequencies
             data_original = data_centered.copy()
-            amplitude = remove_frequencies(data_centered, tunes, normalized_amplitudes, i)
-            amplitude_neg = remove_frequencies(data_centered, tunes_neg, normalized_amplitudes_neg, i)
+            amplitude = remove_frequencies(data_centered, tunes, normalized_amplitudes, i, window)
+            amplitude_neg = remove_frequencies(data_centered, tunes_neg, normalized_amplitudes_neg, i, window)
 
-            results.append({'tune': tune,
-                            'tunes': (tune0, tune, tune_neg),
+            results.append({'tune': tune/sp,
+                            'tunes': (tune0/sp, tune/sp, tune_neg/sp),
                             'namps': (normalized_amplitudes.copy(), normalized_amplitudes_neg.copy()),
                             'amps': (amplitude, amplitude_neg),
+                            'absamps': (np.abs(amplitude), np.abs(amplitude_neg)),
                             'fit': (res, res2),
                             'signal': data_original})
 
@@ -599,22 +592,12 @@ class NAFF:
                 data = data[data_trim]
                 data = data - np.mean(data)
 
-        turns_naff = len(data) - 1
-
-        if (turns_naff, window_order) not in self.window_cache:
-            # Hanning window
-            T = np.linspace(0, turns_naff, num=turns_naff + 1, endpoint=True) * 2.0 * np.pi - np.pi * turns_naff
-            TWIN = ((2.0 ** window_order * np.math.factorial(window_order) ** 2) / float(
-                np.math.factorial(2 * window_order))) * (1.0 + np.cos(T / turns_naff)) ** window_order
-            self.window_cache[(turns_naff, window_order)] = TWIN
-        else:
-            TWIN = self.window_cache[(turns_naff, window_order)]
-
+        window = self.window(len(data), window_order)
         integral = []
         tic = time.perf_counter()
         for tune in frequencies:
             i_line = np.arange(0, len(data))
-            correlation = np.sum(data * TWIN * np.exp(-1.0j * 2 * np.pi * tune * i_line)) / len(data)
+            correlation = np.sum(data * window * np.exp(-1.0j * 2 * np.pi * tune * i_line)) / len(data)
             integral.append((np.abs(correlation), np.real(correlation), np.imag(correlation)))
 
         self.naff_runtimes.append((time.perf_counter() - tic) / len(frequencies))
@@ -632,6 +615,35 @@ class NAFF:
         """
         # <v,v> = 1 * len(v) because frequency vector has entries of magnitude 1
         return np.sum(np.conjugate(u) * v) / len(u)
+
+    def window(self, N: int, power: int, kind: str = 'hann2', copy: bool = False):
+        """
+        Returns a windowing function.
+        For cache, manual management is used (vs lru_cache), so as to provide extra options
+        :param power:
+        :param N:
+        :param kind:
+        :param copy:
+        :return:
+        """
+        key = (kind, N, power)
+        if key in self.window_cache:
+            window = self.window_cache[key]
+        else:
+            if power == 0:
+                window = np.ones(N)
+            else:
+                if kind == 'hann':
+                    # Hanning window - this is 2x vs np.hanning
+                    T = np.linspace(0, N-1, num=N, endpoint=True) * 2.0 * np.pi - np.pi * (N-1)
+                    window = ((2 ** power * np.math.factorial(power) ** 2) /
+                        np.math.factorial(2 * power)) * (1.0 + np.cos(T / (N-1))) ** power
+                elif kind == 'hann2':
+                    window = np.hanning(N) ** power
+                else:
+                    raise Exception(f'Unknown window type:{kind}')
+            self.window_cache[key] = window
+        return window
 
     def reset_perf_counters(self):
         self.naff_runtimes = []
