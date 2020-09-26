@@ -79,6 +79,8 @@ class Kick:
         NUX = '_nux'
         NUY = '_nuy'
         NU = '_nu'
+        INTERPX = '_ix'
+        INTERPY = '_iy'
 
     def __init__(self,
                  df: pd.DataFrame,
@@ -120,7 +122,8 @@ class Kick:
                 bpm_list = set([k[:-1] for k in pyIOTA.iota.run2.BPMS.ALLA])
                 logger.info(f'BPM list not specified - deducing ({len(bpm_list)}) IOTA BPMs: ({bpm_list})')
             else:
-                bpm_list = set([k[:-1] for k in df.columns if k not in special_keys and k.endswith(('V','H','S','C'))])
+                bpm_list = set(
+                    [k[:-1] for k in df.columns if k not in special_keys and k.endswith(('V', 'H', 'S', 'C'))])
                 print('WARN - deducing BPMs')
                 logger.info(f'BPM list not specified - deducing ({len(bpm_list)}) BPMs: ({bpm_list})')
 
@@ -170,10 +173,16 @@ class Kick:
         :param column:
         :param value:
         """
+        # print(value, type(value))
         if column in self.df.columns:
-            self.df.iloc[0, self.df.columns.get_loc(column)] = value
+            # self.df.iloc[0, self.df.columns.get_loc(column)] = [value]
+            self.df.iat[0, self.df.columns.get_loc(column)] = value
         else:
-            self.df.loc[:, column] = [value]
+            # Pandas is horrible with list/array cell contents
+            s = pd.Series([value])
+            self.df = self.df.assign(**{column: s})
+            # self.df.loc[:, column] = [value]
+            # self.df.at[self.df.index[0], column] = [value]
 
     def get(self, column: Union[str, int]):
         """
@@ -212,7 +221,8 @@ class Kick:
         return self.df.iloc[0, self.df.columns.get_loc('state')].copy()
 
     def summarize(self):
-        print(f'Kick idx ({self.idx}) idxglobal ({self.idxg}): ({self.get_turns()}) turns, trim ({self.trim}), at ({self.kickh:.5f})H ({self.kickv:.5f})V')
+        print(
+            f'Kick idx ({self.idx}) idxglobal ({self.idxg}): ({self.get_turns()}) turns, trim ({self.trim}), at ({self.kickh:.5f})H ({self.kickv:.5f})V')
         self.bpms_summarize_status()
 
     def set_trim(self, trim: slice):
@@ -301,7 +311,7 @@ class Kick:
 
     def get_bpm_data(self,
                      columns: Union[List[str], str] = None,
-                     bpms: List[str] = None,
+                     bpms: Union[List[str], str] = None,
                      family: str = 'A',
                      data_type: Datatype = Datatype.RAW,
                      return_type: str = None,
@@ -328,9 +338,20 @@ class Kick:
             columns = [columns]
             if return_type is None:
                 return_type = 'single'
+
+        if columns is not None:
+            if data_type != self.Datatype.RAW:
+                raise Exception('Column list used with nondefault datatype - this seems like an error')
+
+        if not isinstance(bpms, list) and bpms is not None:
+            bpms = [bpms]
+            if return_type is None:
+                return_type = 'single'
+
         if isinstance(columns, list):
             if len(columns) == 0:
                 raise Exception(f'Requested BPM data with empty column list - use None instead')
+
         return_type = return_type or 'dict'
         assert columns is None or isinstance(columns, list)
         assert bpms is None or isinstance(bpms, list)
@@ -820,14 +841,14 @@ class Kick:
                     n_components = search_kwargs.get('n_components', 2)
                     if data_trim:
                         # Use provided trims
-                        nfresult = naff.run_naff(self.get_bpm_data(bpm, no_trim=True)[data_trim],
-                                                 n_components=n_components,
-                                                 data_trim=np.s_[:])
+                        nfresult = naff.run_naff_v2(self.get_bpm_data(bpm, no_trim=True)[data_trim],
+                                                    n_components=n_components,
+                                                    data_trim=np.s_[:])
                     else:
                         # Use NAFF trims
-                        nfresult = naff.run_naff(self.get_bpm_data(bpm, no_trim=True),
-                                                 n_components=n_components)
-                    peaks[bpm] = ([n[0] for n in nfresult], nfresult)
+                        nfresult = naff.run_naff_v2(self.get_bpm_data(bpm, no_trim=True),
+                                                    n_components=n_components)
+                    peaks[bpm] = ([n['tune'] for n in nfresult], nfresult)
                     if selector:
                         nu = selector(self, peaks[bpm], bpm, search_kwargs)
                         self.df[bpm + self.Datatype.NU.value] = nu
@@ -898,7 +919,9 @@ class Kick:
     def calculate_fft(self,
                       naff: NAFF,
                       families: List[str] = None,
-                      data_trim: slice = None):
+                      spacing: float = 1.0,
+                      data_trim: slice = None,
+                      data_type: Datatype = Datatype.RAW):
         """
         Calculates FFT for each bpms and stores in dataframe
         :param families:
@@ -910,11 +933,14 @@ class Kick:
         for i, bpm in enumerate(bpms):
             if data_trim:
                 # Use provided trims
-                fft_freq, fft_power = naff.fft(self.get_bpm_data(bpm, no_trim=True)[data_trim],
-                                               data_trim=np.s_[:])
+                fft_freq, fft_power = naff.fft(
+                    self.get_bpm_data(bpms=bpm, no_trim=True, data_type=data_type)[data_trim],
+                    data_trim=np.s_[:],
+                    spacing=spacing)
             else:
                 # Use NAFF trims
-                fft_freq, fft_power = naff.fft(self.get_bpm_data(bpm, no_trim=True))
+                fft_freq, fft_power = naff.fft(self.get_bpm_data(bpms=bpm, no_trim=True, data_type=data_type),
+                                               spacing=spacing)
             # fft_freq, fft_power = naff.fft(self.get(bpm))
             self.df[bpm + self.Datatype.FFT_FREQ.value] = [fft_freq]
             self.df[bpm + self.Datatype.FFT_POWER.value] = [fft_power]
@@ -979,7 +1005,7 @@ class KickSequence:
     BPMS_ACTIVE = []
 
     def __init__(self, kicks: list, demean=True, eid=None, props=None):
-        #assert all(k.idx_offset == kicks[0].idx_offset[0] for k in kicks)
+        # assert all(k.idx_offset == kicks[0].idx_offset[0] for k in kicks)
         self.kicks = kicks
         # dflist = [k.df for k in self.kicks]
         # self.df = pd.concat(dflist)
@@ -1179,6 +1205,7 @@ class KickSequence:
     def remove_kicks(self, kick_ids: List[Union[int, Kick]], local: bool = True):
         """
         Remove specified kicks from sequence
+        :param local:
         :param kick_ids: Kick ids or objects themselves
         """
         removed_list = []
@@ -1186,8 +1213,8 @@ class KickSequence:
             if isinstance(kid, int):
                 try:
                     k = self.get_kick(kid, local=local)
-                except:
-                    logger.warning(f'Kick ({kid}) not found in KS ({self.id}) - ignoring')
+                except AttributeError as e:
+                    logger.warning(f'Kick ({kid}) not found in KS ({self.id}) - reason {e}')
                     continue
             elif isinstance(kid, Kick):
                 k = kid
@@ -1212,14 +1239,19 @@ class KickSequence:
         return self.kicks[item]
 
     def summarize(self):
-            kv = [k.kickv for k in self.kicks]
-            kh = [k.kickh for k in self.kicks]
-            print(f'KickSequence ({self.id}): ({len(self.kicks)}) kicks, max H ({max(kh):.5f}), max V ({max(kv):.5f})')
-            print(f'Config dictionary: {self.props}')
+        kv = [k.kickv for k in self.kicks]
+        kh = [k.kickh for k in self.kicks]
+        print(f'KickSequence ({self.id}): ({len(self.kicks)}) kicks, max H ({max(kh):.5f}), max V ({max(kv):.5f})')
+        print(f'Config dictionary: {self.props}')
+        ids = [k.idx for k in self.kicks]
+        print(f'IDs: {ids}')
+        gids = [k.idxg for k in self.kicks]
+        print(f'GIDs: {gids}')
 
     def get_kick(self, kick_id: int, local: bool = False) -> Kick:
         """
         Gets kick object in this KickSequence with specified index
+        :param local:
         :param kick_id: Kick integer id
         :return: Kick object
         """
@@ -1229,10 +1261,10 @@ class KickSequence:
             indices = self.df.idxg
         tp = 'local' if local else 'global'
         if kick_id not in indices.values:
-            raise Exception(f'Kick ({tp}) id ({kick_id}) not found - have ({indices.values})')
+            raise AttributeError(f'Kick ({tp}) id ({kick_id}) not found - have ({indices.values})')
         df_row = self.df.loc[indices == kick_id]
         if df_row.shape[0] != 1:
-            raise Exception(f'Kick ({tp}) id ({kick_id}) is not unique - result size is ({df_row.shape})')
+            raise AttributeError(f'Kick ({tp}) id ({kick_id}) is not unique - result size is ({df_row.shape})')
         else:
             return df_row.iloc[0, self.df.columns.get_loc('kick')]
 
