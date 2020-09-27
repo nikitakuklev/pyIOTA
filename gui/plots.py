@@ -31,7 +31,7 @@ def plot_simple(*args,
                 fmt: str = None,
                 xlabel: str = None,
                 ylabel: str = None,
-                sizes: Tuple = (12, 5),
+                sizes: Tuple = (9, 3),
                 demean: bool = False,
                 normalize: bool = False,
                 twiny_args: Union[List, Dict, np.ndarray] = None,
@@ -172,7 +172,7 @@ def plot_simple_grid(*args,
         n_rows = math.ceil(len(entry) / nperrow)
         width = nperrow if n_rows > 1 else len(entry)
         fig, ax = plt.subplots(n_rows, width, figsize=(sizes[0] * width, sizes[1] * n_rows),
-                               sharex=sharex, sharey=sharey)
+                               sharex=sharex, sharey=sharey, squeeze=False)
         fig_l.append(fig)
         # ax_l.append(ax.flatten())
         if n_rows == width == 1:
