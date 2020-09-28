@@ -36,14 +36,16 @@ class Util:
         files_ll = []
         props_dicts = []
 
-        def parse(p):
+        def parse(p, soft_fail: bool = False):
             if p.exists():
                 with p.open('r') as f:
                     try:
                         d = json.load(f)
                         return d
-                    except JSONDecodeError:
-                        logger.error(f'JSON file {p} failed to parse, ignoring')
+                    except JSONDecodeError as e:
+                        logger.error(f'JSON file {p} failed to parse')
+                        if not soft_fail:
+                            raise e
             return {}
 
         for folder in folders:
@@ -340,8 +342,8 @@ class Kick:
                 return_type = 'single'
 
         if columns is not None:
-            if data_type != self.Datatype.RAW:
-                raise Exception('Column list used with nondefault datatype - this seems like an error')
+            if data_type is not self.Datatype.RAW:
+                raise Exception(f'Column list used with nondefault datatype {data_type} - this seems like an error')
 
         if not isinstance(bpms, list) and bpms is not None:
             bpms = [bpms]
@@ -1040,10 +1042,12 @@ class KickSequence:
                                 nl: bool = True,
                                 skew_tol=3e-3,
                                 bad_word_strings: List[str] = None,
-                                bad_word_keys: List[str] = None) -> Set[str]:
+                                bad_word_keys: List[str] = None,
+                                exclusions: List[int] = None) -> Set[str]:
         """
         Checks if certain state parameters are the same for all kicks.
         Includes all standard elements + RF. Some categories can be disabled when differences are expected.
+        :param exclusions:
         :param quadrupoles:
         :param skewquads: Combined skewquads+HV correctors
         :param correctors:
@@ -1095,14 +1099,22 @@ class KickSequence:
                     mask = f(key, values)
                     # print(key, mask)
                     if any(mask):
-                        abort = True
                         # uniques, counts, idxs = np.unique()
                         ok_tuples = [(kick.idx, sd[key]) for (kick, sd, m) in zip(kicks, sd_list, mask) if not m]
                         bad_tuples = [(kick.idx, sd[key], kick.kickh, kick.kickv) for (kick, sd, m) in
                                       zip(kicks, sd_list, mask) if m]
+                        # If we have exclusions, check their global id against exclusions
+                        if exclusions:
+                            idxs = [kick.idxg for (kick, sd, m) in zip(kicks, sd_list, mask) if m]
+                            idxs_excluded = [idx for idx in idxs if idx in exclusions]
+                            idxs_not_excluded = [idx for idx in idxs if idx not in exclusions]
+                            if not idxs_not_excluded:
+                                logger.warning(f'Inconsistent kicks {idxs_excluded} overriden, rest passed!')
+                                continue
                         logger.error(f'{key} inconsistent')
                         logger.error(f'>OK:{ok_tuples}')
                         logger.error(f'>BAD:{bad_tuples}')
+                        abort = True
                         # return True
                 # for kick, sd in zip(kicks, sd_list):
                 #     def f(k, v1, v2):
