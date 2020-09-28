@@ -1,4 +1,4 @@
-__all__ = ['Invariants', 'Coordinates', 'Phase', 'Twiss', 'SVD']
+__all__ = ['Invariants', 'Coordinates', 'Phase', 'Twiss', 'SVD', 'Interpolator']
 
 from typing import Tuple, List
 
@@ -416,12 +416,23 @@ class Interpolator:
     def __init__(self, ratio: int = 10):
         self.ratio = ratio
 
-    def interpolate(self, x: np.ndarray = None, y: np.ndarray = None, ratio: int = None) -> np.ndarray:
+    def __call__(self, *args, **kwargs):
+        return self.interpolate(*args, **kwargs)
+
+    def interpolate(self, x: np.ndarray = None, y: np.ndarray = None,
+                    ratio: int = None) -> Tuple[np.ndarray, np.ndarray]:
+        """
+        Cubic spline interpolation of the signal (aka upsampling)
+        :param x:
+        :param y:
+        :param ratio: Ratio of how much to increase the sampling rate by
+        :return:
+        """
         import scipy.interpolate
-        
-        assert y
-        if not x:
-            x = np.arange(y)
+
+        assert y is not None
+        if x is None:
+            x = np.arange(len(y))
         assert len(x) == len(y) and len(x) > 3
         delta = np.unique(np.diff(x))
         assert len(delta) == 1  # Check if spacing uniform
@@ -429,4 +440,14 @@ class Interpolator:
         ratio = ratio or self.ratio
         p = scipy.interpolate.CubicSpline(x, y)
         x_new = np.linspace(x[0], x[-1], len(x) * ratio, endpoint=True)
-        return p(x_new)
+        return x_new, p(x_new)
+
+    def interpolate_kick(self, kick: Kick, ratio: int = None, families=('H', 'V')):
+        assert kick.__class__.__name__ == 'Kick'  # assert isinstance(kick, Kick)
+        ratio = ratio or self.ratio
+        for family in families:
+            data = kick.get_bpm_data(family=family, no_trim=True, return_type='dict')
+            for b, v in data.items():
+                x, y = self.interpolate(None, v, ratio=ratio)
+                kick.set(f'{b}{Kick.Datatype.INTERPX.value}', x)
+                kick.set(f'{b}{Kick.Datatype.INTERPY.value}', y)
