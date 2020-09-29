@@ -108,15 +108,16 @@ class SDDS:
         return pd.DataFrame(data=d)
 
 
-df_columns = ['PARTICLE', 'N', 'X0i', 'Y0i', 'Z0i', 'X0', 'PX0', 'Y0', 'PY0', 'Z0', 'PZ0', 'E0']
-df_data_columns = ['X0', 'PX0', 'Y0', 'PY0', 'Z0', 'PZ0', 'E0']
-cols = {'X0': 0, 'PX0': 1, 'Y0': 2, 'PY0': 3, 'Z0': 4, 'PZ0': 5, 'E0': 6}
+df_data_columns = ['x', 'xp', 'y', 'yp', 't', 'p', 'dt']
+df_columns = ['PARTICLE', 'N'] + [c + 'i' for c in df_data_columns] + df_data_columns
+cols = {c: i for (c, i) in zip(df_data_columns, range(len(df_data_columns)))}
 
 
 class SDDSTrack:
     """
     SDDSPython wrapper for track data (which requires special treatment due to memory usage and format)
     """
+
     def __init__(self, path: Path, fast: bool = True):
         if isinstance(path, Path):
             path = str(path)
@@ -141,7 +142,7 @@ class SDDSTrack:
             self.pagecnt = self.cdata[0].shape[0]
         else:
             self.pagecnt = self.pdata[0].shape[0]
-
+        # Convert to df immediately - this discards cdata
         self.to_df()
 
     def _ragged_nested_list_to_array(self, data, idx_col):
@@ -165,7 +166,7 @@ class SDDSTrack:
         """
         Print a brief file summary
         """
-        print(f'File:{self.path}')
+        print(f'SDDSTrack File:{self.path}')
         print(f'Pages:{self.pagecnt} | Cols:{len(self.cname)} | Pars:{len(self.pname)}')
 
     def __getitem__(self, name: str):
@@ -210,7 +211,11 @@ class SDDSTrack:
         """
         return self.pdata[self.pdict[name]]
 
-    def to_df(self):
+    def to_df(self, clear_cdata: bool = True):
+        """
+        Convert object storage to a Dataframe
+        :return:
+        """
         arr = self.cdata
         (n_cols, n_particles, n_turns) = arr.shape
         df = pd.DataFrame(columns=df_columns, index=range(1, n_particles + 1), dtype=np.float64)
@@ -227,13 +232,19 @@ class SDDSTrack:
         # print(len(df), df.iloc[0:1])
         # print(df.loc[df.X0 == np.nan,:])
         # print(df.loc[(df.X0 == 0.0),:])
-        del arr
-        self.cdata = None
-        df.loc[:, 'X0i'] = df.loc[:, 'X0'].apply(lambda x: x[0])
-        df.loc[:, 'Y0i'] = df.loc[:, 'Y0'].apply(lambda x: x[0])
-        df.loc[:, 'Z0i'] = df.loc[:, 'Z0'].apply(lambda x: x[0])
-        df.loc[:, 'N'] = df.loc[:, 'X0'].apply(lambda x: len(x))
-        Nmax = df.loc[:, 'N'].max()
+        if clear_cdata:
+            del arr
+            self.cdata = None
+        for c in df_data_columns:
+            df.loc[:, c + 'i'] = df.loc[:, c].apply(lambda x: x[0])
+        # df.loc[:, 'X0i'] = df.loc[:, 'X0'].apply(lambda x: x[0])
+        # df.loc[:, 'Y0i'] = df.loc[:, 'Y0'].apply(lambda x: x[0])
+        # df.loc[:, 'Z0i'] = df.loc[:, 'Z0'].apply(lambda x: x[0])
+        # df.loc[:, 'X0i'] = df.loc[:, 'PX0'].apply(lambda x: x[0])
+        # df.loc[:, 'Y0i'] = df.loc[:, 'PY0'].apply(lambda x: x[0])
+        # df.loc[:, 'Z0i'] = df.loc[:, 'PZ0'].apply(lambda x: x[0])
+        df.loc[:, 'N'] = df.loc[:, df_data_columns[0]].apply(lambda x: len(x))
+        # Nmax = df.loc[:, 'N'].max()
         # print(len(df), df.dtypes)
         df = df.astype(dtype={'PARTICLE': np.int32, 'N': np.int32})
         self.df = df
@@ -433,14 +444,14 @@ def write_df_to_parameter_file_v2(fpath: Path,
         x.defineSimpleColumn(names[i], types[i])
     column_data = [[[]] for i in range(len(names))]
     for row in df.itertuples(index=False):
-        #print(row)
+        # print(row)
         for i, r in enumerate(row):
-            #print(i, r)
+            # print(i, r)
             column_data[i][0].append(r)
     for i, n in enumerate(names):
         x.setColumnValueLists(names[i], column_data[i])
     # print(column_data)
-    #print(names, types)
+    # print(names, types)
     x.save(str(fpath))
     del x
 
