@@ -102,10 +102,10 @@ def chromaticity(lattice: MagneticLattice,
         #tl_out = ocelot.track_nturns(lattice, n_turns, t_list, print_progress=False)
         # This is ideal data so can use window
         naff = NAFF(window_power=1, fft_pad_zeros_power=14)
-        freq_x = [naff.run_naff(tl.get_x(), n_components=1, full_data=False, xatol=naff_atol)[0] for tl in tl_out]
-        freq_xp = [naff.run_naff(tl.get_xp(), n_components=1, full_data=False, xatol=naff_atol)[0] for tl in tl_out]
-        freq_y = [naff.run_naff(tl.get_y(), n_components=1, full_data=False, xatol=naff_atol)[0] for tl in tl_out]
-        freq_yp = [naff.run_naff(tl.get_yp(), n_components=1, full_data=False, xatol=naff_atol)[0] for tl in tl_out]
+        freq_x = [naff.run_naff_v2(tl.get_x(), n_components=1, full_data=False, xatol=naff_atol)[0] for tl in tl_out]
+        freq_xp = [naff.run_naff_v2(tl.get_xp(), n_components=1, full_data=False, xatol=naff_atol)[0] for tl in tl_out]
+        freq_y = [naff.run_naff_v2(tl.get_y(), n_components=1, full_data=False, xatol=naff_atol)[0] for tl in tl_out]
+        freq_yp = [naff.run_naff_v2(tl.get_yp(), n_components=1, full_data=False, xatol=naff_atol)[0] for tl in tl_out]
         fx = np.hstack([np.diff(freq_x), np.diff(freq_xp)])
         fy = np.hstack([np.diff(freq_y), np.diff(freq_yp)])
         if debug:
