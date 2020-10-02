@@ -217,6 +217,27 @@ class Task:
                             f'emit_y = {y ** 2 / beta_y:10e}',
                             f'distribution_type[0] = "{dist}","{dist}","hard-edge"',
                             f'distribution_cutoff[0] = 1, 1, 1'])
+        elif mode in ['HE_centered', 'SH_centered']:
+            assert gridspec, latspec
+            if mode.startswith('HE'):
+                dist = 'hard-edge'
+            elif mode.startswith('SH'):
+                dist = 'shell'
+            else:
+                raise Exception(f'Bad mode {mode}')
+            x, nx, y, ny = gridspec
+            beta_x, beta_y = latspec
+            x = x / 2
+            y = y / 2
+            strings.append(f'centroid[0] = 0, 0, 0, 0, 0, 0')
+            # xmax^2 = emittance*beta
+            strings.extend([f'n_particles_per_bunch = {nx * ny}',
+                            f'beta_x = 1.0',
+                            f'emit_x = {x ** 2 / beta_x:10e}',
+                            f'beta_y = 1.0',
+                            f'emit_y = {y ** 2 / beta_y:10e}',
+                            f'distribution_type[0] = "{dist}","{dist}","hard-edge"',
+                            f'distribution_cutoff[0] = 1, 1, 1'])
         else:
             raise Exception
 
