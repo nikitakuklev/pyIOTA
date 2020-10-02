@@ -425,8 +425,6 @@ def plot_opt_func(fig, lat, tws, top_plot=["Dx"], legend=False, fig_name=None, g
         else:
             fig = plt.figure(fig_name)
 
-    plt.rc('axes', grid=grid)
-    plt.rc('grid', color='0.75', linestyle='-', linewidth=0.5)
     left, width = 0.1, 0.85
 
     rect1 = [left, 0.65, width, 0.3]
