@@ -154,8 +154,6 @@ class NAFF:
 
         return fft_freq, fft_power
 
-
-
     def fft_hanning_peaks(self, data: np.ndarray, window_power: int = None, just_do_fft: bool = False,
                           search_peaks: bool = False):
         """
@@ -296,7 +294,7 @@ class NAFF:
 
     def run_naff_v2(self, data: np.ndarray, data_trim: slice = None, xatol: float = 1e-8,
                     n_components: int = 2, full_data: bool = True, spacing: float = 1.0,
-                    perf_mode: bool = True):
+                    perf_mode: bool = False):
         """
         Numeric analysis of fundamental frequencies
         Iterative method that maximizes inner product of data and oscillatory signal, finding best frequencies
@@ -386,7 +384,7 @@ class NAFF:
             dataw = data * window
             # Get FFT peak as guess
             tune0 = get_top_freq(dataw)
-            #logger.debug(f'Component ({i}) - tune initial guess: {tune0}')
+            # logger.debug(f'Component ({i}) - tune initial guess: {tune0}')
 
             # Find optimum
             res = scipy.optimize.minimize_scalar(f,
@@ -406,7 +404,7 @@ class NAFF:
                 tune_neg = res2.x
             tunes.append(tune)
             tunes_neg.append(tune_neg)
-            #logger.debug(f'Component ({i}) - found +f={tune:.7f} and -f={tune_neg:.7f}')
+            # logger.debug(f'Component ({i}) - found +f={tune:.7f} and -f={tune_neg:.7f}')
 
             # Remove frequencies
             if not perf_mode:
@@ -596,19 +594,19 @@ class NAFF:
         :param magnitude_only:
         :return:
         """
+        if not no_trim:
+            data_trim = data_trim or self.data_trim
+            if data_trim:
+                if data_trim.stop is not None and data_trim.stop > len(data):
+                    raise Exception(f"Trim end ({data_trim.stop}) exceeds available data length ({len(data)})")
+                data = data[data_trim]
+                data = data - np.mean(data)
+
         N = len(data)
         if N in self.icache:
             i_line = self.icache[N]
         else:
             self.icache[N] = i_line = np.arange(0, len(data))
-
-        if not no_trim:
-            data_trim = data_trim or self.data_trim
-            if data_trim:
-                if data_trim.stop is not None and data_trim.stop > N:
-                    raise Exception(f"Trim end ({data_trim.stop}) exceeds available data length ({N})")
-                data = data[data_trim]
-                data = data - np.mean(data)
 
         if no_window:
             dataw = data
@@ -619,7 +617,7 @@ class NAFF:
 
         if isinstance(frequencies, float) or isinstance(frequencies, int):
             # Single freq mode
-            #correlation = np.sum(dataw * np.exp(-1.0j * 2 * np.pi * frequencies * i_line)) / N
+            # correlation = np.sum(dataw * np.exp(-1.0j * 2 * np.pi * frequencies * i_line)) / N
             pi = np.pi
             correlation = ne.evaluate("sum(dataw * exp(-1.0j * 2 * pi * frequencies * i_line))")
             return np.abs(correlation), np.real(correlation), np.imag(correlation)
@@ -632,6 +630,8 @@ class NAFF:
                 return np.array(integral)[:, 0]
             else:
                 return np.array(integral)
+
+    correlation = compute_correlations_v2
 
     def get_projection(self, u, v):
         """

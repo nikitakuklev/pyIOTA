@@ -873,12 +873,14 @@ class Kick:
                     for bpm, nc in zip([bh, bv], n_components):
                         if data_trim:
                             # Use provided trims
-                            nfresult = naff.run_naff(self.get_bpm_data(bpm, no_trim=True)[data_trim],
-                                                     n_components=nc, data_trim=np.s_[:])
+                            nfresult = naff.run_naff_v2(self.get_bpm_data(bpm, no_trim=True)[data_trim],
+                                                        n_components=nc,
+                                                        data_trim=np.s_[:])
                         else:
                             # Use NAFF trims
-                            nfresult = naff.run_naff(self.get_bpm_data(bpm, no_trim=True), n_components=nc)
-                        peaks[bpm] = ([n[0] for n in nfresult], nfresult)
+                            nfresult = naff.run_naff_v2(self.get_bpm_data(bpm, no_trim=True),
+                                                        n_components=nc)
+                        peaks[bpm] = ([n['tune'] for n in nfresult], nfresult)
                         results.append(peaks[bpm])
                     if selector:
                         nux, nuy = selector(self, results, (bh, bv), search_kwargs)
