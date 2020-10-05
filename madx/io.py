@@ -124,6 +124,9 @@ def parse_lattice(fpath: Path, verbose: bool = False):
 
 
 class TFS:
+    """
+    MADX TFS file wrapper for reading and writing
+    """
     def __init__(self, fpath: Path):
         from tfs import read, write
         self.path = fpath

@@ -26,7 +26,7 @@ sd = sdds.SDDS(15)
 
 class SDDS:
     """
-    SDDSPython wrapper that provides nice dictionary-like interface, or a DataFrame view
+    SDDSPython wrapper for elegant files that provides nice dictionary-like interface, or a DataFrame view
     """
 
     def __init__(self, path: Path, fast: bool = False):

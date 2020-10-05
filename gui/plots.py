@@ -22,10 +22,6 @@ def plot(*args, **kwargs):
     return plot_simple(*args, **kwargs)
 
 
-def plot_grid(*args, **kwargs):
-    return plot_simple_grid(*args, **kwargs)
-
-
 def plot_simple(*args,
                 x: Union[List, np.ndarray] = None,
                 fmt: str = None,
@@ -269,6 +265,9 @@ def plot_simple_grid(*args,
         fig = fig_l
         ax = ax_l
     return fig, ax
+
+
+plot_grid = plot_simple_grid
 
 
 def get_ax(fig=None, ax=None):
