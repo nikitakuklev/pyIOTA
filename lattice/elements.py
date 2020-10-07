@@ -29,6 +29,7 @@ class LatticeContainer:
         if not info:
             info = {'source_file': 'unknown', 'source': 'unknown', 'pc': 0.0}
         self.name = name
+        self.totallen = None
         self.lattice_list = lattice
         self.correctors = correctors
         self.monitors = monitors
@@ -66,7 +67,7 @@ class LatticeContainer:
         self.update_element_positions()
 
         # if not silent: print(f'Lattice ({self.name}) initialized')
-        if not silent: logger.info(f'Lattice ({self.name}) initialized')
+        if not silent: logger.info(f'Lattice ({self.name}) initialized - length {self.totallen:.5f}m')
         # self.twiss = twiss(self.lattice)
 
     def reset(self, sequence):
@@ -75,6 +76,14 @@ class LatticeContainer:
             self.lattice = MagneticLattice(tuple(self.lattice_list))
         else:
             self.lattice = MagneticLattice(tuple(self.lattice_list), method=self.method)
+
+    @property
+    def names(self):
+        return [el.id for el in self.lattice.sequence]
+
+    @property
+    def elements(self):
+        return [(el.id, el.__class__.__name__, el.l) for el in self.lattice.sequence]
 
     def insert_correctors(self, destroy_skew_quads: bool = True):
         """
@@ -347,6 +356,7 @@ class LatticeContainer:
             el.s_end = l + el.l
             l += el.l
             slist.append(el.s_mid)
+        self.totallen = self.lattice.sequence[-1].s_end
         return slist
 
     def update_twiss(self, n_points: int = None, update_maps: bool = True, tws0: Twiss = None):
@@ -485,6 +495,13 @@ class LatticeContainer:
         :param verbose:
         :return:
         """
+        def name_check(name):
+            if len(name) > 250:
+                logger.warning('Merged drift name too long - generating new random one')
+                return "ID_{0}_".format(np.random.randint(100000000))
+            else:
+                return name
+
         seq = self.lattice.sequence
         if exclusions:
             assert all(isinstance(el, Drift) for el in exclusions)
@@ -512,6 +529,7 @@ class LatticeContainer:
                 if is_exclusion:
                     print(f'Skipping drift ({el.id}) since it is excluded')
                 if drift_mode:
+                    name_new = name_check(name_new)
                     seq_new.append(Drift(l=l_new, eid=name_new))
                     if verbose: print(f'Consecutive drifts ended - creating ({name_new}) of length ({l_new:.5f})')
                     name_new = ''
@@ -520,6 +538,7 @@ class LatticeContainer:
                     cnt += 1
                 seq_new.append(el)
         if l_new != 0:
+            name_new = name_check(name_new)
             if verbose: print(f'Sequence ended - creating ({name_new}) of length ({l_new})')
             seq_new.append(Drift(l=l_new, eid=name_new))
 
@@ -615,6 +634,24 @@ class LatticeContainer:
                  singleton_only: bool = False):
         return self.get_first(el_name, el_type, exact, singleton_only, last=True)
 
+    def get_before(self, target):
+        for i, el in enumerate(self.lattice.sequence):
+            if el == target:
+                if i == 0:
+                    return self.lattice.sequence[-1]
+                else:
+                    return self.lattice.sequence[i-1]
+        raise Exception('No match')
+
+    def get_after(self, target):
+        for i, el in enumerate(self.lattice.sequence):
+            if el == target:
+                if i == len(self.lattice.sequence) - 1:
+                    return self.lattice.sequence[0]
+                else:
+                    return self.lattice.sequence[i+1]
+        raise Exception('No match')
+
     def get_elements(self, el_type: Union[str, type] = None) -> List[type]:
         """
         Gets all elements of type in sequence
@@ -625,6 +662,34 @@ class LatticeContainer:
             return [el for el in self.lattice.sequence if el.__class__.__name__ in el_type]
         else:
             return [el for el in self.lattice.sequence if isinstance(el, el_type)]
+
+    def get_between_elements(self, start, end, exclude_ends: bool = False):
+        """
+        Gets all elements between start and end ones. Does not wrap around.
+        :param start:
+        :param end:
+        :return:
+        """
+        assert start in self.lattice.sequence and end in self.lattice.sequence
+        selection = []
+        rec = False
+        for el in self.lattice.sequence:
+            if el == start:
+                rec = True
+                if not exclude_ends:
+                    selection.append(el)
+            elif el == end:
+                if rec:
+                    if not exclude_ends:
+                        selection.append(el)
+                    break
+                else:
+                    raise Exception
+            else:
+                if rec:
+                    selection.append(el)
+
+        return selection
 
     def get_all(self, el_type: Union[str, type] = None) -> List[type]:
         return self.get_elements(el_type)
@@ -645,10 +710,13 @@ class LatticeContainer:
         """
         return [el for el in self.lattice.sequence if fun(el)]
 
-    def filter_elements(self, el_name: str = None, el_type: Union[str, type] = None) -> List[Element]:
+    def filter_elements(self, el_name: Union[str, Element] = None,
+                        el_type: Union[str, type] = None) -> List[Element]:
         """
-        Filter elements by type and regex
-        :return:
+        Filter elements by type and regex. If both are specified, logical AND is applied.
+        :param el_type: Element type object
+        :param el_name: Regex to run against element id
+        :return: Elements that satisfied both constraints
         """
         import re
         el_list = self.lattice.sequence
@@ -712,11 +780,15 @@ class LatticeContainer:
 
     # Conversion functions
 
-    def to_elegant(self, fpath: Path = None, lattice_options: Dict = None, dry_run: bool = False):
+    def to_elegant(self, fpath: Path = None, lattice_options: Dict = None,
+                   dry_run: bool = False):
         """
-        Calls elegant submodule library to produce elegant lattice.
+        Calls elegant module to produce elegant lattice.
         Should fail-fast if incompatible features are found.
-        :return:
+        :param fpath: File path to use - can be None, in which case string is returned
+        :param lattice_options: Elegant module option
+        :param dry_run: If true, writing is done regardless of fpath parameter
+        :return: Export output
         """
         import pyIOTA.elegant as elegant
         if fpath:
@@ -844,6 +916,15 @@ class NLLens(Element):
 class OctupoleInsert:
     """
     A collection of octupoles for quasi-integrable insert that can be generated into a sequence
+    :param tn:    #tn = 0.4  # strength of nonlinear lens
+    :param cn:    #cn = 0.01  # dimentional parameter of nonlinear lens
+    :param oqK:   Octupole strength scale factor
+    :param l0:    #l0     = 1.8;           # length of the straight section
+    :param mu0:   #mu0 = 0.3;  # phase advance over straight section
+    :param run:   # which run configuration to use, 1 or 2
+    :param otype: # type of magnet (0) thin, (1) thick, (2) HKPoly, only works for octupoles (ncut=4)
+    :param olen:  #olen = 0.07  # length of octupole for thick option.must be < l0 / nn
+    :param nn:    # number of nonlinear elements
     """
 
     def __init__(self, **kwargs):
