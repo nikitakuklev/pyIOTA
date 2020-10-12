@@ -1,6 +1,7 @@
 __all__ = ['Writer']
 
 import datetime
+import logging
 import sys
 import textwrap
 from pathlib import Path
@@ -13,14 +14,12 @@ from ocelot import Sextupole, Hcor, Vcor, Element, Edge, Marker, Octupole, Matri
     Cavity, Monitor, Multipole
 from pyIOTA.lattice.elements import LatticeContainer, NLLens, HKPoly, ILMatrix, Recirculator
 
+logger = logging.getLogger(__name__)
+
 
 class Writer:
     def __init__(self, options: Dict):
         self.options = options or {}
-        if 'add_limiting_aperture' not in self.options:
-            self.options['add_limiting_aperture'] = True
-        if 'add_mal' not in self.options:
-            self.options['add_mal'] = True
         self.iota = None
         self.verbose = False
 
@@ -268,28 +267,46 @@ class Writer:
         assert self.options['sr'] in [False, True]
         assert self.options['isr'] in [False, True]
         for k in ['dip_kicks', 'quad_kicks', 'sext_kicks', 'oct_kicks']:
-            assert isinstance(self.options[k], int) and 1 < self.options[k] < 128
-        if 'aperture_scale' not in self.options:
-            self.options['aperture_scale'] = 1
+            assert isinstance(self.options[k], int) and 1 <= self.options[k] <= 128
+
+        if 'global_aperture' not in self.options:
+            self.options['global_aperture'] = False
+        else:
+            assert isinstance(self.options['global_aperture'], (int, float))
+
+        if 'limiting_aperture' not in self.options:
+            self.options['limiting_aperture'] = False
+        else:
+            assert isinstance(self.options['limiting_aperture'], (int, float))
+
+        if 'add_mal' not in self.options:
+            self.options['add_mal'] = False
+        else:
+            assert isinstance(self.options['add_mal'], bool)
+        # if 'aperture_scale' not in self.options:
+        #     self.options['aperture_scale'] = 1
+
 
     def write_lattice_ng(self,
                          fpath: Path,
                          box: LatticeContainer,
                          debug: bool = True,
                          save: bool = False,
-                         #add_limiting_aperture: bool = True,
-                         #add_misalignment_el: bool = True
+                         # add_limiting_aperture: bool = True,
+                         # add_misalignment_el: bool = True
                          ):
         """
         Writes current lattice to the specified path. DEPRECATED.
-        :param path: Full file path
+        :param fpath: Full file path
         """
         if isinstance(fpath, str):
-            print('WARN - paths should be using Pathlib')
+            raise Exception('Paths should be using Pathlib')
         self._check_critical_options_ng()
         # iota = self.iota
         lat = box.lattice
         opt = SimpleNamespace(**self.options)
+        if debug:
+            logger.info(opt)
         sl = []
         elements = []
 
@@ -314,7 +331,7 @@ class Writer:
         multipoles = view.get_elements(Multipole)
 
         # The edges in sequences are ocelot-based, and so can be ignored
-        if len(dipoles) != len(edges)//2:
+        if len(dipoles) != len(edges) // 2:
             raise Exception(f'Element mismatch - have ({len(dipoles)}) dipoles and ({len(edges)}) edges')
 
         # Custom elegant elements
@@ -336,13 +353,19 @@ class Writer:
         # sl.append(f'CHRG: CHARGE, TOTAL={header["NPART"] * 1.602176634e-19:e}\n')
         # sl.append(f'CHRG: CHARGE, TOTAL={lat.:e}\n')
 
+        def ma(el):
+            if el.dx != 0.0 or el.dy != 0.0 or (el.tilt+el.dtilt) != 0.0:
+                return f' dx={el.dx:+.10e}, dy={el.dy:+.10e}, tilt={el.tilt+el.dtilt:+.10e},'
+            else:
+                return ''
+
         if dipoles:
             sl.append('!MAIN BENDS\n')
             for el in dipoles:
                 if self._check_if_already_defined(el, elements): continue
                 sl.append(f"{el.id}: CSBEND, l={el.l:.10f}, angle={el.angle}, e1=0, e2=0, &\n")
-                sl.append(f" h1={el.h_pole1:+.10f}, h2={el.h_pole1:+.10f}, hgap={el.gap/2}, fint={el.fint}, &\n")
-                sl.append(f" EDGE_ORDER=1, EDGE1_EFFECTS=3, EDGE2_EFFECTS=3, &\n")
+                sl.append(f" h1={el.h_pole1:+.10f}, h2={el.h_pole1:+.10f}, hgap={el.gap/2:+.10f}, fint={el.fint}, &\n")
+                sl.append(f" EDGE_ORDER=1, EDGE1_EFFECTS=3, EDGE2_EFFECTS=3,{ma(el)} &\n")
                 sl.append(f' N_KICKS="dip_kicks", ISR="flag_isr", SYNCH_RAD="flag_synch"\n')
             sl.append('\n')
 
@@ -351,8 +374,8 @@ class Writer:
             sl.append('!MAIN QUADS\n')
             for el in main_quads:
                 if self._check_if_already_defined(el, elements): continue
-                sl.append(f'{el.id:<6}: KQUAD, l={el.l:.10f}, k1={el.k1:+.10e}, '
-                          f'N_KICKS="quad_kicks", ISR="flag_isr", SYNCH_RAD="flag_synch"\n')
+                sl.append(f'{el.id:<6}: KQUAD, l={el.l:.10f}, k1={el.k1:+.10e},{ma(el)}'
+                          f' N_KICKS="quad_kicks", ISR="flag_isr", SYNCH_RAD="flag_synch"\n')
             sl.append('\n')
 
         other_quads = [q for q in quads if q not in main_quads]
@@ -371,8 +394,9 @@ class Writer:
                         else:
                             continue
                 sl.append(
-                    f'{el.id:<6}: KQUAD, l={el.l:.10f}, k1={el.k1:+.10e}, HSTEERING={add_hcor}, VSTEERING={add_vcor},'
-                    f' N_KICKS="quad_kicks", ISR="flag_isr", SYNCH_RAD="flag_synch", tilt={el.tilt}\n')
+                    f'{el.id:<6}: KQUAD, l={el.l:.10f}, k1={el.k1:+.10e},{ma(el)}'
+                    f' HSTEERING={add_hcor}, VSTEERING={add_vcor},'
+                    f' N_KICKS="quad_kicks", ISR="flag_isr", SYNCH_RAD="flag_synch"\n')
             sl.append('\n')
 
         if sextupoles:
@@ -381,7 +405,7 @@ class Writer:
                 if self._check_if_already_defined(el, elements): continue
                 if el.l == 0.0:
                     raise Exception("Thin integrator element found - this will have no effect, use MULT or HKPOLY")
-                sl.append(f'{el.id:<10}: KSEXT, l={el.l}, k2={el.k2:+.10e},'
+                sl.append(f'{el.id:<10}: KSEXT, l={el.l}, k2={el.k2:+.10e},{ma(el)}'
                           f' N_KICKS="sext_kicks", ISR="flag_isr", SYNCH_RAD="flag_synch"\n')
             sl.append('\n')
 
@@ -392,7 +416,7 @@ class Writer:
                 if el.l == 0.0:
                     raise Exception("Thin integrator element found - this will have no effect, use MULT or HKPOLY")
                 sl.append(
-                    f'{el.id:<10}: KOCT, l={el.l}, k3={el.k3:.10e},'
+                    f'{el.id:<10}: KOCT, l={el.l}, k3={el.k3:.10e},{ma(el)}'
                     f' N_KICKS="oct_kicks", ISR="flag_isr", SYNCH_RAD="flag_synch"\n')
             sl.append('\n')
 
@@ -410,7 +434,7 @@ class Writer:
                 else:
                     n_kicks = 1
                 sl.append(
-                    f'{el.id:<10}: MULT, l={el.l}, knl={el.kn[order]:.10e}, order={order},'
+                    f'{el.id:<10}: MULT, l={el.l}, knl={el.kn[order]:.10e}, order={order}, {ma(el)}'
                     f' N_KICKS={n_kicks}, SYNCH_RAD="flag_synch"\n')
             sl.append('\n')
 
@@ -471,7 +495,7 @@ class Writer:
                 matrix_terms = []
                 for i, j in np.ndindex(el.r.shape):
                     if el.r[i, j] != 0:
-                        matrix_terms.append(f'R{i+1}{j+1}={el.r[i, j]}')
+                        matrix_terms.append(f'R{i + 1}{j + 1}={el.r[i, j]}')
                 sl.append(f'{el.id:<10}: EMATRIX, l={el.l}, C5={el.l}, ' + ', '.join(matrix_terms) + '\n')
             sl.append('\n')
 
@@ -505,7 +529,7 @@ class Writer:
                 sl.append('RC: RECIRC \n')
                 sl.append('MAL: MALIGN \n')
                 sl.append('\n')
-                preamble += 'MAL, RC, '
+                preamble += 'MAL, RC,'
 
         # names = []
         # for el in markers:
@@ -516,41 +540,56 @@ class Writer:
         #     # iota.RenameElement(el['INDEX'], name)
         # sl.append('\n')
 
-        if opt.add_limiting_aperture:
-            preamble += 'MA1, APER, '
+        if opt.global_aperture or opt.limiting_aperture:
             sl.append('!APERTURES\n')
-            sl.append('!Default escape criterion is very large (10m), and there are timing issues with CLEAN\n')
-            sl.append('!It needs change_t, which doesnt work for 4D tracking (when RF has not been setup)\n')
-            sl.append('!For now, globally limit transverse aperture, since our beampipe is <=2in\n')
-            sl.append('!Also add worst restriction point in ring (at IOR)\n')
-            sl.append('!Will have to cut bucket escapes in post-processing\n')
-            sl.append('!C0: CLEAN, DELTALIMIT=0.1\n')
-            xm, ym = 0.0381, 0.0381  # 1.5x aperture
-            print(f'Global aperture set at {xm:.5f}/{ym:.5f}')
-            # f.write('MA1: MAXAMP, X_MAX=0.025, Y_MAX=0.025, ELLIPTICAL=1 \n')
-            # f.write('MA1: MAXAMP, X_MAX=0.030, Y_MAX=0.030, ELLIPTICAL=1 \n')
-            # f.write('APER: RCOL, X_MAX=0.007, Y_MAX=0.007 \n')
-            # f.write('MA1: MAXAMP, X_MAX=0.050, Y_MAX=0.050, ELLIPTICAL=1 \n')
-            # sl.append('MA1: MAXAMP, X_MAX=0.0381, Y_MAX=0.0381, ELLIPTICAL=1 \n')  # 1.5x aperture
-            # f.write('APER: ECOL, X_MAX=0.008, Y_MAX=0.008 \n')
-            # sl.append('APER: ECOL, X_MAX=0.005925, Y_MAX=0.00789 \n')  # 1.5x actual NL aperture
-            if xm == ym:
-                sl.append(f'MA1: MAXAMP, X_MAX={xm}, Y_MAX={ym} \n')
-            else:
-                sl.append(f'MA1: MAXAMP, X_MAX={xm}, Y_MAX={ym}, ELLIPTICAL=1 \n')
+            sl.append('!Default escape criterions in Elegant (from source code): SLOPE_LIMIT=1.0L, COORD_LIMIT=10.0L\n')
 
-            if opt.aperture_scale != 1:
-                print(f'Limiting aperture scaled by ({opt.aperture_scale})')
-                sl.append(f'! Limiting aperture scaled by ({opt.aperture_scale}) from actual\n')
-                sl.append(
-                    f'APER: ECOL, X_MAX={3.9446881e-3 * opt.aperture_scale}, Y_MAX={5.25958413e-3 * opt.aperture_scale} \n')
-            else:
-                sl.append(f'! Limiting aperture is not scaled (i.e. is actual)\n')
-                sl.append('APER: ECOL, X_MAX=3.9446881e-3, Y_MAX=5.25958413e-3 \n')  # 1x actual NL aperture
-            # f.write('W1: WATCH, MODE="coordinate", INTERVAL=1, FILENAME="%s_w1.track"')
+            if opt.global_aperture:
+                v = opt.global_aperture
+                preamble += ' MA1,'
+                if isinstance(v, tuple):
+                    xm, ym = v
+                else:
+                    xm, ym = 0.0254*v, 0.0254*v
+                #xm, ym = 0.0381, 0.0381  # 1.5x aperture
+                logger.warning(f'Global aperture set at {xm:.5f}/{ym:.5f}')
+                # f.write('MA1: MAXAMP, X_MAX=0.025, Y_MAX=0.025, ELLIPTICAL=1 \n')
+                # f.write('MA1: MAXAMP, X_MAX=0.030, Y_MAX=0.030, ELLIPTICAL=1 \n')
+                # f.write('APER: RCOL, X_MAX=0.007, Y_MAX=0.007 \n')
+                # f.write('MA1: MAXAMP, X_MAX=0.050, Y_MAX=0.050, ELLIPTICAL=1 \n')
+                # sl.append('MA1: MAXAMP, X_MAX=0.0381, Y_MAX=0.0381, ELLIPTICAL=1 \n')  # 1.5x aperture
+                # f.write('APER: ECOL, X_MAX=0.008, Y_MAX=0.008 \n')
+                # sl.append('APER: ECOL, X_MAX=0.005925, Y_MAX=0.00789 \n')  # 1.5x actual NL aperture
+                if xm == ym:
+                    sl.append(f'MA1: MAXAMP, X_MAX={xm:+.10f}, Y_MAX={ym:+.10f} \n')
+                else:
+                    sl.append(f'MA1: MAXAMP, X_MAX={xm:+.10f}, Y_MAX={ym:+.10f}, ELLIPTICAL=1 \n')
+
+            if opt.limiting_aperture:
+                preamble += ' APER,'
+                if opt.limiting_aperture != 1:
+                    logger.warning(f'Limiting aperture scaled by ({opt.limiting_aperture})')
+                    sl.append(f'! Limiting aperture scaled by ({opt.limiting_aperture}) from actual\n')
+                    sl.append(f'APER: ECOL, X_MAX={3.9446881e-3 * opt.limiting_aperture:+.10f},'
+                              f' Y_MAX={5.25958413e-3 * opt.limiting_aperture:+.10f}\n')
+                else:
+                    # 1x actual NL aperture
+                    logger.warning(f'Realistic DN aperture added (X_MAX={3.9446881e-3:+.10f},'
+                                   f' Y_MAX={5.25958413e-3:+.10f})')
+                    sl.append(f'! Limiting aperture is not scaled (i.e. is actual)\n')
+                    sl.append('APER: ECOL, X_MAX=3.9446881e-3, Y_MAX=5.25958413e-3\n')
+
+            #           'is very large (10m), and there are timing issues with CLEAN\n')
+            # sl.append('!It needs change_t, which doesnt work for 4D tracking (when RF has not been setup)\n')
+            # sl.append('!For now, globally limit transverse aperture, since our beampipe is <=2in\n')
+            # sl.append('!Also add worst restriction point in ring (at IOR)\n')
+            # sl.append('!Will have to cut bucket escapes in post-processing\n')
+            #sl.append('!C0: CLEAN, DELTALIMIT=0.1\n')
             sl.append('\n')
+        else:
+            logger.warning(f'No apertures specified - internal elegant ones will apply!')
 
-        sl.append('!Full line has everything\n')
+        #sl.append('!Full line has everything\n')
 
         # seq = list(iota.sequence)
         # markerdict = markers.data
@@ -584,16 +623,20 @@ class Writer:
 
         remainder = view.get_sequence()
         if remainder:
-            raise Exception(f'Have leftover elements at end: {[(e.id, type(e), e.__class__.__name__) for e in remainder]}')
+            raise Exception(
+                f'Have leftover elements: {[(e.id, type(e), e.__class__.__name__) for e in remainder]}')
+
+        result = ''.join(sl)
 
         if save:
             if not fpath:
-                raise Exception(f'A path has to be specified if save is requested')
-            print(f'Writing lattice to: {fpath}')
-            with open(str(fpath), 'w', newline='\n') as f:
-                f.write(''.join(sl))
+                logger.warning(f'File path not specified, no writes will be performed')
+            else:
+                print(f'Writing lattice to: {fpath}')
+                with open(str(fpath), 'w', newline='\n') as f:
+                    f.write(result)
 
-        return ''.join(sl)
+        return result
 
     def _check_if_already_defined(self, el: Element, elements: list):
         if el.id in elements:
