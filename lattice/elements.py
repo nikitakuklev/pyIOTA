@@ -6,8 +6,10 @@ import logging
 from pathlib import Path
 
 from typing import Union, List, Dict, Type, Iterable, Callable, Optional
+
+from .containers import ElementList
 from ocelot.cpbd.elements import *
-from ocelot import MagneticLattice, twiss, MethodTM, Twiss
+from ocelot import MagneticLattice, twiss, MethodTM, Twiss, periodic_twiss, lattice_transfer_map, trace_z
 
 logger = logging.getLogger(__name__)
 
@@ -229,7 +231,7 @@ class LatticeContainer:
             if at is not None:
                 assert at < el.l and n_parts == 2
                 el_list = [deepcopy(el) for i in range(n_parts)]
-                for i, (e, ratio) in enumerate(zip(el_list, [at/el.l, (el.l-at)/el.l])):
+                for i, (e, ratio) in enumerate(zip(el_list, [at / el.l, (el.l - at) / el.l])):
                     for s in scaled_parameters:
                         if hasattr(e, s):
                             setattr(e, s, getattr(e, s) * ratio)
@@ -362,9 +364,29 @@ class LatticeContainer:
     def update_twiss(self, n_points: int = None, update_maps: bool = True, tws0: Twiss = None):
         if update_maps:
             self.lattice.update_transfer_maps()
-        return twiss(self.lattice, nPoints=n_points, tws0=tws0)
+        self.tws = twiss(self.lattice, nPoints=n_points, tws0=tws0)
+        return self.tws
 
     twiss = update_twiss
+
+    def twiss_at(self, loc: Union[float, int, Element], where: str = 'start', update: bool = True):
+        assert isinstance(loc, (float, int, Element))
+        if update:
+            self.lattice.update_transfer_maps()
+        tws0 = periodic_twiss(None, lattice_transfer_map(self.lattice, energy=0.))
+        if isinstance(loc, Element):
+            if where == 'start':
+                s = loc.s_start
+            elif where == 'end':
+                s = loc.s_end
+            elif where == 'mid':
+                s = loc.s_mid
+            else:
+                raise Exception(f'Unknown element location ({where}')
+        else:
+            s = loc
+        tws1 = trace_z(self.lattice, tws0, [s])
+        return tws1[0]
 
     def insert_extra_markers(self, spacing: float = 1.0):
         """
@@ -495,6 +517,7 @@ class LatticeContainer:
         :param verbose:
         :return:
         """
+
         def name_check(name):
             if len(name) > 250:
                 logger.warning('Merged drift name too long - generating new random one')
@@ -562,11 +585,11 @@ class LatticeContainer:
         selection = []
         for k, (s1, s2) in spans.items():
             # Select thin elements exactly at s, and any thick ones that are on top or start there
-            if (k.l == 0.0 and s1 == s2 and np.isclose(s1, s))\
-                    or np.isclose(s1, s)\
+            if (k.l == 0.0 and s1 == s2 and np.isclose(s1, s)) \
+                    or np.isclose(s1, s) \
                     or (s1 <= s < s2 and not np.isclose(s, s2)):
                 selection.append(k)
-            #print(s1,s,s2)
+            # print(s1,s,s2)
         return selection
 
     def is_gap(self, s):
@@ -579,7 +602,7 @@ class LatticeContainer:
         assert 0.0 <= s <= self.lattice.totalLen
         for i, el in enumerate(self.lattice.sequence):
             if np.isclose(s, el.s_start):
-                return self.lattice.sequence[i-1], el
+                return self.lattice.sequence[i - 1], el
             else:
                 if el.s_start > s:
                     return False
@@ -640,7 +663,7 @@ class LatticeContainer:
                 if i == 0:
                     return self.lattice.sequence[-1]
                 else:
-                    return self.lattice.sequence[i-1]
+                    return self.lattice.sequence[i - 1]
         raise Exception('No match')
 
     def get_after(self, target):
@@ -649,7 +672,7 @@ class LatticeContainer:
                 if i == len(self.lattice.sequence) - 1:
                     return self.lattice.sequence[0]
                 else:
-                    return self.lattice.sequence[i+1]
+                    return self.lattice.sequence[i + 1]
         raise Exception('No match')
 
     def get_elements(self, el_type: Union[str, type] = None) -> List[type]:
@@ -732,7 +755,7 @@ class LatticeContainer:
                 if r.match(el.id):
                     new_list.append(el)
             el_list = new_list
-        return el_list
+        return ElementList(el_list)
 
     def filter_by_id(self, id_list: List[str], loose_match=True):
         """
@@ -834,6 +857,7 @@ class Recirculator(Element):
     """
     RECIRC element for ELEGANT
     """
+
     def __init__(self, eid: str = None):
         Element.__init__(self, eid)
 
@@ -982,7 +1006,7 @@ class OctupoleInsert:
         else:
             perturbed_mode = True
             assert len(positions) == nn
-            assert np.all(positions + olen/2 < l0) and np.all(positions - olen/2 > 0.0)
+            assert np.all(positions + olen / 2 < l0) and np.all(positions - olen / 2 > 0.0)
 
         # musect = mu0 + 0.5
         f0, betae, alfae, betas = self.calculate_optics_parameters()
@@ -990,14 +1014,14 @@ class OctupoleInsert:
         self.beta_edge = betae
         self.alpha_edge = alfae
 
-        #print(f"QI optics: mu0:{mu0:.3f}|f0:{f0:.3f}|1/f0:{1 / f0:.3f}|"
+        # print(f"QI optics: mu0:{mu0:.3f}|f0:{f0:.3f}|1/f0:{1 / f0:.3f}|"
         #      f"betaedge:{betae:.3f}|alphaedge:{alfae:.3f}|betastar:{betas:.3f}")
         # value, , oqK, nltype, otype;
 
         if current:
             # Use current-based setting via central current
             cal_factor = self.calculate_strength_factor(energy=100.0)
-            scale_factor = self.beta(positions)**-3 / self.beta_star**-3
+            scale_factor = self.beta(positions) ** -3 / self.beta_star ** -3
             k3_arr = current * cal_factor * scale_factor
         else:
             # Use DN formalism to derive k3 from t-strength
@@ -1008,28 +1032,28 @@ class OctupoleInsert:
             knll = knn * cnll ** 2
             k1 = knn * 2  # 1 * 2!
             k3 = knn / cn ** 2 / bn * 16  # 2 / 3 * 4!
-            k3scaled = k3 * oqK # Can be an array
+            k3scaled = k3 * oqK  # Can be an array
             k3_arr = k3scaled / olen_eff
 
         self.seq = seq = []
-        #print(k3_arr)
+        # print(k3_arr)
         if perturbed_mode:
-            seq.append(Drift(l=positions[0]-olen/2, eid='DmarginL'))
+            seq.append(Drift(l=positions[0] - olen / 2, eid='DmarginL'))
             for i, k3 in zip(range(0, nn), k3_arr):
                 k3l = k3 * olen_eff
                 if otype == 0:
                     assert olen == 0.0
-                    seq.append(Multipole(kn=[0., 0., 0., k3l], eid=f'QI{i+1:02}'))
+                    seq.append(Multipole(kn=[0., 0., 0., k3l], eid=f'QI{i + 1:02}'))
                 elif otype == 1:
-                    seq.append(Octupole(l=olen, k3=k3, eid=f'QI{i+1:02}'))
+                    seq.append(Octupole(l=olen, k3=k3, eid=f'QI{i + 1:02}'))
                 elif otype == 2:
                     assert olen == 0.0
-                    seq.append(HKPoly(K40=k3l / 24., K22=k3l / 4., K04=k3l / 24., eid=f'QI{i+1:02}'))
+                    seq.append(HKPoly(K40=k3l / 24., K22=k3l / 4., K04=k3l / 24., eid=f'QI{i + 1:02}'))
                 else:
                     raise
                 if i < nn - 1:
                     seq.append(Drift(l=(positions[i + 1] - positions[i]) - olen, eid=f'D{i + 1:02}'))
-            seq.append(Drift(l=l0-positions[-1]-olen/2, eid='DmarginR'))
+            seq.append(Drift(l=l0 - positions[-1] - olen / 2, eid='DmarginR'))
         else:
             seq.append(Drift(l=margin, eid='oQImarginL'))
             for i, k3 in zip(range(1, nn + 1), k3_arr):
@@ -1051,7 +1075,7 @@ class OctupoleInsert:
                 # value, i, bn, sn, k3, k3scaled, (betas ^ 3 / bn ^ 3);
             seq.append(Drift(l=margin, eid='oQImarginR'))
         l_list = [e.l for e in seq]
-        #print(seq, l_list, sum(l_list))
+        # print(seq, l_list, sum(l_list))
         assert np.isclose(sum(l_list), l0)
 
         if not perturbed_mode:
@@ -1108,7 +1132,7 @@ class OctupoleInsert:
         mu = self.mu0
         bs = l2 / np.tan(mu * np.pi)
         res = (-((bs * s0 * (5 * bs ** 2 + 3 * s0 ** 2)) / (bs ** 2 + s0 ** 2) ** 2) + (2 * bs ** 3 * s1) / (
-                    bs ** 2 + s1 ** 2) ** 2 + (3 * bs * s1) / (bs ** 2 + s1 ** 2) - 3 * np.arctan(
+                bs ** 2 + s1 ** 2) ** 2 + (3 * bs * s1) / (bs ** 2 + s1 ** 2) - 3 * np.arctan(
             s0 / bs) + 3 * np.arctan(s1 / bs)) / (8. * bs ** 2)
         return res
 
@@ -1121,7 +1145,7 @@ class OctupoleInsert:
         l2 = self.l0 / 2
         mu = self.mu0
         bs = l2 / np.tan(mu * np.pi)
-        res = -np.arctan(s0/bs) + np.arctan(s1/bs)
+        res = -np.arctan(s0 / bs) + np.arctan(s1 / bs)
         return res
 
     def integral_beta2(self, s0, s1):
@@ -1133,7 +1157,7 @@ class OctupoleInsert:
         l2 = self.l0 / 2
         mu = self.mu0
         bs = l2 / np.tan(mu * np.pi)
-        res = bs**2 * (-s0 + s1) - (2.0*(s0**3 - s1**3))/3.0 + (-s0**5 + s1**5)/(5.0 * bs**2)
+        res = bs ** 2 * (-s0 + s1) - (2.0 * (s0 ** 3 - s1 ** 3)) / 3.0 + (-s0 ** 5 + s1 ** 5) / (5.0 * bs ** 2)
         return res
 
     def compute_relative_detuning(self):
@@ -1149,8 +1173,8 @@ class OctupoleInsert:
         elif self.otype == 1:
             els = [el for el in box.lattice.sequence if isinstance(el, Octupole)]
             detuning_str = np.array([self.integral_beta2(el.s_start, el.s_end) / el.l for el in els])
-            #central_k3_str = np.array([1 / (self.beta(el.s_mid) ** 3) * el.l for el in els])
-            central_k3_str = np.array([el.k3 * el.l for el in els]) #k3l
+            # central_k3_str = np.array([1 / (self.beta(el.s_mid) ** 3) * el.l for el in els])
+            central_k3_str = np.array([el.k3 * el.l for el in els])  # k3l
             return np.sum(detuning_str * central_k3_str)
         elif self.otype == 2:
             # HKpoly are thin elements - sum their beta^2 * K40 * 24 directly
@@ -1165,7 +1189,7 @@ class OctupoleInsert:
         for el in self.seq:
             if self.otype == 0:
                 if isinstance(el, Multipole):
-                    el.kn = list(np.array(el.kn)*factor)
+                    el.kn = list(np.array(el.kn) * factor)
             elif self.otype == 1:
                 if isinstance(el, Octupole):
                     el.k3 *= factor
