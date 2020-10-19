@@ -63,8 +63,7 @@ class Writer:
         sl.append(f"!Module: {Writer.__module__ + '.' + Writer.__qualname__} v{pyIOTA.__version__}\n")
         sl.append(f'!Source file: {box.source_file}\n')
         sl.append(f'!Lattice title: {box.name}\n')
-        sl.append(f'!Origin: {box.source}\n')
-        sl.append(f'')
+        sl.append(f'!Origin: {box.source}\n\n')
         sl.append(f'!Time: {datetime.datetime.now().isoformat()}\n')
         return ''.join(sl)
 
@@ -286,6 +285,32 @@ class Writer:
         # if 'aperture_scale' not in self.options:
         #     self.options['aperture_scale'] = 1
 
+    def _validate_element(self, el: Element, elements: list):
+        if len(el.id >= 99):
+            idx = el.id[:99]
+            logger.warning(f'Name ({el.id}) is ({len(el.id)}) chars, truncating to 99')
+            idx = el.id[:99]
+            raise Exception # temp
+        else:
+            idx = el.id
+
+        if idx in elements:
+            if self.verbose:
+                print(f'Found repeat definition: ({idx})')
+            return True
+        else:
+            elements.append(idx)
+            return False
+
+    def _check_element_names(self, box: LatticeContainer):
+        names = [el.id for el in box.lattice.sequence]
+        n_uniques = len(set(names))
+        if any(len(idx) >= 99 for idx in names):
+            raise Exception # temp
+            names = [idx[:99] for idx in names]
+            n_uniques2 = len(set(names))
+            if n_uniques != n_uniques2:
+                raise Exception(f'Concatenation to 99 characters created ID conflicts - aborting')
 
     def write_lattice_ng(self,
                          fpath: Path,
@@ -296,12 +321,13 @@ class Writer:
                          # add_misalignment_el: bool = True
                          ):
         """
-        Writes current lattice to the specified path. DEPRECATED.
+        Writes current lattice to the specified path.
         :param fpath: Full file path
         """
         if isinstance(fpath, str):
             raise Exception('Paths should be using Pathlib')
         self._check_critical_options_ng()
+        self._check_element_names(box)
         # iota = self.iota
         lat = box.lattice
         opt = SimpleNamespace(**self.options)
@@ -362,7 +388,7 @@ class Writer:
         if dipoles:
             sl.append('!MAIN BENDS\n')
             for el in dipoles:
-                if self._check_if_already_defined(el, elements): continue
+                if self._validate_element(el, elements): continue
                 sl.append(f"{el.id}: CSBEND, l={el.l:.10f}, angle={el.angle}, e1=0, e2=0, &\n")
                 sl.append(f" h1={el.h_pole1:+.10f}, h2={el.h_pole1:+.10f}, hgap={el.gap/2:+.10f}, fint={el.fint}, &\n")
                 sl.append(f" EDGE_ORDER=1, EDGE1_EFFECTS=3, EDGE2_EFFECTS=3,{ma(el)} &\n")
@@ -373,7 +399,7 @@ class Writer:
         if main_quads:
             sl.append('!MAIN QUADS\n')
             for el in main_quads:
-                if self._check_if_already_defined(el, elements): continue
+                if self._validate_element(el, elements): continue
                 sl.append(f'{el.id:<6}: KQUAD, l={el.l:.10f}, k1={el.k1:+.10e},{ma(el)}'
                           f' N_KICKS="quad_kicks", ISR="flag_isr", SYNCH_RAD="flag_synch"\n')
             sl.append('\n')
@@ -382,7 +408,7 @@ class Writer:
         if other_quads:
             sl.append('!COMBINED HV CORRECTORS+SKEW QUADS\n')
             for el in other_quads:
-                if self._check_if_already_defined(el, elements): continue
+                if self._validate_element(el, elements): continue
                 add_hcor = 0
                 add_vcor = 0
                 for c in box.correctors:
@@ -402,7 +428,7 @@ class Writer:
         if sextupoles:
             sl.append('!SEXTUPOLES\n')
             for el in sextupoles:
-                if self._check_if_already_defined(el, elements): continue
+                if self._validate_element(el, elements): continue
                 if el.l == 0.0:
                     raise Exception("Thin integrator element found - this will have no effect, use MULT or HKPOLY")
                 sl.append(f'{el.id:<10}: KSEXT, l={el.l}, k2={el.k2:+.10e},{ma(el)}'
@@ -412,7 +438,7 @@ class Writer:
         if octupoles:
             sl.append('!OCTUPOLES + quasi-integrable insert\n')
             for el in octupoles:
-                if self._check_if_already_defined(el, elements): continue
+                if self._validate_element(el, elements): continue
                 if el.l == 0.0:
                     raise Exception("Thin integrator element found - this will have no effect, use MULT or HKPOLY")
                 sl.append(
@@ -428,7 +454,7 @@ class Writer:
                     raise Exception('Elegant MULT only supports a single multipole order - use HKPOLY')
                 order = np.argmax(kn > 0.0)
                 assert order >= 2
-                if self._check_if_already_defined(el, elements): continue
+                if self._validate_element(el, elements): continue
                 if getattr(el, 'extra_args', None):
                     n_kicks = el.extra_args.get('N_KICKS', 1)
                 else:
@@ -441,14 +467,14 @@ class Writer:
         if solenoids:
             sl.append('!SOLENOIDS\n')
             for el in solenoids:
-                if self._check_if_already_defined(el, elements): continue
+                if self._validate_element(el, elements): continue
                 sl.append(f'{el.id:<10}: EDRIFT, l={el.l}\n')
             sl.append('\n')
 
         if nllenses:
             sl.append('!Danilov-Nagaitsev nonlinear magnet\n')
             for el in nllenses:
-                if self._check_if_already_defined(el, elements): continue
+                if self._validate_element(el, elements): continue
                 sl.append(f'{el.id:<10}: EDRIFT, l={el.l}\n')
             sl.append('\n')
 
@@ -461,35 +487,35 @@ class Writer:
         if cavities:
             sl.append('! Voltages set in task file\n')
             for el in cavities:
-                if self._check_if_already_defined(el, elements): continue
+                if self._validate_element(el, elements): continue
                 sl.append(f'{el.id:<10}: RFCA, l={el.l}, volt=0.0, change_t=1\n')
             sl.append('\n')
 
         if monitors:
             sl.append('!MONITORS\n')
             for el in monitors:
-                if self._check_if_already_defined(el, elements): continue
+                if self._validate_element(el, elements): continue
                 sl.append(f'{el.id:<10}: MONI, l={el.l}, CO_FITPOINT=1\n')
             sl.append('\n')
 
         if markers:
             sl.append('!MARKERS\n')
             for el in markers:
-                if self._check_if_already_defined(el, elements): continue
+                if self._validate_element(el, elements): continue
                 sl.append(f'{el.id:<10}: MARKER\n')
             sl.append('\n')
 
         if drifts:
             sl.append('!DRIFTS\n')
             for el in drifts:
-                if self._check_if_already_defined(el, elements): continue
+                if self._validate_element(el, elements): continue
                 sl.append(f'{el.id:<10}: EDRIFT, l={el.l:.10e}\n')
             sl.append('\n')
 
         if matrices:
             sl.append('!MATRICES\n')
             for el in matrices:
-                if self._check_if_already_defined(el, elements): continue
+                if self._validate_element(el, elements): continue
                 if el.r.shape != (6, 6):
                     raise Exception(f'First order matrix shape is {el.r.shape}, not 6x6????')
                 matrix_terms = []
@@ -502,7 +528,7 @@ class Writer:
         if hkpoly:
             sl.append('!HKPOLY (polynomial hamiltonian)\n')
             for el in hkpoly:
-                if self._check_if_already_defined(el, elements): continue
+                if self._validate_element(el, elements): continue
                 arg_string = [f'{k.upper()}={v}' for (k, v) in el.hkpoly_args.items()]
                 sl.append(f"{el.id:<10}: HKPOLY, l={el.l}, {', '.join(arg_string)}\n")
             sl.append('\n')
@@ -510,7 +536,7 @@ class Writer:
         if ilmatrices:
             sl.append('!ILMATRICES \n')
             for el in ilmatrices:
-                if self._check_if_already_defined(el, elements): continue
+                if self._validate_element(el, elements): continue
                 arg_string = [f'{k.upper()}={v}' for (k, v) in el.extra_args.items()]
                 sl.append(f"{el.id:<10}: ILMATRIX, l={el.l}, {', '.join(arg_string)}\n")
             sl.append('\n')
@@ -521,7 +547,7 @@ class Writer:
                 raise Exception('Legacy add_mal option specified but custom recirculators also present!')
             sl.append('!RECIRC \n')
             for el in recirculators:
-                if self._check_if_already_defined(el, elements): continue
+                if self._validate_element(el, elements): continue
                 sl.append(f"{el.id:<10}: RECIRC \n")
             sl.append('\n')
         else:
@@ -638,10 +664,4 @@ class Writer:
 
         return result
 
-    def _check_if_already_defined(self, el: Element, elements: list):
-        if el.id in elements:
-            if self.verbose: print(f'Found repeat definition: {el.id}')
-            return True
-        else:
-            elements.append(el.id)
-            return False
+

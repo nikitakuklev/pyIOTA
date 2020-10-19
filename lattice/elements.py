@@ -510,18 +510,24 @@ class LatticeContainer:
         # print(f'Inserted ({a}) cleanly, ({b}) with drift splitting, ({c}) rejected: {rejected}')
         logger.info(f'Inserted ({a}) cleanly, ({b}) with drift splitting, ({c}) rejected: {rejected}')
 
-    def merge_drifts(self, exclusions: List[Drift] = None, verbose: bool = False, silent: bool = False):
+    def merge_drifts(self, exclusions: List[Drift] = None, verbose: bool = False,
+                     silent: bool = False, max_id_length: int = None):
         """
         Merges consecutive drifts in the lattice, except those in exclusions list
         :param exclusions:
         :param verbose:
         :return:
         """
+        lim = max_id_length or 250
 
-        def name_check(name):
-            if len(name) > 250:
-                logger.warning('Merged drift name too long - generating new random one')
-                return "ID_{0}_".format(np.random.randint(100000000))
+        def name_check(name, mode='trunc'):
+            if len(name) > lim:
+                if mode == 'rand':
+                    logger.warning(f'Merged drift name ({name}) too long - generating new random one')
+                    return "ID_{0}_".format(np.random.randint(100000000))
+                elif mode == 'trunc':
+                    logger.warning(f'Merged drift name ({name}) too long - truncating to ({lim}) chars')
+                    return name[:lim]
             else:
                 return name
 
