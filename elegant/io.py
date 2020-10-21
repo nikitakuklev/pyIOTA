@@ -2,6 +2,8 @@ __all__ = ['SDDS', 'SDDSTrack',
            'read_parameters_to_df', 'write_df_to_parameter_file', 'prepare_folders', 'prepare_folder_structure',
            'write_df_to_parameter_file_v2']
 
+import gc
+
 """
 Collection of IO-related functions for elegant and SDDS file formats
 """
@@ -109,24 +111,37 @@ class SDDS:
 
 
 df_data_columns = ['x', 'xp', 'y', 'yp', 't', 'p', 'dt']
+df_data_columns_dict = {c: i for (c, i) in zip(df_data_columns, range(len(df_data_columns)))}
 df_columns = ['PARTICLE', 'N'] + [c + 'i' for c in df_data_columns] + df_data_columns
-cols = {c: i for (c, i) in zip(df_data_columns, range(len(df_data_columns)))}
-
+df_dtypes = [np.float64] * len(df_data_columns)
 
 class SDDSTrack:
     """
     SDDSPython wrapper for track data (which requires special treatment due to memory usage and format)
     """
 
-    def __init__(self, path: Path, fast: bool = True):
+    def __init__(self, path: Path, as_df: bool = True, fast: bool = True,
+                 clear_cdata: bool = True, clear_sd: bool = True,
+                 data_trim: slice = None, columns: List = None):
+        """
+        Special SDDS container for track data, with many performance and memory options
+        :param path: File path
+        :param as_df: Convert to per-particle dataframe
+        :param fast: Dont store definitions
+        :param clear_cdata: Clear parsed numpy array (only if converting to df)
+        :param clear_sd: Clear SDDS object
+        :param data_trim: Page range to parse
+        """
         if isinstance(path, Path):
             path = str(path)
         if not os.path.exists(path):
             raise Exception(f'Path {path} is missing you fool!')
-        sd = sdds.SDDS(0)
+        sd = sdds.SDDS(16)
         sd.load(path)
-        self.sd = sd
         self.path = path
+        columns = columns or df_data_columns
+        self.df_data_columns = columns
+        self.df_data_columns_dict = {c: df_data_columns_dict[c] for c in columns}
         self.cname = [sd.columnName[i] for i in range(len(sd.columnName))]
         self.pname = [sd.parameterName[i] for i in range(len(sd.parameterName))]
         self.cdict = {sd.columnName[i]: i for i in range(len(sd.columnName))}
@@ -135,32 +150,108 @@ class SDDSTrack:
             self.cdef = [sd.columnDefinition[i].copy() for i in range(len(sd.columnName))]
             self.pdef = [sd.parameterDefinition[i].copy() for i in range(len(sd.parameterName))]
 
-        self.cdata = self._ragged_nested_list_to_array(sd.columnData, idx_col='particleID')
-        print(f'Track data has shape {self.cdata.shape} (cols|entries|pages)')
+        self.cdata = self._ragged_nested_list_to_array(sd.columnData,
+                                                       idx_col=self.cdict['particleID'],
+                                                       data_trim=data_trim)
+        # print(f'Track data has shape {self.cdata.shape} (cols|entries|pages)')
+        # print(self.cdata)
         self.pdata = [np.array(sd.parameterData[i]) for i in range(len(sd.parameterName))]
         if len(self.cname) > 0:
             self.pagecnt = self.cdata[0].shape[0]
         else:
             self.pagecnt = self.pdata[0].shape[0]
-        # Convert to df immediately - this discards cdata
-        self.to_df()
+        if as_df:
+            # Convert to df immediately
+            self.to_df()
+            if clear_cdata:
+                # Remove complete array
+                del self.cdata
+                self.cdata = None
+        if clear_sd:
+            sd.columnData.clear()
+            del sd.columnData
+            del sd
+        else:
+            self.sd = sd
+        gc.collect()
 
-    def _ragged_nested_list_to_array(self, data, idx_col):
-        n_cols = len(data)
+    def _ragged_nested_list_to_array(self, data: List, idx_col: int, data_trim: slice = None):
+        """
+        Converts ragged 3d list to a 3d array
+        :param data: 3d list
+        :param idx_col: index column (dim 0)
+        :return:
+        """
+        # Columns are x, xp, etc...
+        n_cols = len(self.df_data_columns_dict)
+
+        # Pages are 1 per turn
         n_pages_l = [len(data[i]) for i in range(n_cols)]
         assert len(np.unique(n_pages_l)) == 1
         n_pages = n_pages_l[0]
+
+        # Entries are particles - number varies per page
         n_entries = max([len(v) for v in data[0]])
-        arr = np.full((n_cols, n_entries, n_pages), np.nan, dtype=np.float64)
-        col_idx = self.cdict[idx_col]
-        for page in range(n_pages):
+
+        # Particles are identified by their ID - order changes as some are lost
+        col_idx = idx_col
+
+        pages = np.arange(n_pages, dtype=np.int32)
+        if data_trim:
+            pages = pages[data_trim]
+            # print(pages)
+
+        # Allocate the full array
+        arr = np.full((n_cols, n_entries, len(pages)), np.nan, dtype=np.float64)
+
+        for i, page in enumerate(pages):
             entries = np.array(data[col_idx][page]) - 1
-            for j, (name, idx) in enumerate(cols.items()):
-                assert j == idx
-                arr[j, entries, page] = data[idx][page]
-                # if j == 0:
-                #     print(arr[j, :, page])
+            for j, (name, idx) in enumerate(self.df_data_columns_dict.items()):
+                arr[j, entries, i] = data[idx][page]
         return arr
+
+    def to_df(self):
+        """
+        Convert object storage to a Dataframe
+        :return:
+        """
+        arr = self.cdata
+        (n_cols, n_particles, n_turns) = arr.shape
+        idx = list(range(1, n_particles + 1))
+        # df = pd.DataFrame(columns=df_columns, index=range(1, n_particles + 1), dtype=np.float64)
+        series_l = {}
+
+        # print(len(df), df.dtypes)
+        # df = df.astype(dtype= {'PARTICLE':np.int32,'N':np.int32,'X0i':np.float64,'Y0i':np.float64,'Z0i':np.float64})
+        # print(len(df), df.dtypes)
+        # df.loc[:, 'PARTICLE'] = np.array(range(n_particles)) + 1
+        series_l['P'] = pd.Series(np.arange(1, n_particles + 1, dtype=np.int32), index=idx)
+        # print(len(df), df.dtypes)
+        for i, (c, dt) in enumerate(zip(self.df_data_columns, df_dtypes)):
+            series_l[c] = pd.Series([l[~np.isnan(l)] for l in arr[i, ...]], dtype=object, index=idx)
+            # df.loc[:, c] = pd.Series([l[~np.isnan(l)] for l in arr[i, ...]], index=range(1, n_particles + 1))
+            # print([l[~np.isnan(l)] for l in list(arr[...,i])][0], len(df.loc[:,c]))
+
+        # number of turns
+        series_l['N'] = series_l[self.df_data_columns[0]].apply(lambda x: len(x)).astype(np.int32)
+        # df.loc[:, 'N'] = df.loc[:, df_data_columns[0]].apply(lambda x: len(x))
+
+        # print(len(df), df.iloc[0:1])
+        # return df
+        # print(len(df), df.iloc[0:1])
+        # print(df.loc[df.X0 == np.nan,:])
+        # print(df.loc[(df.X0 == 0.0),:])
+        for i, c in enumerate(self.df_data_columns):
+            # print(series_l[c])
+            series_l[c + 'i'] = series_l[c].apply(lambda x: x[0] if len(x) > 0 else np.nan)
+            # df.loc[:, c + 'i'] = df.loc[:, c].apply(lambda x: x[0])
+
+        # Nmax = df.loc[:, 'N'].max()
+        # print(len(df), df.dtypes)
+        # df = df.astype(dtype={'PARTICLE': np.int32, 'N': np.int32})
+        # self.df = df
+        self.df = df = pd.DataFrame(series_l, index=idx)
+        return df
 
     def summary(self):
         """
@@ -210,45 +301,6 @@ class SDDSTrack:
         :return:
         """
         return self.pdata[self.pdict[name]]
-
-    def to_df(self, clear_cdata: bool = True):
-        """
-        Convert object storage to a Dataframe
-        :return:
-        """
-        arr = self.cdata
-        (n_cols, n_particles, n_turns) = arr.shape
-        df = pd.DataFrame(columns=df_columns, index=range(1, n_particles + 1), dtype=np.float64)
-        # print(len(df), df.dtypes)
-        # df = df.astype(dtype= {'PARTICLE':np.int32,'N':np.int32,'X0i':np.float64,'Y0i':np.float64,'Z0i':np.float64})
-        # print(len(df), df.dtypes)
-        df.loc[:, 'PARTICLE'] = np.array(range(n_particles)) + 1
-        # print(len(df), df.dtypes)
-        for i, c in enumerate(cols.keys()):
-            df.loc[:, c] = pd.Series([l[~np.isnan(l)] for l in arr[i, ...]], index=range(1, n_particles + 1))
-            # print([l[~np.isnan(l)] for l in list(arr[...,i])][0], len(df.loc[:,c]))
-        # print(len(df), df.iloc[0:1])
-        # return df
-        # print(len(df), df.iloc[0:1])
-        # print(df.loc[df.X0 == np.nan,:])
-        # print(df.loc[(df.X0 == 0.0),:])
-        if clear_cdata:
-            del arr
-            self.cdata = None
-        for c in df_data_columns:
-            df.loc[:, c + 'i'] = df.loc[:, c].apply(lambda x: x[0])
-        # df.loc[:, 'X0i'] = df.loc[:, 'X0'].apply(lambda x: x[0])
-        # df.loc[:, 'Y0i'] = df.loc[:, 'Y0'].apply(lambda x: x[0])
-        # df.loc[:, 'Z0i'] = df.loc[:, 'Z0'].apply(lambda x: x[0])
-        # df.loc[:, 'X0i'] = df.loc[:, 'PX0'].apply(lambda x: x[0])
-        # df.loc[:, 'Y0i'] = df.loc[:, 'PY0'].apply(lambda x: x[0])
-        # df.loc[:, 'Z0i'] = df.loc[:, 'PZ0'].apply(lambda x: x[0])
-        df.loc[:, 'N'] = df.loc[:, df_data_columns[0]].apply(lambda x: len(x))
-        # Nmax = df.loc[:, 'N'].max()
-        # print(len(df), df.dtypes)
-        df = df.astype(dtype={'PARTICLE': np.int32, 'N': np.int32})
-        self.df = df
-        return df
 
 
 def read_parameters_to_df(knob: Path,
