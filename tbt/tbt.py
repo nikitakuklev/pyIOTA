@@ -69,6 +69,159 @@ class Util:
         return files_ll, props_dicts
 
 
+class SimKick:
+    @enum.unique
+    class Datatype(enum.Enum):
+        """
+        Enum containing the most common types of data in a kick. Intended to be used with data retrieval methods.
+        """
+        RAW = ''
+        FFT_FREQ = '_fft_freq'
+        FFT_POWER = '_fft_pwr'
+        NUX = '_nux'
+        NUY = '_nuy'
+        NU = '_nu'
+        INTERPX = '_ix'
+        INTERPY = '_iy'
+        CSX = 'CSx'
+        CSY = 'CSy'
+        I1 = 'I1'
+
+    def __init__(self,
+                 df: pd.DataFrame,
+                 families: Tuple = None):
+        """
+        Stores data from a tracking simulation. Many methods are analogous to
+        experimental Kick class.
+        :param df:
+        """
+        self.df = df
+        self.families = families or ('x', 'xp', 'y', 'yp')
+        self.pairs = (('x', 'xp'), ('y', 'yp'))
+        self.track = 'track' in df.columns
+        self.twiss = 'twiss' in df.columns
+        #if self.track:
+        #    self.tdata = self.df.iloc[0, self.df.columns.get_loc('track')].df
+        self.n_part = len(df.iloc[0, self.df.columns.get_loc('track')].df) if self.track else None
+
+    @property
+    def tdata(self):
+        if self.track:
+            return self.df.iloc[0, self.df.columns.get_loc('track')].df
+        else:
+            return None
+
+    def calculate_fft(self,
+                      naff: NAFF,
+                      families: List = None,
+                      spacing: float = 1.0,
+                      data_trim: slice = None,
+                      store: bool = True):
+        """ Calculates FFT for each particle """
+        assert self.track
+        data = self.tdata
+        families = families or self.families
+        results = []
+        for f in families:
+            fft_freq_l = []
+            fft_power_l = []
+            for i in data.index:
+                vec = data.loc[i, f]
+                vec -= np.mean(vec)
+                if data_trim:
+                    # Use provided trims
+                    fft_freq, fft_power = naff.fft(vec[data_trim],
+                                                   data_trim=np.s_[:],
+                                                   spacing=spacing)
+                else:
+                    # Use NAFF trims
+                    fft_freq, fft_power = naff.fft(vec,
+                                                   spacing=spacing)
+                fft_freq_l.append(fft_freq)
+                fft_power_l.append(fft_power)
+
+            if store:
+                data.loc[:, f + self.Datatype.FFT_FREQ.value] = fft_freq_l
+                data.loc[:, f + self.Datatype.FFT_POWER.value] = fft_power_l
+            results.append((fft_freq_l, fft_power_l))
+        return results
+
+    def calculate_tunes(self,
+                        naff: NAFF,
+                        method: str = 'FFT',
+                        selector: Callable = None,
+                        search_kwargs: Dict[str, int] = None,
+                        use_precalculated: bool = True,
+                        data_trim: slice = None,
+                        pairs: bool = False):
+        """
+        Calculates tune by finding peaks in FFT data, optionally using precomputed data to save time
+
+        :param naff: tbt.NAFF object to be used - its setting will take priority over kick values
+        :param method: Peak finding method - NAFF or FFT
+        :param families: Families to perform calculation on - typically H, V, or C
+        :param selector: Function that picks correct peak from list
+        :param search_kwargs: Method specific extra parameters to be used in the search
+        :param use_precalculated:
+        :param data_trim: Trim override - if not provided, use whatever NAFF object has
+        :param pairs:
+        :return:
+        """
+        data = self.tdata
+        if not pairs:
+            for f in self.families:
+                if method.upper() == 'FFT':
+                    tunes = []
+                    col_fr = f + self.Datatype.FFT_FREQ.value
+                    col_pwr = f + self.Datatype.FFT_POWER.value
+
+                    if use_precalculated and col_fr in data and col_pwr in data:
+                        fft_freq_l = data.loc[:, col_fr]
+                        fft_power_l = data.loc[:, col_pwr]
+                    else:
+                        fft_freq_l, fft_power_l = self.calculate_fft(naff, [f], data_trim=data_trim, store=False)[0]
+
+                    for fft_freq, fft_power in zip(fft_freq_l, fft_power_l):
+                        tunes.append(fft_freq[np.argmax(fft_power)])
+
+                    data.loc[:, f + self.Datatype.NU.value] = tunes
+                else:
+                    raise Exception
+
+    def calculate_invariants(self, beta_x, alpha_x, beta_y, alpha_y,
+                             i1_str=0.0,
+                             data_trim: slice = None):
+        from pyIOTA.tbt import Coordinates
+        from pyIOTA.tbt import Invariants
+        assert self.track
+        data_trim = data_trim or np.s_[:]
+        data = self.df.iloc[0, self.df.columns.get_loc('track')].df
+
+        csxl = []
+        csyl = []
+        i1l = []
+        for i in range(1, self.n_part + 1):
+            x = data.loc[i, self.pairs[0][0]][data_trim]
+            xp = data.loc[i, self.pairs[0][1]][data_trim]
+            xn, xpn = Coordinates.normalize(x, xp, beta_x, alpha_x)
+            csx = Invariants.compute_CS_2D(xn, xpn, True)
+
+            y = data.loc[i, self.pairs[1][0]][data_trim]
+            yp = data.loc[i, self.pairs[1][1]][data_trim]
+            yn, ypn = Coordinates.normalize(y, yp, beta_y, alpha_y)
+            csy = Invariants.compute_CS_2D(yn, ypn, True)
+
+            i1 = Invariants.compute_I1(xn, xpn, yn, ypn, i1_str, True)
+
+            csxl.append(csx)
+            csyl.append(csy)
+            i1l.append(i1)
+
+        data[self.Datatype.CSX.value] = csxl
+        data[self.Datatype.CSY.value] = csyl
+        data[self.Datatype.I1.value] = i1l
+
+
 class Kick:
     @enum.unique
     class Datatype(enum.Enum):
@@ -769,9 +922,6 @@ class Kick:
         """ Gets sextupole settings """
         elements = [q + '.SETTING' for q in pyIOTA.iota.SEXTUPOLES.ALL_CURRENTS]
         return {k: self.state(k) for k in elements}
-
-    def compute_tunes_naff(self):
-        pass
 
     def get_turns(self) -> int:
         bpm = self.get_bpms()[0]
