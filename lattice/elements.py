@@ -917,7 +917,7 @@ class NLLens(Element):
     tilt - tilt of lens in [rad]
     """
 
-    def __init__(self, l=0., knll=0., cnll=0.1, tilt=0., eid=None):
+    def __init__(self, l=0.0, knll=0.0, cnll=0.0, tilt=0.0, eid=None):
         Element.__init__(self, eid)
         self.l = l
         self.knll = knll
