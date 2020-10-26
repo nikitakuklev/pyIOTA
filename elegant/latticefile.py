@@ -286,7 +286,7 @@ class Writer:
         #     self.options['aperture_scale'] = 1
 
     def _validate_element(self, el: Element, elements: list):
-        if len(el.id >= 99):
+        if len(el.id) >= 99:
             idx = el.id[:99]
             logger.warning(f'Name ({el.id}) is ({len(el.id)}) chars, truncating to 99')
             idx = el.id[:99]
