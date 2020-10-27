@@ -100,7 +100,7 @@ class SimKick:
         self.pairs = (('x', 'xp'), ('y', 'yp'))
         self.track = 'track' in df.columns
         self.twiss = 'twiss' in df.columns
-        #if self.track:
+        # if self.track:
         #    self.tdata = self.df.iloc[0, self.df.columns.get_loc('track')].df
         self.n_part = len(df.iloc[0, self.df.columns.get_loc('track')].df) if self.track else None
 
@@ -123,11 +123,9 @@ class SimKick:
         families = families or self.families
         results = []
         for f in families:
-            fft_freq_l = []
-            fft_power_l = []
+            fft_freq_l, fft_power_l = [], []
             for i in data.index:
-                vec = data.loc[i, f]
-                vec -= np.mean(vec)
+                vec = data.loc[i, f].copy() - np.mean(data.loc[i, f])
                 if data_trim:
                     # Use provided trims
                     fft_freq, fft_power = naff.fft(vec[data_trim],
@@ -229,6 +227,7 @@ class Kick:
         Enum containing the most common types of data in a kick. Intended to be used with data retrieval methods.
         """
         RAW = ''
+        ORIG = '_orig'
         FFT_FREQ = '_fft_freq'
         FFT_POWER = '_fft_pwr'
         NUX = '_nux'
@@ -236,6 +235,7 @@ class Kick:
         NU = '_nu'
         INTERPX = '_ix'
         INTERPY = '_iy'
+        AMP = '_a'
 
     def __init__(self,
                  df: pd.DataFrame,
@@ -386,7 +386,7 @@ class Kick:
     def reset_trim(self):
         self.trim = self.default_trim
 
-    def suggest_trim(self, min_idx: int, max_idx: int, threshold: float = 0.2,
+    def suggest_trim(self, min_idx: int, max_idx: int, threshold: float = 0.2, min_turns: int = None,
                      n_refturns: int = 50, families: list = None, verbose: bool = False, silent: bool = True):
         """
         Finds longest signal trim within constraints, based on local SNR
@@ -401,6 +401,7 @@ class Kick:
         families = families or ['H', 'V']
         for fam in families:
             for k, v in self.get_bpm_data(family=fam, no_trim=True).items():
+                v = v.copy()
                 v = v[min_idx:max_idx] - np.mean(v[min_idx:max_idx])
                 # Reference is first n_refturns after min_idx
                 initial_ampl = np.mean(np.abs(v[:n_refturns]))
@@ -422,6 +423,8 @@ class Kick:
                 offsets[k] = offset
         if verbose: print(f'Found trims: {min_idx} + {offsets}')
         offset_avg = int(np.round(np.mean(list(offsets.values()))))
+        if min_turns is not None and offset_avg + 30 < min_turns:
+            offset_avg = min_turns - 30
         if verbose: print(f'Average offset: {offset_avg}')
         return np.s_[min_idx:min_idx + offset_avg + 30]
 
@@ -937,6 +940,7 @@ class Kick:
                        search_kwargs: Dict[str, int] = None,
                        use_precalculated: bool = True,
                        data_trim: slice = None,
+                       freq_trim: tuple = None,
                        pairs: bool = False):
         """
         Calculates tune by finding peaks in FFT data, optionally using precomputed data to save time
@@ -964,15 +968,12 @@ class Kick:
                     col_fr = bpm + self.Datatype.FFT_FREQ.value
                     col_pwr = bpm + self.Datatype.FFT_POWER.value
                     if use_precalculated and col_fr in self.df.columns and col_pwr in self.df.columns:
-                        top_tune, peak_tunes, peak_idx, peak_props, (pf, pp) = naff.fft_peaks(data=None,
-                                                                                              search_peaks=True,
-                                                                                              search_kwargs=search_kwargs,
-                                                                                              fft_freq=
-                                                                                              self.df.iloc[0].loc[
-                                                                                                  col_fr],
-                                                                                              fft_power=
-                                                                                              self.df.iloc[0].loc[
-                                                                                                  col_pwr])
+                        res = naff.fft_peaks(data=None,
+                                             search_peaks=True,
+                                             search_kwargs=search_kwargs,
+                                             fft_freq=self.df.iloc[0].loc[col_fr],
+                                             fft_power=self.df.iloc[0].loc[col_pwr])
+                        top_tune, peak_tunes, peak_idx, peak_props, (pf, pp) = res
                     else:
                         top_tune, peak_tunes, peak_idx, peak_props, (pf, pp) = naff.fft_peaks(
                             data=self.df.iloc[0].loc[bpm],
@@ -1021,15 +1022,18 @@ class Kick:
                         n_components = (n_components, n_components)
                     results = []
                     for bpm, nc in zip([bh, bv], n_components):
+                        data = self.get_bpm_data(bpm, no_trim=True).copy()
                         if data_trim:
                             # Use provided trims
-                            nfresult = naff.run_naff_v2(self.get_bpm_data(bpm, no_trim=True)[data_trim],
+                            nfresult = naff.run_naff_v2(data[data_trim],
                                                         n_components=nc,
-                                                        data_trim=np.s_[:])
+                                                        data_trim=np.s_[:],
+                                                        freq_trim=freq_trim)
                         else:
                             # Use NAFF trims
-                            nfresult = naff.run_naff_v2(self.get_bpm_data(bpm, no_trim=True),
-                                                        n_components=nc)
+                            nfresult = naff.run_naff_v2(data,
+                                                        n_components=nc,
+                                                        freq_trim=freq_trim)
                         peaks[bpm] = ([n['tune'] for n in nfresult], nfresult)
                         results.append(peaks[bpm])
                     if selector:
@@ -1087,13 +1091,15 @@ class Kick:
         for i, bpm in enumerate(bpms):
             if data_trim:
                 # Use provided trims
+                data = self.get_bpm_data(bpms=bpm, no_trim=True, data_type=data_type).copy()[data_trim]
                 fft_freq, fft_power = naff.fft(
-                    self.get_bpm_data(bpms=bpm, no_trim=True, data_type=data_type)[data_trim],
+                    data,
                     data_trim=np.s_[:],
                     spacing=spacing)
             else:
                 # Use NAFF trims
-                fft_freq, fft_power = naff.fft(self.get_bpm_data(bpms=bpm, no_trim=True, data_type=data_type),
+                data = self.get_bpm_data(bpms=bpm, no_trim=True, data_type=data_type).copy()
+                fft_freq, fft_power = naff.fft(data,
                                                spacing=spacing)
             # fft_freq, fft_power = naff.fft(self.get(bpm))
             self.df[bpm + self.Datatype.FFT_FREQ.value] = [fft_freq]
@@ -1113,6 +1119,17 @@ class Kick:
         if np.isnan(self.df.iloc[0]['intensity']):
             raise Exception
         return avg / len(bpms)
+
+    def calculate_amplitude(self, families=None, data_trim=None):
+        families = families or ['H', 'V']
+        data_trim = data_trim or self.trim
+        bpms = self.get_bpms(families)
+        for bpm in bpms:
+            data = self.get_bpm_data(bpm, data_trim=data_trim).copy()
+            data -= np.mean(data)
+            data = np.abs(data)
+            amp = np.percentile(data, 90) * 2
+            self.df[bpm + self.Datatype.AMP.value] = amp
 
     def calculate_stats(self) -> dict:
         """

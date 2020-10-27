@@ -9,6 +9,7 @@ def flatten(*args):
     """
     return (e for arg in args for e in (flatten(*arg) if isinstance(arg, (tuple, list, Iterable)) else (arg,)))
 
+
 def flatten_l(*args):
     """
     Return a deep flat list
@@ -16,6 +17,7 @@ def flatten_l(*args):
     :return: Single 1D list
     """
     return [e for arg in args for e in (list(flatten(*arg)) if isinstance(arg, (tuple, list, Iterable)) else (arg,))]
+
 
 def flatten_unique(*args):
     """
