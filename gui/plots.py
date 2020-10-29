@@ -79,7 +79,7 @@ def plot_simple(*args,
         else:
             x_local = None
         if demean:
-            v = v - np.mean(v)
+            v = v.copy() - np.mean(v)
         if normalize:
             from sklearn.preprocessing import minmax_scale
             v = minmax_scale(v)
@@ -101,7 +101,7 @@ def plot_simple(*args,
         axy._get_lines.prop_cycler = ax._get_lines.prop_cycler
         for z, (i, v) in enumerate(arrays_twiny):
             if demean:
-                v = v - np.mean(v)
+                v = v.copy() - np.mean(v)
             if normalize:
                 from sklearn.preprocessing import minmax_scale
                 v = minmax_scale(v)
@@ -187,7 +187,7 @@ def plot_simple_grid(*args,
                 for z, (k, v) in enumerate(entry.items()):
                     if root in k:
                         if demean:
-                            v = v - np.nanmean(v)
+                            v = v.copy() - np.nanmean(v)
                         ax[i, j].plot(v, lw=0.5)
                         ax[i, j].set_title(f"{z}|{k}")
                         i += 1
