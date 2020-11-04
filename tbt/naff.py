@@ -294,7 +294,7 @@ class NAFF:
 
     def run_naff_v2(self, data: np.ndarray, data_trim: slice = None, xatol: float = 1e-8,
                     n_components: int = 2, full_data: bool = True, spacing: float = 1.0,
-                    perf_mode: bool = False):
+                    perf_mode: bool = False, freq_trim: tuple = None):
         """
         Numeric analysis of fundamental frequencies
         Iterative method that maximizes inner product of data and oscillatory signal, finding best frequencies
@@ -315,7 +315,7 @@ class NAFF:
             if data_trim.stop is not None and data_trim.stop > len(data):
                 raise Exception(f"Trim end ({data_trim.stop}) exceeds available data length ({len(data)})")
             data = data[data_trim]
-        data -= np.mean(data)
+        data = data - np.mean(data)  # NOT INPLACE, VERY IMPORTANT
         data = data.astype(complex)
         n_turns = len(data)
         window = self.window(n_turns, self.window_power)
@@ -330,7 +330,12 @@ class NAFF:
             else:
                 fft_power = np.fft.rfft(signal)
                 fft_freq = np.fft.rfftfreq(len(signal), d=spacing)
-            return fft_freq[np.argmax(fft_power)]
+            if freq_trim is not None:
+                mask = np.argwhere((fft_freq > freq_trim[0]) & (fft_freq < freq_trim[1])).flatten()
+                assert np.any(mask)
+                return fft_freq[mask][np.argmax(fft_power[mask])]
+            else:
+                return fft_freq[np.argmax(fft_power)]
 
         def get_amplitude(freq: np.ndarray, signal: np.ndarray):
             last_eval = self.compute_correlations_v2(signal, freq, no_trim=True, no_window=True)
