@@ -1,5 +1,6 @@
 __all__ = ['Invariants', 'Coordinates', 'Phase', 'Twiss', 'SVD', 'Interpolator']
 
+import logging
 from typing import Tuple, List
 
 import numpy as np
@@ -9,6 +10,8 @@ from scipy.optimize import curve_fit
 from scipy.signal import hilbert
 
 import pyIOTA.math as pmath
+
+logger = logging.getLogger(__name__)
 
 
 class Routines:
@@ -22,6 +25,23 @@ class Routines:
         phases_exp_abs = Phase.relative_to_absolute(phases_exp_rel)
         betax_exp_unscaled = Twiss.from_SVD(U, S, V)
         return phases_exp_rel, betax_exp_unscaled
+
+
+class NIO:
+    @staticmethod
+    def convert_t_to_kappa(t, c):
+        """ Compute conversion from t strength of DN magnet to kappa notation of QI"""
+        # From mathematica, have 6*kappa = 16*t/c^2
+        if c != 0.01:
+            logger.warning(f'Unusual geometric constant c={c} has been supplied')
+        return (8.0 / 3.0) * t / (c * c)
+
+    @staticmethod
+    def convert_kappa_to_t(kappa, c):
+        if c != 0.01:
+            logger.warning(f'Unusual geometric constant c={c} has been supplied')
+        """ Convert QI kappa to DN strength t"""
+        return (3.0 / 8.0) * c * c * kappa
 
 
 class Invariants:
@@ -251,6 +271,27 @@ class SVD:
         self.data_trim = data_trim
         self.output_trim = output_trim
 
+    def clean_kick_2D(self,
+                      kick: Kick,
+                      n_comp: int = 5,
+                      families: List[str] = None,
+                      use_kick_trim: bool = True):
+        """
+        Clean kick using SVD, reconstructing each BPM from specified number of components
+        """
+        families = families or ['H', 'V', 'S']
+        assert kick.__class__.__name__ == 'Kick'  # assert isinstance(kick, Kick)
+        for family in families:
+            U, S, V, vh = self.decompose2D(kick, plane=family, use_kick_trim=use_kick_trim)
+            signal = U[:, :n_comp] @ np.diag(S[:n_comp]) @ vh[:n_comp, :]
+            bpms = kick.get_bpms(family)
+            for i, b in enumerate(bpms):
+                if b + kick.Datatype.ORIG.value not in kick.df.columns:
+                    kick.set(b + kick.Datatype.ORIG.value, kick.get_bpm_data(b).copy())
+                else:
+                    raise Exception('Double cleaning!')
+                kick.set(b + kick.Datatype.RAW.value, signal[i, :].copy())
+
     def decompose2D(self, data: Kick, plane: str = None, use_kick_trim: bool = True):
         """
         Decompose any matrix-castable object using SVD
@@ -274,7 +315,7 @@ class SVD:
         else:
             raise Exception(f'Unknown data type: {data.__class__.__name__}')
 
-        matrix -= np.mean(matrix, axis=1)[:, np.newaxis]
+        matrix = matrix - np.mean(matrix, axis=1)[:, np.newaxis]
         U, S, vh = np.linalg.svd(matrix, full_matrices=False)
         V = vh.T  # transpose it back to conventional U @ S @ V.T
         return U, S, V, vh
