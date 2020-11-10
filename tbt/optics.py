@@ -137,14 +137,32 @@ class Phase:
 
 class Twiss:
     @staticmethod
-    def beta_from_3bpm(bpm1, bpm2, bpm3):
+    def beta1_from_3bpm(beta1_model, dphase12, dphase12_model, dphase13, dphase13_model):
         """
-        Implements beta-function calculation from 3 BPMs
-        :param bpm1:
-        :param bpm2:
-        :param bpm3:
-        :return:
+        Model-dependent beta-function at BPM1, calculated via 3-BPM method
+        See below for references
         """
+        cot = np.arctan
+        assert dphase12 > 0 and dphase13 > 0 and \
+               dphase12_model > 0 and dphase13_model > 0
+        beta1 = beta1_model * (cot(dphase12) - cot(dphase13))/(cot(dphase12_model)-cot(dphase13_model))
+        return beta1
+
+    @staticmethod
+    def beta_from_3bpm(beta1_model, beta2_model, beta3_model, dphase12, dphase12_model, dphase13, dphase13_model, dphase23, dphase23_model):
+        """
+        Model-dependent beta-functions calculated via 3-BPM method
+        Ref:
+         Luminosity and beta function measurement at the electron - positron collider ring LEP
+         CERN-SL-96-070-BI
+        """
+        cot = np.arctan
+        assert dphase12 > 0 and dphase13 > 0 and dphase23 > 0 and \
+               dphase12_model > 0 and dphase13_model > 0 and dphase23_model > 0
+        beta1 = beta1_model * (cot(dphase12) - cot(dphase13)) / (cot(dphase12_model) - cot(dphase13_model))
+        beta2 = beta2_model * (cot(dphase12) + cot(dphase23)) / (cot(dphase12_model) + cot(dphase23_model))
+        beta3 = beta3_model * (cot(dphase23) - cot(dphase13)) / (cot(dphase23_model) - cot(dphase13_model))
+        return beta1, beta2, beta3
 
     @staticmethod
     def from_SVD(U, S, V):
@@ -492,3 +510,4 @@ class Interpolator:
                 x, y = self.interpolate(None, v, ratio=ratio)
                 kick.set(f'{b}{Kick.Datatype.INTERPX.value}', x)
                 kick.set(f'{b}{Kick.Datatype.INTERPY.value}', y)
+
