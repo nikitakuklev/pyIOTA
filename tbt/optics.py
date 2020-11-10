@@ -145,11 +145,12 @@ class Twiss:
         cot = np.arctan
         assert dphase12 > 0 and dphase13 > 0 and \
                dphase12_model > 0 and dphase13_model > 0
-        beta1 = beta1_model * (cot(dphase12) - cot(dphase13))/(cot(dphase12_model)-cot(dphase13_model))
+        beta1 = beta1_model * (cot(dphase12) - cot(dphase13)) / (cot(dphase12_model) - cot(dphase13_model))
         return beta1
 
     @staticmethod
-    def beta_from_3bpm(beta1_model, beta2_model, beta3_model, dphase12, dphase12_model, dphase13, dphase13_model, dphase23, dphase23_model):
+    def beta_from_3bpm(beta1_model, beta2_model, beta3_model, dphase12, dphase12_model, dphase13, dphase13_model,
+                       dphase23, dphase23_model):
         """
         Model-dependent beta-functions calculated via 3-BPM method
         Ref:
@@ -172,6 +173,11 @@ class Twiss:
     @staticmethod
     def from_amplitudes(data: List[np.ndarray]):
         return np.array([np.mean(np.abs(v - np.mean(v))) for v in data])
+
+    @staticmethod
+    def sigma_from_emittance(beta, emittance, dispersion, deltaE):
+        """ Compute beam size from twiss parameters and emittance """
+        return np.sqrt(beta*emittance + (dispersion*deltaE)**2)
 
 
 class Envelope:
@@ -511,3 +517,27 @@ class Interpolator:
                 kick.set(f'{b}{Kick.Datatype.INTERPX.value}', x)
                 kick.set(f'{b}{Kick.Datatype.INTERPY.value}', y)
 
+
+class Errors:
+    @staticmethod
+    def fft_errors_from_bpm_noise(N, amplitude, sigma_noise):
+        """
+        Statistical error propagation from BPM noise for amplitude and phase of signal
+        N - number of turns/samples
+        Ref: CERN-SL-96-070-BI
+        """
+        sigma_amp = np.sqrt(2 / N) * sigma_noise
+        sigma_phase = (1 / amplitude) * np.sqrt(2 / N) * sigma_noise
+        return sigma_amp, sigma_phase
+
+    @staticmethod
+    def twiss_errors_from_bpm_noise(dphase12, dphase13, dphase23, sig_phase1, sig_phase2, sig_phase3):
+        """
+        Statistical error of beta1 from 3BPM method based on phase uncertainty
+        Ref: CERN-SL-96-070-BI
+        """
+        cot = np.arctan
+        v = (cot(dphase12) + cot(dphase13)) ** 2 * sig_phase1 ** 2 + \
+            (cot(dphase12) + cot(dphase23)) ** 2 * sig_phase2 ** 2 + \
+            (cot(dphase23) - cot(dphase13)) ** 2 * sig_phase3 ** 2
+        return np.sqrt(v)
