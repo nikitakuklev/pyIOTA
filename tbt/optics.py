@@ -82,19 +82,17 @@ class Coordinates:
 
     @staticmethod
     def calc_px_from_bpms(x1, x2, beta1, beta2, alpha1, alpha2, dphase):
-        """
-        Compute momentum at location 1 from position readings at locations 1 and 2
-        :param x1:
-        :param x2:
-        :param beta1:
-        :param beta2:
-        :param alpha1:
-        :param alpha2:
-        :param dphase:
-        :return:
-        """
+        """ Compute momentum at location 1 from position readings at locations 1 and 2 and local optics funcs """
         return x2 * (1 / np.sin(dphase)) * (1 / np.sqrt(beta1 * beta2)) - \
                x1 * (1 / np.tan(dphase)) * (1 / beta1) - x1 * alpha1 / beta1
+
+    @staticmethod
+    def calc_px_from_bpms_mat(x1, x2, M11, M12):
+        """
+        Compute momentum at location 1 from position readings at locations 1 and 2 and transfer matrix
+        Ref: https://doi.org/10.1103/PhysRevAccelBeams.23.052802
+        """
+        return (x2 - M11*x1) / M12
 
 
 class Phase:
