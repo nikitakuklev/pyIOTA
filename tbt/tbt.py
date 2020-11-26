@@ -102,7 +102,8 @@ class SimKick:
         self.twiss = 'twiss' in df.columns
         # if self.track:
         #    self.tdata = self.df.iloc[0, self.df.columns.get_loc('track')].df
-        self.n_part = len(df.iloc[0, self.df.columns.get_loc('track')].df) if self.track else None
+        self.N = self.tdata.N.max()
+        self.n_part = len(self.tdata) if self.track else None
 
     @property
     def tdata(self):
@@ -111,13 +112,21 @@ class SimKick:
         else:
             return None
 
+    @tdata.setter
+    def tdata(self, value):
+        self.df.iloc[0, self.df.columns.get_loc('track')].df = value
+
+    def prune_lost_particles(self):
+        self.tdata = self.tdata[self.tdata.N == self.N].copy()
+        self.n_part = len(self.tdata)
+
     def calculate_fft(self,
                       naff: NAFF,
                       families: List = None,
                       spacing: float = 1.0,
                       data_trim: slice = None,
                       store: bool = True):
-        """ Calculates FFT for each particle """
+        """ Calculates FFT for each particle and store results """
         assert self.track
         data = self.tdata
         families = families or self.families
@@ -139,8 +148,10 @@ class SimKick:
                 fft_power_l.append(fft_power)
 
             if store:
-                data.loc[:, f + self.Datatype.FFT_FREQ.value] = fft_freq_l
-                data.loc[:, f + self.Datatype.FFT_POWER.value] = fft_power_l
+                ser_freq = pd.Series(fft_freq_l, index=data.index)
+                ser_power = pd.Series(fft_power_l, index=data.index)
+                data.loc[:, f + self.Datatype.FFT_FREQ.value] = ser_freq
+                data.loc[:, f + self.Datatype.FFT_POWER.value] = ser_power
             results.append((fft_freq_l, fft_power_l))
         return results
 
@@ -182,7 +193,8 @@ class SimKick:
                     for fft_freq, fft_power in zip(fft_freq_l, fft_power_l):
                         tunes.append(fft_freq[np.argmax(fft_power)])
 
-                    data.loc[:, f + self.Datatype.NU.value] = tunes
+                    ser_tunes = pd.Series(tunes, index=data.index)
+                    data.loc[:, f + self.Datatype.NU.value] = ser_tunes
                 else:
                     raise Exception
 
@@ -218,6 +230,8 @@ class SimKick:
         data[self.Datatype.CSX.value] = csxl
         data[self.Datatype.CSY.value] = csyl
         data[self.Datatype.I1.value] = i1l
+
+
 
 
 class Kick:
