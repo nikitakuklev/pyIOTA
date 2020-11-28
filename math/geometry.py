@@ -14,6 +14,7 @@ def point_line_distance(a: np.ndarray, n: np.ndarray, p: np.ndarray) -> float:
     d = (a - p) - ((a - p) @ n) * n
     return np.linalg.norm(d)
 
+
 def cart2pol(x: float, y: float):
     """ (x,y) -> (r,θ) """
     r = np.sqrt(x * x + y * y)
