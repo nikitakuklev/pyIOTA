@@ -670,6 +670,10 @@ class Kick:
             fam_list = self.bpm_families_active[fam]
             if b not in fam_list:
                 fam_list.append(b)
+                
+            fam_list = self.bpm_families_all[fam]
+            if b not in fam_list:
+                fam_list.append(b)
 
     def bpms_disable(self, bpms: List, plane: str = 'A'):
         # Old signature fix
