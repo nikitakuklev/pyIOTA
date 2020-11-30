@@ -87,6 +87,14 @@ class LatticeContainer:
     def elements(self):
         return [(el.id, el.__class__.__name__, el.l) for el in self.lattice.sequence]
 
+    @property
+    def sequence(self):
+        return self.lattice.sequence
+
+    @sequence.setter
+    def sequence(self, v):
+        self.lattice.sequence = v
+
     def insert_correctors(self, destroy_skew_quads: bool = True):
         """
         Placeholder until hell freezes over and we how learn to superimpose elements :(
@@ -971,7 +979,7 @@ class OctupoleInsert:
         """
         Initialize QI configuration. Notation matches that used in original MADX scripts.
         :param tn:    #tn = 0.4  # strength of nonlinear lens
-        :param cn:    #cn = 0.01  # dimentional parameter of nonlinear lens
+        :param cn:    #cn = 0.01  # dimentional parameter of nonlinear lens #cn is [m^1/2], c^2=0.01cm=0.0001m
         :param oqK:   Octupole strength scale factor
         :param l0:    #l0     = 1.8;           # length of the straight section
         :param mu0:   #mu0 = 0.3;  # phase advance over straight section
@@ -1219,12 +1227,12 @@ class NLInsert:
     A collection of nonlinear lenses for DN magnet
     """
 
-    def __init__(self):
+    def __init__(self, **kwargs):
         self.l0 = self.mu0 = None
         self.seq = []
-        pass
+        self.configure(**kwargs)
 
-    def configure(self, oqK=1.0, t=0.4, cn=0.01, run=2, l0=1.8, mu0=0.3, olen=0.06, nn=18):
+    def configure(self, oqK=1.0, tn=0.4, cn=0.01, run=2, l0=1.8, mu0=0.3, olen=0.06, nn=18):
         """
         Initializes QI configuration
         :param l0: #l0     = 1.8;        # length of the straight section
@@ -1235,7 +1243,6 @@ class NLInsert:
         """
         self.l0 = l0
         self.mu0 = mu0
-        tn = t
         # tn = 0.4  # strength of nonlinear lens
         # cn = 0.01  # dimentional parameter of nonlinear lens
 
