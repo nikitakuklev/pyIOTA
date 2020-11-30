@@ -109,6 +109,11 @@ class SDDS:
         d = {k: v[p, :] for (k, v) in zip(self.cname, self.cdata)}
         return pd.DataFrame(data=d)
 
+    def df_param(self):
+        """ Return parameter dataframe """
+        d = {k: v for (k, v) in zip(self.pname, self.pdata)}
+        return pd.DataFrame(data=d)
+
 
 df_data_columns = ['x', 'xp', 'y', 'yp', 't', 'p', 'dt']
 df_data_columns_dict = {c: i for (c, i) in zip(df_data_columns, range(len(df_data_columns)))}
