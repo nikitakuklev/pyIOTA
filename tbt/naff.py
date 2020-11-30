@@ -142,7 +142,8 @@ class NAFF:
         else:
             len_padded = n_turns
 
-        fft_power = np.abs(np.fft.fft(data_centered, n=len_padded)) ** 2 / (n_turns * n_turns)
+        #fft_power = np.abs(np.fft.fft(data_centered, n=len_padded)) ** 2 / (n_turns * n_turns)
+        fft_power = np.abs(np.fft.fft(data_centered, n=len_padded)) / (n_turns * n_turns)
         fft_freq = np.fft.fftfreq(len_padded, d=spacing)
         # Keep half
         fft_power = fft_power[fft_freq >= 0]
