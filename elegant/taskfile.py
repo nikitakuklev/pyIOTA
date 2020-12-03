@@ -163,15 +163,36 @@ class Task:
             strings.extend(['statistics = 1', 'radiation_integrals = 1', 'compute_driving_terms = 1'])
         return strings
 
+    @task(name='moments_output')
+    def action_moments(self, *args, full=True, create_file=False, ext=None, **kwargs):
+        strings = ['matched = 1', 'equilibrium = 1']
+        if create_file:
+            if ext:
+                strings.append(f'filename = {self.rf}/%s.{ext}')
+            else:
+                strings.append(f'filename = {self.rf}/%s.mom')
+        if full:
+            strings.extend(['radiation = 1'])
+        return strings
+
     @task(name='bunched_beam')
-    def setup_bunched_beam(self, *args, mode=None, create_file=False, gridspec=None, latspec=None, **kwargs):
+    def setup_bunched_beam(self, *args,
+                           mode: str = None,
+                           create_file: bool = False,
+                           gridspec: tuple = None,
+                           latspec: tuple = None,
+                           bunchspec: tuple = None,
+                           shift_off_zero: bool = True,
+                           **kwargs):
         """
         Bunched beam generation in elegant.
+
         :param args:
         :param mode:
         :param create_file:
         :param gridspec: maxima and number of points
         :param latspec: optics functions for non-DA distributions to enable computing real dimensions
+        :param shift_off_zero: whether to offset (by half space) away from exact zero coordinates
         :param kwargs:
         :return:
         """
@@ -181,19 +202,28 @@ class Task:
         if create_file:
             strings.append(f'bunch = {self.rf}/%s.bun')
         if mode in ['DA_upperhalf', 'DA_upperright']:
-            assert gridspec
+            assert gridspec, latspec
             x, nx, y, ny = gridspec
+            beta_x, beta_y = latspec
             # For DA distribution, elegant forms uniform grid between +- sqrt(emittance*beta)
             # with no slope, so we backtrack the values to fit bounds.
             if mode == 'DA_upperright':
                 x = x / 2
-                strings.append(
-                    f'centroid[0] = {x + 2 * x / nx:10e}, 0, {y / ny:10e}, 0, 0, 0, !shift to upper right quadrant and off zeroes')
+                if shift_off_zero:
+                    strings.append(
+                        f'centroid[0] = {x + 2 * x / nx:10e}, 0, {y / ny:10e}, 0, 0, 0, !shift to upper right and off zeroes')
+                else:
+                    strings.append(f'centroid[0] = {x:10e}, 0, {y / ny:10e}, 0, 0, 0, !shift to upper right')
+            elif mode == 'DA_upperhalf':
+                if shift_off_zero:
+                    strings.append(f'centroid[0] = 0, 0, {y / ny / 2:10e}, 0, 0, 0, !shift off zeroes')
+                else:
+                    strings.append(f'centroid[0] = 0, 0, 0, 0, 0, 0,')
             strings.extend([f'n_particles_per_bunch = {nx * nx}',
                             f'beta_x = 1.0',
-                            f'emit_x = {x ** 2:10e}',
+                            f'emit_x = {x ** 2 / beta_x:10e}',
                             f'beta_y = 1.0',
-                            f'emit_y = {y ** 2:10e}',
+                            f'emit_y = {y ** 2 / beta_y:10e}',
                             f'distribution_type[0] = "dynamic-aperture","dynamic-aperture","hard-edge"',
                             f'distribution_cutoff[0] = {nx}, {ny}, 1'])
         elif mode in ['HE_upperright', 'SH_upperright']:
@@ -238,13 +268,29 @@ class Task:
                             f'emit_y = {y ** 2 / beta_y:10e}',
                             f'distribution_type[0] = "{dist}","{dist}","hard-edge"',
                             f'distribution_cutoff[0] = 1, 1, 1'])
+        elif mode in ['gaussian_bunch']:
+            assert gridspec, latspec
+            assert bunchspec
+            x, nx, y, ny = gridspec
+            beta_x, beta_y = latspec
+            cx, cy = bunchspec
+            x /= 2
+            y /= 2
+            #strings.append(f'centroid[0] = {cx}, 0, {cy}, 0, 0, 0')
+            strings.extend([f'n_particles_per_bunch = {nx * ny}',
+                            #f'beta_x = 1.0',
+                            #f'emit_x = {x ** 2 / beta_x:10e}',
+                            #f'beta_y = 1.0',
+                            #f'emit_y = {y ** 2 / beta_y:10e}',
+                            f'distribution_type[0] = "gaussian","gaussian","gaussian"',
+                            f'distribution_cutoff[0] = 4, 4, 4'])
         else:
-            raise Exception
+            raise Exception(f'Unrecognized bunch mode: {mode}')
 
         return strings
 
     @task(name='track')
-    def action_track(self, *args, orbit='closed', **kwargs):
+    def action_track(self, *args, orbit='closed_center', **kwargs):
         strings = ['soft_failure=0']
         if orbit == 'closed_center':
             strings.extend(
