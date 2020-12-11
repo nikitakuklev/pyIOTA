@@ -6,6 +6,7 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
+
 def addsubtract_wrap(data, delta, minval=0, maxval=2 * np.pi):
     """
     Addition and subtraction of bounded values.
@@ -70,13 +71,26 @@ def remove_integer_part(data, minval, maxval):
     return np.mod(data, span)
 
 
+class WrappedFloat:
+    """
+    Defined a bounded floating point value that never goes outside specified bounds but wraps around.
+    Useful when dealing with phases, fractional tunes, and similar values.
+    Supports all basic math operations with primitives and numpy arrays, but some operations require two
+    wrapped floats.
+    """
+    # TODO: implement :)
+
+
 class Wrapper:
+    """ Simple class to store wrapping methods with specific defaults """
+
     def __init__(self, minval: float, maxval: float):
         assert maxval > minval
         self.minval = minval
         self.maxval = maxval
 
     def add(self, data, delta, minval: float = None, maxval: float = None):
+        """ Add bounded values """
         minval = minval or self.minval
         maxval = maxval or self.maxval
         assert maxval > minval
@@ -102,6 +116,7 @@ class Wrapper:
         return ret
 
     def wrap(self, data: Union[float, list, np.ndarray], minval: float = None, maxval: float = None):
+        """ Wrap bounded values """
         singleton = False
         if isinstance(data, float):
             ret = [data]
@@ -125,14 +140,7 @@ class Wrapper:
             return ret
 
     def delta(self, data1, data2, minval: float = None, maxval: float = None):
-        """
-        Smallest distance (forward or backward) between two bounded values, elementwise.
-        :param data1:
-        :param data2:
-        :param minval:
-        :param maxval:
-        :return:
-        """
+        """ Smallest distance (forward or backward) between two bounded values, elementwise. """
         assert len(data1) == len(data2)
         minval = minval or self.minval
         maxval = maxval or self.maxval
@@ -149,3 +157,56 @@ class Wrapper:
                 distance2 = (v2 - minval) + (maxval - v)
                 ret[i] = -distance1 if distance1 <= distance2 else distance2
         return ret
+
+    def delta_fwd(self, data1, data2, minval: float = None, maxval: float = None):
+        assert len(data1) == len(data2)
+        minval = minval or self.minval
+        maxval = maxval or self.maxval
+        if np.any((data1 < minval) | (data1 > maxval) | (data2 < minval) | (data2 > maxval)):
+            raise Exception(f'Out of bounds encountered for delta: {data1} | {data2}')
+        ret = np.zeros(len(data1))
+        for i, (v, v2) in enumerate(zip(data1, data2)):
+            if v <= v2:
+                distance1 = v2 - v
+                distance2 = (v - minval) + (maxval - v2)
+                ret[i] = distance1 #if distance1 <= distance2 else -distance2
+            else:
+                distance1 = v - v2
+                distance2 = (v2 - minval) + (maxval - v)
+                ret[i] = (self.maxval - self.minval) - distance1 #if distance1 <= distance2 else distance2
+        return ret
+
+    def rms(self, data1, data2, minval: float = None, maxval: float = None):
+        # Errors will be checked in delta
+        delta = self.delta(data1, data2, minval, maxval)
+        return np.sqrt(np.sum(delta**2))
+
+    def fit(self, data1, data2, minval: float = None, maxval: float = None, debug=False):
+        """ Fit two circular value arrays in least squares sense"""
+        assert len(data1) == len(data2)
+        minval = minval or self.minval
+        maxval = maxval or self.maxval
+        if np.any((data1 < minval) | (data1 > maxval) | (data2 < minval) | (data2 > maxval)):
+            raise Exception(f'Out of bounds encountered for delta: {data1} | {data2}')
+
+        delta_mean = -np.max(self.delta(data1, data2))#np.mean(self.delta_fwd(data1, data2))#np.mean(self.delta(data1, data2))
+        def f(shift, data1, data2):
+            ret = np.zeros(len(data1))
+            for i, (v, v2) in enumerate(zip(data1, data2)):
+                v2 += shift[0]
+                if v <= v2:
+                    distance1 = v2 - v
+                    distance2 = (v - minval) + (maxval - v2)
+                    ret[i] = distance1 if distance1 <= distance2 else -distance2
+                else:
+                    distance1 = v - v2
+                    distance2 = (v2 - minval) + (maxval - v)
+                    ret[i] = -distance1 if distance1 <= distance2 else distance2
+            return np.sum(ret * ret)
+
+        from scipy.optimize import minimize
+        res = minimize(f, np.array([delta_mean]), args=(data1, data2))
+        if debug:
+            print(res)
+        #assert(np.isclose(delta_mean, res.x[0], atol=1e-3))
+        return -res.x[0]
