@@ -993,7 +993,7 @@ class OctupoleInsert:
         self.otype = otype
         if isinstance(oqK, np.ndarray):
             assert len(oqK) == nn
-        olen_eff = olen_eff or olen
+        olen_eff = olen_eff or olen or l0/nn
 
         if positions is None:
             perturbed_mode = False
@@ -1180,7 +1180,7 @@ class OctupoleInsert:
         box.update_element_positions()
         if self.otype == 0:
             # Multipoles are thin elements - sum their beta^2 * k3l directly
-            els = [el for el in box.lattice.sequence if isinstance(el, Multipole)]
+            els = box.get_all(Multipole)
             detuning_str = np.array([self.beta(el.s_mid) ** 2 for el in els])
             central_k3_str = np.array([el.kn[3] for el in els])  # k3l
             return np.sum(detuning_str * central_k3_str)
