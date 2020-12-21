@@ -1,4 +1,4 @@
-__all__ = ['Invariants', 'Coordinates', 'Phase', 'Twiss', 'SVD', 'Interpolator']
+__all__ = ['Routines', 'NIO', 'Invariants', 'Coordinates', 'Phase', 'Twiss', 'SVD', 'ICA', 'Interpolator']
 
 import logging
 from typing import Tuple, List
@@ -10,6 +10,7 @@ from scipy.optimize import curve_fit
 from scipy.signal import hilbert
 
 import pyIOTA.math as pmath
+from sklearn import decomposition
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +26,13 @@ class Routines:
         phases_exp_abs = Phase.relative_to_absolute(phases_exp_rel)
         betax_exp_unscaled = Twiss.from_SVD(U, S, V)
         return phases_exp_rel, betax_exp_unscaled
+
+
+class Physics:
+    @staticmethod
+    def magnetic_rigidity(pc):
+        """ Computes magnetic rigidity in T*m for energy given in MeV - only valid for E>>rest energy """
+        return pc/300.0
 
 
 class NIO:
@@ -58,12 +66,74 @@ class Invariants:
         return (x ** 2 + px ** 2)
 
     @staticmethod
-    def compute_I1(x, px, y, py, alpha, normalized=True):
+    def compute_I1(x, px, y, py, alpha, c, normalized=True):
         """Compute first DN invariant"""
+        # c is unused
         assert normalized
-        I = x ** 2 + y ** 2 + px ** 2 + py ** 2 + alpha * (x ** 4 + y ** 4 - 3 * (y ** 2) * (x ** 2)) / 2
+        assert c is None
+        I = (x ** 2 + y ** 2 + px ** 2 + py ** 2) / 2 + alpha / 4 * (x ** 4 + y ** 4 - 6 * (y ** 2) * (x ** 2))
         return I
 
+    @staticmethod
+    def compute_I1_DN(x, px, y, py, t, c, normalized=True):
+        xN = x / c
+        yN = y / c
+        sqrt = np.sqrt
+        u = (sqrt((xN + 1.) ** 2 + yN ** 2) + sqrt((xN - 1.) ** 2 + yN ** 2)) / 2.
+        v = (sqrt((xN + 1.) ** 2 + yN ** 2) - sqrt((xN - 1.) ** 2 + yN ** 2)) / 2.
+        f2u = u * sqrt(u ** 2 - 1.) * np.arccosh(u)
+        g2v = v * sqrt(1. - v ** 2) * (-np.pi / 2 + np.arccos(v))
+        elliptic = (f2u + g2v) / (u ** 2 - v ** 2)
+        quadratic = 0.5 * (px ** 2 + py ** 2) + 0.5 * (x ** 2 + y ** 2)
+        I = quadratic + t * c**2 * elliptic
+        return I
+
+    @staticmethod
+    def compute_I1_DN_CM(x, px, y, py, t, c, normalized=True):
+        x = x / c; y = y/c; px = px /c; py = py/c;
+        quadratic = 0.5 * (px ** 2 + py ** 2 + x ** 2 + y ** 2)
+        z = (x+1.0j*y)
+        elliptic = t * np.real(z / np.sqrt(1-z*z) * np.arcsin(z))
+        return quadratic - elliptic
+
+    @staticmethod
+    def compute_I2_DN(x, px, y, py, t, c, normalized=True):
+        sqrt = np.sqrt
+        # Angular momentum
+        ang_momentum = (x * py - y * px) ** 2
+        lin_momentum = (c * px) ** 2
+
+        # elliptic coordinates
+        xN = x / c
+        yN = y / c
+
+        u = (sqrt((xN + 1) ** 2 + yN ** 2) + sqrt((xN - 1) ** 2 + yN ** 2)) / (2.)
+        v = (sqrt((xN + 1) ** 2 + yN ** 2) - sqrt((xN - 1) ** 2 + yN ** 2)) / (2.)
+
+        # harmonic part of the potential
+        f1u = c ** 2 * u ** 2 * (u ** 2 - 1.)
+        g1v = c ** 2 * v ** 2 * (1. - v ** 2)
+
+        # elliptic part of the potential
+        f2u = -t * c ** 2 * u * sqrt(u ** 2 - 1.) * np.arccosh(u)
+        g2v = -t * c ** 2 * v * sqrt(1. - v ** 2) * (0.5 * np.pi - np.arccos(v))
+
+        # combined potentials
+        fu = (0.5 * f1u - f2u)
+        gv = (0.5 * g1v + g2v)
+
+        # putting it all together
+        invariant = (ang_momentum + lin_momentum) + 2. * (c ** 2) * \
+                    (fu * v ** 2 + gv * u ** 2) / (u ** 2 - v ** 2)
+        return invariant
+
+    @staticmethod
+    def compute_I2_DN_CM(x, px, y, py, t, c, normalized=True):
+        x = x / c; y = y/c; px = px /c; py = py/c;
+        quadratic = ((x * py - y * px) ** 2) + px**2 + x**2
+        z = (x+1.0j*y)
+        elliptic = t * np.real((z+np.conj(z)) / np.sqrt(1-z*z) * np.arcsin(z))
+        return quadratic - elliptic
 
 class Coordinates:
     @staticmethod
@@ -93,6 +163,14 @@ class Coordinates:
         Ref: https://doi.org/10.1103/PhysRevAccelBeams.23.052802
         """
         return (x2 - M11*x1) / M12
+
+    @staticmethod
+    def slopes_to_momenta(xp, yp, delta):
+        """ From elegant """
+        denom = np.sqrt(1 + xp**2 + yp**2)
+        px = (1 + delta) * xp / denom
+        py = (1 + delta) * yp / denom
+        return px, py
 
 
 class Phase:
@@ -343,7 +421,8 @@ class SVD:
         return U, S, V, vh
 
     def decompose_kick_2D(self, kick: Kick, tag: str = 'SVD', use_kick_trim: bool = True,
-                          add_virtual_bpms: bool = True, families: List[str] = None):
+                          add_virtual_bpms: bool = True, families: List[str] = None,
+                          n_components: int = 2):
         """
         Decompose kick using SVD and store results
         :param add_virtual_bpms: Whether to add resulting components as virtual BPMs
@@ -363,9 +442,10 @@ class SVD:
             kick.df[f'{tag}_{family}_S'] = [S]
             kick.df[f'{tag}_{family}_vh'] = [vh]
             if add_virtual_bpms:
-                kick.bpms_add([f'SVD2D_{family}_1C', f'SVD2D_{family}_2C'])
-                kick.df[f'SVD2D_{family}_1C'] = [vh[0, :]]
-                kick.df[f'SVD2D_{family}_2C'] = [vh[1, :]]
+                kick.bpms_add([f'SVD2D_{i}C_{family}' for i in range(n_components)], family='C'+family)
+                for i in range(n_components):
+                    kick.df[f'SVD2D_{i}C_{family}'] = [vh[i, :]]
+                    #kick.df[f'SVD2D_{2}C_{family}'] = [vh[1, :]]
 
     def get_data_2D(self, kick: Kick, family: str, tag: str = 'SVD'):
         U = kick.get(f'{tag}_{family}_U')
@@ -457,7 +537,7 @@ class ICA:
         self.data_trim = data_trim
         self.output_trim = output_trim
 
-    def decompose2D(self, data: Kick, plane: str):
+    def decompose2D(self, data: Kick, plane: str = None, n_components: int = 2):
         if isinstance(data, Kick):
             matrix = data.get_bpm_matrix(plane)
         elif isinstance(data, np.ndarray):
@@ -469,9 +549,13 @@ class ICA:
             matrix = matrix[:, self.data_trim]
 
         matrix -= np.mean(matrix, axis=1)[:, np.newaxis]
-        U, S, vh = np.linalg.svd(matrix, full_matrices=False)
-        V = vh.T  # transpose it back to conventional U @ S @ V.T
-        return U, S, V, vh
+
+        ica = decomposition.FastICA(n_components=n_components, max_iter=2000, random_state=42, tol=1e-8)
+        icadata = ica.fit_transform(matrix.T)
+
+        #U, S, vh = np.linalg.svd(matrix, full_matrices=False)
+        #V = vh.T  # transpose it back to conventional U @ S @ V.T
+        return icadata.T, ica.mixing_
 
 
 class Interpolator:
