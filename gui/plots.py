@@ -18,8 +18,6 @@ from ocelot import Quadrupole, Bend, SBend, RBend, Vcor, Hcor, Sextupole, Undula
 logger = logging.getLogger(__name__)
 
 
-def plot(*args, **kwargs):
-    return plot_simple(*args, **kwargs)
 
 
 def plot_simple(*args,
@@ -43,7 +41,7 @@ def plot_simple(*args,
     :param demean: Demean each data series
     :param normalize: Minmax normalize each data series
     :param twiny_args: Right y axis arguments
-    :return:
+    :return: fig, ax
     """
     arrays = []
     arrays_twiny = []
@@ -115,6 +113,9 @@ def plot_simple(*args,
     ax.patch.set_visible(False)
     fig.tight_layout()
     return fig, ax
+
+
+plot = plot_simple
 
 
 def plot_simple_grid(*args,
@@ -677,7 +678,7 @@ dict_plot = {Quadrupole:    {"scale": 0.7, "color": "r",            "edgecolor":
              RBend:         {"scale": 0.7, "color": "lightskyblue", "edgecolor": "k",          "label": "bend"},
              SBend:         {"scale": 0.7, "color": "lightskyblue", "edgecolor": "k",          "label": "bend"},
              Matrix:        {"scale": 0.7, "color": "pink",         "edgecolor": "k",          "label": "mat"},
-             Multipole:     {"scale": 0.7, "color": "g",            "edgecolor": "k",          "label": "mult"},
+             Multipole:     {"scale": 0.7, "color": "purple",       "edgecolor": "k",          "label": "mult"},
              Undulator:     {"scale": 0.7, "color": "pink",         "edgecolor": "k",          "label": "und"},
              Monitor:       {"scale": 0.5, "color": "orange",       "edgecolor": "orange",     "label": "mon"},
              Hcor:          {"scale": 0.7, "color": "c",            "edgecolor": "c",          "label": "cor"},
