@@ -32,7 +32,7 @@ class Physics:
     @staticmethod
     def magnetic_rigidity(pc):
         """ Computes magnetic rigidity in T*m for energy given in MeV - only valid for E>>rest energy """
-        return pc/300.0
+        return pc / 300.0
 
 
 class NIO:
@@ -66,8 +66,28 @@ class Invariants:
         return (x ** 2 + px ** 2)
 
     @staticmethod
+    def compute_CS_2D_2BPM(x1, x2, beta1, beta2, alpha1, alpha2, dphase):
+        """
+         Compute Courant-Snyder invariant directly from unnormalized 2BPM data
+         (this composes px calculation and normalization)
+         Ref: Independent component analysis for beam measurements - https://doi.org/10.1063/1.3226858
+         Ref: S.Y.Lee book
+        """
+        return (x1 ** 2 + (x2 * 1 / np.sin(dphase) * np.sqrt(beta1 / beta2) - x1 * 1 / np.tan(dphase)) ** 2) / beta1
+
+    @staticmethod
     def compute_I1(x, px, y, py, alpha, c, normalized=True):
-        """Compute first DN invariant"""
+        """
+        Compute first DN invariant in QI notation - (x^2+y^2+px^2+py^2)/2 + (x^4+y^4-6*y^2*x^2)*a/4
+        :param x:
+        :param px:
+        :param y:
+        :param py:
+        :param alpha: standard constant
+        :param c: an unused parameter
+        :param normalized: placeholder
+        :return: I1
+        """
         # c is unused
         assert normalized
         assert c is None
@@ -85,15 +105,18 @@ class Invariants:
         g2v = v * sqrt(1. - v ** 2) * (-np.pi / 2 + np.arccos(v))
         elliptic = (f2u + g2v) / (u ** 2 - v ** 2)
         quadratic = 0.5 * (px ** 2 + py ** 2) + 0.5 * (x ** 2 + y ** 2)
-        I = quadratic + t * c**2 * elliptic
+        I = quadratic + t * c ** 2 * elliptic
         return I
 
     @staticmethod
     def compute_I1_DN_CM(x, px, y, py, t, c, normalized=True):
-        x = x / c; y = y/c; px = px /c; py = py/c;
+        x = x / c;
+        y = y / c;
+        px = px / c;
+        py = py / c;
         quadratic = 0.5 * (px ** 2 + py ** 2 + x ** 2 + y ** 2)
-        z = (x+1.0j*y)
-        elliptic = t * np.real(z / np.sqrt(1-z*z) * np.arcsin(z))
+        z = (x + 1.0j * y)
+        elliptic = t * np.real(z / np.sqrt(1 - z * z) * np.arcsin(z))
         return quadratic - elliptic
 
     @staticmethod
@@ -129,11 +152,15 @@ class Invariants:
 
     @staticmethod
     def compute_I2_DN_CM(x, px, y, py, t, c, normalized=True):
-        x = x / c; y = y/c; px = px /c; py = py/c;
-        quadratic = ((x * py - y * px) ** 2) + px**2 + x**2
-        z = (x+1.0j*y)
-        elliptic = t * np.real((z+np.conj(z)) / np.sqrt(1-z*z) * np.arcsin(z))
+        x = x / c;
+        y = y / c;
+        px = px / c;
+        py = py / c;
+        quadratic = ((x * py - y * px) ** 2) + px ** 2 + x ** 2
+        z = (x + 1.0j * y)
+        elliptic = t * np.real((z + np.conj(z)) / np.sqrt(1 - z * z) * np.arcsin(z))
         return quadratic - elliptic
+
 
 class Coordinates:
     @staticmethod
@@ -151,10 +178,19 @@ class Coordinates:
         return x / np.sqrt(beta), x * alpha / np.sqrt(beta) + np.sqrt(beta) * px
 
     @staticmethod
-    def calc_px_from_bpms(x1, x2, beta1, beta2, alpha1, alpha2, dphase):
+    def calc_px_from_bpms(x1, x2, beta1, beta2, a1, a2, dphase):
         """ Compute momentum at location 1 from position readings at locations 1 and 2 and local optics funcs """
-        return x2 * (1 / np.sin(dphase)) * (1 / np.sqrt(beta1 * beta2)) - \
-               x1 * (1 / np.tan(dphase)) * (1 / beta1) - x1 * alpha1 / beta1
+        px1 = x2 * (1 / np.sin(dphase)) * (1 / np.sqrt(beta1 * beta2)) - \
+              x1 * (1 / np.tan(dphase)) * (1 / beta1) - x1 * a1 / beta1
+        return px1
+
+    @staticmethod
+    def calc_px_from_bpms_v2(x1, x2, beta1, beta2, a1, a2, dphase):
+        """ Compute momentum at location 1 and 2 from position readings and local optics funcs """
+        px1 = x2 * (1 / np.sin(dphase)) * (1 / np.sqrt(beta1 * beta2)) - \
+              x1 * (1 / np.tan(dphase)) * (1 / beta1) - x1 * a1 / beta1
+        px2 = (1 / beta1) * (x2 * (1 / np.tan(dphase)) - x2 * a2 - x1 * (1 / np.sin(dphase)) * np.sqrt(beta2 / beta1))
+        return px1, px2
 
     @staticmethod
     def calc_px_from_bpms_mat(x1, x2, M11, M12):
@@ -162,12 +198,12 @@ class Coordinates:
         Compute momentum at location 1 from position readings at locations 1 and 2 and transfer matrix
         Ref: https://doi.org/10.1103/PhysRevAccelBeams.23.052802
         """
-        return (x2 - M11*x1) / M12
+        return (x2 - M11 * x1) / M12
 
     @staticmethod
     def slopes_to_momenta(xp, yp, delta):
         """ From elegant """
-        denom = np.sqrt(1 + xp**2 + yp**2)
+        denom = np.sqrt(1 + xp ** 2 + yp ** 2)
         px = (1 + delta) * xp / denom
         py = (1 + delta) * yp / denom
         return px, py
@@ -212,6 +248,14 @@ class Phase:
 
 
 class Twiss:
+    """
+    References:
+    https://journals.aps.org/prab/pdf/10.1103/PhysRevSTAB.18.031002
+    https://journals.aps.org/prab/pdf/10.1103/PhysRevAccelBeams.20.111002
+    https://github.com/pylhc/omc3/blob/master/omc3/optics_measurements/beta_from_phase.py
+    https://journals.aps.org/prab/pdf/10.1103/PhysRevSTAB.11.084002 (phase correction, TBD if needed)
+    """
+
     @staticmethod
     def beta1_from_3bpm(beta1_model, dphase12, dphase12_model, dphase13, dphase13_model):
         """
@@ -253,7 +297,7 @@ class Twiss:
     @staticmethod
     def sigma_from_emittance(beta, emittance, dispersion, deltaE):
         """ Compute beam size from twiss parameters and emittance """
-        return np.sqrt(beta*emittance + (dispersion*deltaE)**2)
+        return np.sqrt(beta * emittance + (dispersion * deltaE) ** 2)
 
 
 class Envelope:
@@ -442,10 +486,10 @@ class SVD:
             kick.df[f'{tag}_{family}_S'] = [S]
             kick.df[f'{tag}_{family}_vh'] = [vh]
             if add_virtual_bpms:
-                kick.bpms_add([f'SVD2D_{i}C_{family}' for i in range(n_components)], family='C'+family)
+                kick.bpms_add([f'SVD2D_{i}C_{family}' for i in range(n_components)], family='C' + family)
                 for i in range(n_components):
                     kick.df[f'SVD2D_{i}C_{family}'] = [vh[i, :]]
-                    #kick.df[f'SVD2D_{2}C_{family}'] = [vh[1, :]]
+                    # kick.df[f'SVD2D_{2}C_{family}'] = [vh[1, :]]
 
     def get_data_2D(self, kick: Kick, family: str, tag: str = 'SVD'):
         U = kick.get(f'{tag}_{family}_U')
@@ -553,8 +597,8 @@ class ICA:
         ica = decomposition.FastICA(n_components=n_components, max_iter=2000, random_state=42, tol=1e-8)
         icadata = ica.fit_transform(matrix.T)
 
-        #U, S, vh = np.linalg.svd(matrix, full_matrices=False)
-        #V = vh.T  # transpose it back to conventional U @ S @ V.T
+        # U, S, vh = np.linalg.svd(matrix, full_matrices=False)
+        # V = vh.T  # transpose it back to conventional U @ S @ V.T
         return icadata.T, ica.mixing_
 
 
