@@ -17,21 +17,36 @@ import numpy as np
 import pandas as pd
 from time import perf_counter
 
-try:
-    import sdds
-except ImportError:
-    sys.path.insert(1, Path.home().joinpath('rpms/usr/lib/python3.6/site-packages').as_posix())
-    import sdds
-
-sd = sdds.SDDS(15)
-
 
 class SDDS:
     """
     SDDSPython wrapper for elegant files that provides nice dictionary-like interface, or a DataFrame view
     """
 
+    sd = None
+
+    @staticmethod
+    def load_sdds():
+        try:
+            import sdds
+        except ImportError as e:
+            # Try fix sdds pythonpath issues by adding common paths I use
+            import platform
+            plt = platform.system()
+            if plt == "Linux":
+                sys.path.insert(1, Path.home().joinpath('rpms/usr/lib/python3.6/site-packages').as_posix())
+            elif plt == "Windows":
+                sys.path.insert(1, str(Path("C:\Python37\Lib")))
+                sys.path.insert(1, str(Path("C:\Python37\DLLs")))
+            else:
+                raise e
+            import sdds
+
+        sd = sdds.SDDS(15)
+
     def __init__(self, path: Path, fast: bool = False):
+        if sd is None:
+            load_sdds()
         if isinstance(path, Path):
             path = str(path)  # legacy code :(
         if not os.path.exists(path):
@@ -113,6 +128,42 @@ class SDDS:
         """ Return parameter dataframe """
         d = {k: v for (k, v) in zip(self.pname, self.pdata)}
         return pd.DataFrame(data=d)
+
+    # def write(self, fpath: Path, parameters: dict = None, type_map: dict = None):
+    #     assert not fpath.is_dir()
+    #     if fpath.exists():
+    #         print(f'Warning - knob {fpath} already exists, overwriting!')
+    #     x = sdds.SDDS(10)
+    #     #x.setDescription("params", str(fpath))
+    #     type_dict = {'ElementName': x.SDDS_STRING, 'ElementParameter': x.SDDS_STRING, 'ParameterValue': x.SDDS_DOUBLE,
+    #                  'ParameterError': x.SDDS_DOUBLE, 'ElementOccurence': x.SDDS_LONG, 'ElementType': x.SDDS_STRING}
+    #     if type_map:
+    #         type_dict.update(type_map)
+    #     names = list(df.columns.values)
+    #     types = [type_dict[name] for name in names]
+    #     # TODO: type heuristics
+    #     if parameters:
+    #         for (k, v) in parameters.items():
+    #             if isinstance(v, int):
+    #                 v = float(v)
+    #             if not isinstance(v, float):
+    #                 raise Exception("Only numeric parameters supported - add strings/etc. manually plz")
+    #             x.defineSimpleParameter(k, x.SDDS_DOUBLE)
+    #             x.setParameterValueList(k, [v])
+    #     for i, n in enumerate(names):
+    #         x.defineSimpleColumn(names[i], types[i])
+    #     column_data = [[[]] for i in range(len(names))]
+    #     for row in df.itertuples(index=False):
+    #         # print(row)
+    #         for i, r in enumerate(row):
+    #             # print(i, r)
+    #             column_data[i][0].append(r)
+    #     for i, n in enumerate(names):
+    #         x.setColumnValueLists(names[i], column_data[i])
+    #     # print(column_data)
+    #     # print(names, types)
+    #     x.save(str(fpath))
+    #     del x
 
 
 df_data_columns = ['x', 'xp', 'y', 'yp', 't', 'p', 'dt']
