@@ -993,6 +993,9 @@ class OctupoleInsert:
         self.otype = otype
         if isinstance(oqK, np.ndarray):
             assert len(oqK) == nn
+            assert all(not np.isnan(oqkt) for oqkt in oqK)
+        else:
+            assert not np.isnan(oqK)
         olen_eff = olen_eff or olen or l0/nn
 
         if positions is None:
