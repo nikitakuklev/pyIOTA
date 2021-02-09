@@ -68,8 +68,44 @@ class Util:
             props_dicts.append(props)
         return files_ll, props_dicts
 
+class COORD(enum.Enum):
+    X = 'x'
+    PX = 'px'
+    Y = 'y'
+    PY = 'py'
+
+class TrackFrame(pd.DataFrame):
+    """ Thin container to store TBT data """
+    @property
+    def df(self):
+        return self
+
+    def mat(self, idx, coord):
+        assert coord in COORD
+        return self.as_matrix(idx, self.columns.str.endswith(coord))
+
+    def as_matrix(self, idx, mask):
+        return np.vstack(self.loc[idx, mask])
+
+    def xmat(self, idx=0):
+        return self.as_matrix(idx, self.columns.str.endswith(COORD.X.value))
+
+    def pxmat(self, idx=0):
+        return self.as_matrix(idx, self.columns.str.endswith(COORD.PX.value))
+
+    def ymat(self, idx=0):
+        return self.as_matrix(idx, self.columns.str.endswith(COORD.Y.value))
+
+    def pymat(self, idx=0):
+        return self.as_matrix(idx, self.columns.str.endswith(COORD.PY.value))
 
 class SimKick:
+    """
+    SimKick stores data of a particle tracking simulation, along with related metadata.
+    Dataframe format has particles as rows, with only mandatory column 'N' (the number of turns)
+    Typical data columns are 'track' sub-dataframe and 'twiss' dictionary
+    """
+
     @enum.unique
     class Datatype(enum.Enum):
         """
@@ -87,34 +123,93 @@ class SimKick:
         CSY = 'CSy'
         I1 = 'I1'
 
+    @enum.unique
+    class Dataclass(enum.Enum):
+        # TODO: try subclass str like IntEnum?
+        """
+        Enum for data classes (tracking, twiss, etc.)
+        """
+        TRACK = 'track'
+        TURN_CNT = 'N'
+        TWISS = 'twiss'
+
+        @property
+        def v(self):
+            """ Shorthand method """
+            return self.value
+
+    @staticmethod
+    def convert_tbt_matrices_to_track_df(bpms:Iterable[str],
+                                         mx:np.ndarray, mpx:np.ndarray, my:np.ndarray, mpy:np.ndarray,
+                                         families:Iterable[str] = None):
+        """
+        Convert data matrices from M bpms x N turns format into a track dataframe of single particle
+        """
+        DT, DC = SimKick.Datatype, SimKick.Dataclass
+        families = families or ('x', 'xp', 'y', 'yp')
+        assert mx.shape == my.shape == mpx.shape == mpy.shape
+        assert mx.shape[0] == len(bpms)
+
+        matrices = (mx, mpx, my, mpy)
+        # This is per-plane version, not needed
+        # for f, mat in zip(families, matrices):
+        #     data_track = {}
+        #     for i, b in enumerate(bpms):
+        #         data_track[b] = [mat[i,:]]
+        #     dft = pd.DataFrame(columns=bpms, index=[0], data=data_track)
+        #     data[DC.TRACK.v + '_' + f] = [dft]
+        # columns = [DC.TURN_CNT.v] + [DC.TRACK.v + '_' + f for f in families]
+        data_track = {DC.TURN_CNT.v:mx.shape[1]}
+        for f, mat in zip(families, matrices):
+            for i, b in enumerate(bpms):
+                data_track[b+'_'+f] = [mat[i,:]]
+        dft = TrackFrame(index=[0], data=data_track)
+
+        data = {DC.TURN_CNT.v:mx.shape[1], DC.TRACK.v: [dft]}
+        df = pd.DataFrame(index=[0], data=data)
+        return df
+
     def __init__(self,
                  df: pd.DataFrame,
                  families: Tuple = None):
         """
-        Stores data from a tracking simulation. Many methods are analogous to
-        experimental Kick class.
-        :param df:
+        Stores data from a tracking simulation. Many methods are analogous to experimental Kick class.
+        :param df: master dataframe
         """
         self.df = df
-        self.families = families or ('x', 'xp', 'y', 'yp')
-        self.pairs = (('x', 'xp'), ('y', 'yp'))
-        self.track = 'track' in df.columns
-        self.twiss = 'twiss' in df.columns
+        self.families = families or ('x', 'px', 'y', 'py')
+        self.pairs = (('x', 'px'), ('y', 'py'))
+        self.has_track = self.Dataclass.TRACK.v in df.columns
+        self.has_twiss = self.Dataclass.TWISS.v in df.columns
         # if self.track:
         #    self.tdata = self.df.iloc[0, self.df.columns.get_loc('track')].df
         self.N = self.tdata.N.max()
-        self.n_part = len(self.tdata) if self.track else None
+        self.n_part = len(self.tdata) if self.has_track else None
 
     @property
     def tdata(self):
-        if self.track:
-            return self.df.iloc[0, self.df.columns.get_loc('track')].df
+        if self.has_track:
+            return self.df.iloc[0, self.df.columns.get_loc(self.Dataclass.TRACK.v)].df
         else:
             return None
 
     @tdata.setter
     def tdata(self, value):
-        self.df.iloc[0, self.df.columns.get_loc('track')].df = value
+        self.df.iloc[0, self.df.columns.get_loc(self.Dataclass.TRACK.v)].df = value
+
+    @property
+    def track(self):
+        return self.tdata
+
+    def rotate(self, bpm):
+        """
+        During analysis it is important to rotate starting point to just past main nonlinearity
+        This method does so, and adjusts phases appropriately
+        :param bpm: New starting bpm
+        """
+        dnew = np.vstack([data_matrix[idx:, :-1], data_matrix[:idx, 1:]])
+        bpms_root = bpms_root[idx:] + bpms_root[:idx]
+        return dnew, bpms_root
 
     def prune_lost_particles(self):
         self.tdata = self.tdata[self.tdata.N == self.N].copy()
@@ -127,7 +222,7 @@ class SimKick:
                       data_trim: slice = None,
                       store: bool = True):
         """ Calculates FFT for each particle and store results """
-        assert self.track
+        assert self.has_track
         data = self.tdata
         families = families or self.families
         results = []
@@ -203,7 +298,7 @@ class SimKick:
                              data_trim: slice = None):
         from pyIOTA.tbt import Coordinates
         from pyIOTA.tbt import Invariants
-        assert self.track
+        assert self.has_track
         data_trim = data_trim or np.s_[:]
         data = self.df.iloc[0, self.df.columns.get_loc('track')].df
 
@@ -670,7 +765,7 @@ class Kick:
             fam_list = self.bpm_families_active[fam]
             if b not in fam_list:
                 fam_list.append(b)
-                
+
             fam_list = self.bpm_families_all[fam]
             if b not in fam_list:
                 fam_list.append(b)
@@ -959,7 +1054,9 @@ class Kick:
                        use_precalculated: bool = True,
                        data_trim: slice = None,
                        freq_trim: tuple = None,
-                       pairs: bool = False):
+                       pairs: bool = False,
+                       append_results: bool = False,
+                       **kwargs):
         """
         Calculates tune by finding peaks in FFT data, optionally using precomputed data to save time
 
@@ -976,7 +1073,13 @@ class Kick:
         families = families or ['H', 'V']
         freq = {}
         pwr = {}
-        peaks = {}
+        if append_results:
+            if hasattr(self, 'peaks'):
+                peaks = self.peaks
+            else:
+                peaks = {}
+        else:
+            peaks = {}
         average_tunes = {f: [] for f in families}
         if not pairs:
             bpms = self.get_bpms(families)
