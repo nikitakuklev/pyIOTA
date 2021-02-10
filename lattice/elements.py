@@ -369,7 +369,14 @@ class LatticeContainer:
         self.totallen = self.lattice.sequence[-1].s_end
         return slist
 
-    def update_twiss(self, n_points: int = None, update_maps: bool = True, tws0: Twiss = None):
+    def update_twiss(self, n_points: int = None, update_maps: bool = True, tws0: Twiss = None) -> List[Twiss]:
+        """
+        Update twiss and return list of Twiss objects
+        :param n_points: Number of points or once per element (at end) if not specified
+        :param update_maps: Update transfer maps - only necessary if element parameters changed
+        :param tws0: Initial Twiss, or periodic solution if not supplied
+        :return: List of Twiss objects
+        """
         if update_maps:
             self.lattice.update_transfer_maps()
         self.tws = twiss(self.lattice, nPoints=n_points, tws0=tws0)
@@ -632,9 +639,9 @@ class LatticeContainer:
                   last: bool = False) -> Element:
         """
         Gets first element matching any non-None conditions
-        :param last:
-        :param singleton_only:
-        :param exact:
+        :param last: Get last element instead
+        :param singleton_only: Check that only 1 element matches (i.e. is unique)
+        :param exact: If true, id must match exactly; otherwise, id only need to contain name as substring
         :param el_name: Element name string
         :param el_type: Class object or name string
         :return: Element
@@ -656,13 +663,13 @@ class LatticeContainer:
         if len(seq) > 0:
             if singleton_only:
                 if len(seq) > 1:
-                    raise Exception(f'Multiple matches found for (name:{el_name}|type:{el_type})')
+                    raise Exception(f'Multiple matches for (name:{el_name}|type:{el_type}) - {[e.id for e in seq]}')
             if last:
                 return seq[-1]
             else:
                 return seq[0]
         else:
-            raise Exception(f'No matches found for (name:{el_name}|type:{el_type})')
+            raise Exception(f'No matches for (name:{el_name}|type:{el_type})')
 
     def get_last(self,
                  el_name: str = None,
