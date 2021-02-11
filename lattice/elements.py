@@ -7,6 +7,8 @@ from pathlib import Path
 
 from typing import Union, List, Dict, Type, Iterable, Callable, Optional
 
+from ..util import *
+
 from .containers import ElementList
 from ocelot.cpbd.elements import *
 from ocelot import MagneticLattice, twiss, MethodTM, Twiss, periodic_twiss, lattice_transfer_map, trace_z
@@ -402,6 +404,51 @@ class LatticeContainer:
             s = loc
         tws1 = trace_z(self.lattice, tws0, [s])
         return tws1[0]
+
+    def twiss_model(self, bpm_names: List[str]):
+        """
+        Compiles twiss model - list of (bpm,twiss) tuples for all bpm names
+        Adjusts phases if there is a wrap around the origin
+        :param bpm_names: BPM names in order along lattice, with single possible wrap-around
+        :return: (b,t) tuples
+        """
+        tws = self.update_twiss()[1:]
+        assert len(bpm_names) == len(set(bpm_names))
+        assert len(tws) == len(self.sequence)
+        nux, nuy = tws[-1].mux, tws[-1].muy
+
+        start_name = bpm_names[0]
+        start_bpm = self.get_first(el_name=start_name, exact=True, singleton_only=True)
+        start_idx = last_idx = self.sequence.index(start_bpm)
+
+        twiss_model = [(start_bpm, tws[start_idx])]
+        wrapped_around = False  # indicates we have crossed origin
+        for bpm_name in bpm_names[1:]:
+            bpm = self.get_first(el_name=bpm_name, exact=True, singleton_only=True)
+            idx = self.sequence.index(bpm)
+            tw = tws[idx]
+            if idx > last_idx:
+                if wrapped_around:
+                    tw.mux += nux
+                    tw.muy += nuy
+            elif idx < last_idx:
+                if not wrapped_around:
+                    wrapped_around = True
+                    tw.mux += nux
+                    tw.muy += nuy
+                else:
+                    raise Exception(
+                        f"Backwards ordering after wrap - {self.sequence[last_idx].id} -> {bpm.id} ({last_idx}->{idx})")
+            else:
+                raise Exception('Should be unreachable')
+
+            twiss_model.append((bpm, tw))
+            last_idx = idx
+        assert util.strictly_increasing([t.mux for (b, t) in twiss_model])
+        assert util.strictly_increasing([t.muy for (b, t) in twiss_model])
+        assert len(twiss_model) == len(bpm_names)
+        assert bpm_names[0] == twiss_model[0][0].id
+        return twiss_model
 
     def insert_extra_markers(self, spacing: float = 1.0):
         """
