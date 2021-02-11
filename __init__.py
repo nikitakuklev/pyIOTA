@@ -2,7 +2,7 @@
 pyIOTA accelerator control and analysis framework
 """
 
-__version__ = '0.7.3'
+__version__ = '0.7.5'
 __author__  = "Nikita Kuklev"
 
 # General imports - without these, most things will not work
