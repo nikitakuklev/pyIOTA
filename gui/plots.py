@@ -1,23 +1,21 @@
 import copy
 import logging
-
 import math
-import numpy as np
-import pandas as pd
-import matplotlib.pyplot as plt
 from typing import Tuple, List, Dict, Union
 
-from pyIOTA.lattice.elements import ILMatrix
-from matplotlib import font_manager
-import matplotlib.patches as patches
+import numpy as np
+import pandas as pd
 import matplotlib as mpl
+from matplotlib import font_manager
+import matplotlib.pyplot as plt
+import matplotlib.patches as patches
+
+from pyIOTA.lattice.elements import ILMatrix
 from ocelot import Quadrupole, Bend, SBend, RBend, Vcor, Hcor, Sextupole, Undulator, \
     Cavity, Multipole, Marker, Edge, Octupole, Matrix, Monitor, Drift, Solenoid, UnknownElement, TDCavity, TWCavity, \
     MagneticLattice, Element
 
 logger = logging.getLogger(__name__)
-
-
 
 
 def plot_simple(*args,

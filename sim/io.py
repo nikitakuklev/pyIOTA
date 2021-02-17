@@ -6,7 +6,7 @@ from typing import Optional, List
 import numpy as np
 import pandas as pd
 
-__import__('tables')  # <-- import PyTables; __import__ so that linters don't complain, used for BLOSC codecs
+#__import__('tables')  # <-- import PyTables; __import__ so that linters don't complain, used for BLOSC codecs
 import h5py
 
 

@@ -76,7 +76,9 @@ class NAFF:
     def __init__(self,
                  window_type: str = 'hanning',
                  window_power: int = 0,
+                 wp: int = None,
                  fft_pad_zeros_power: int = None,
+                 pp: int = None,
                  data_trim: slice = None,
                  output_trim: slice = None):
         """
@@ -91,9 +93,9 @@ class NAFF:
         :param output_trim: Slice object to apply to all output (freq, freq_power) - useful to remove 0 frequency
         """
         self.window_type = window_type
-        self.window_power = window_power
+        self.window_power = wp or window_power
         self.data_trim = data_trim
-        self.fft_pad_zeros_power = fft_pad_zeros_power
+        self.fft_pad_zeros_power = pp or fft_pad_zeros_power
         self.output_trim = output_trim
         self.coeffs_cache = [sci.newton_cotes(i, 1)[0].astype(np.complex128) for i in range(1, 10)]
         self.icache = {}
