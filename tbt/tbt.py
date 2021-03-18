@@ -1,19 +1,18 @@
 import copy
 import enum
-import itertools
 import json
 import logging
 from json import JSONDecodeError
 from typing import Union, Callable, Dict, List, Iterable, Tuple, Optional, Any, Set
 
 import numpy as np
-import pyIOTA.acnet
-import pyIOTA.iota.run2
-import pyIOTA.iota.run2 as iota
 import pandas as pd
+import pyIOTA.iota.run2 as iota
 
 # special_keys = ['idx', 'kickv', 'kickh', 'state', 'custom']
-from pyIOTA.tbt.naff import NAFF
+from ocelot import Twiss
+#from pyIOTA.tbt.naff import NAFF
+from .naff import NAFF
 
 import pyIOTA.acnet.utils as acutils
 
@@ -68,14 +67,28 @@ class Util:
             props_dicts.append(props)
         return files_ll, props_dicts
 
+    class Ocelot:
+        @staticmethod
+        def twiss_to_dataframe(tws: List[Twiss]):
+            """ Convert list of twiss objects from Ocelot to a TWISS dataframe """
+            keys = ['beta_x', 'beta_y', 'alpha_x', 'alpha_y', 'Dx', 'Dy']
+            index = [tw.id for tw in tws]
+            data = {}
+            for tw in tws:
+                data[tw.id] = [getattr(tw, k) for k in keys]
+            return pd.DataFrame(index=index, data=data)
+
+
 class COORD(enum.Enum):
     X = 'x'
     PX = 'px'
     Y = 'y'
     PY = 'py'
 
+
 class TrackFrame(pd.DataFrame):
     """ Thin container to store TBT data """
+
     @property
     def df(self):
         return self
@@ -98,6 +111,7 @@ class TrackFrame(pd.DataFrame):
 
     def pymat(self, idx=0):
         return self.as_matrix(idx, self.columns.str.endswith(COORD.PY.value))
+
 
 class SimKick:
     """
@@ -139,9 +153,9 @@ class SimKick:
             return self.value
 
     @staticmethod
-    def convert_tbt_matrices_to_track_df(bpms:Iterable[str],
-                                         mx:np.ndarray, mpx:np.ndarray, my:np.ndarray, mpy:np.ndarray,
-                                         families:Iterable[str] = None):
+    def convert_tbt_matrices_to_track_df(bpms: Iterable[str],
+                                         mx: np.ndarray, mpx: np.ndarray, my: np.ndarray, mpy: np.ndarray,
+                                         families: Iterable[str] = None):
         """
         Convert data matrices from M bpms x N turns format into a track dataframe of single particle
         """
@@ -159,13 +173,13 @@ class SimKick:
         #     dft = pd.DataFrame(columns=bpms, index=[0], data=data_track)
         #     data[DC.TRACK.v + '_' + f] = [dft]
         # columns = [DC.TURN_CNT.v] + [DC.TRACK.v + '_' + f for f in families]
-        data_track = {DC.TURN_CNT.v:mx.shape[1]}
+        data_track = {DC.TURN_CNT.v: mx.shape[1]}
         for f, mat in zip(families, matrices):
             for i, b in enumerate(bpms):
-                data_track[b+'_'+f] = [mat[i,:]]
+                data_track[b + '_' + f] = [mat[i, :]]
         dft = TrackFrame(index=[0], data=data_track)
 
-        data = {DC.TURN_CNT.v:mx.shape[1], DC.TRACK.v: [dft]}
+        data = {DC.TURN_CNT.v: mx.shape[1], DC.TRACK.v: [dft]}
         df = pd.DataFrame(index=[0], data=data)
         return df
 
@@ -325,8 +339,6 @@ class SimKick:
         data[self.Datatype.CSX.value] = csxl
         data[self.Datatype.CSY.value] = csyl
         data[self.Datatype.I1.value] = i1l
-
-
 
 
 class Kick:
