@@ -1160,6 +1160,18 @@ class OctupoleInsert:
             s_oct = [s for e, s in zip(seq, s_list) if not isinstance(e, Drift)]
             assert np.allclose(np.diff(np.array(s_oct)), oqSpacing + olen)
 
+    @property
+    def elements(self):
+        return self.seq
+
+    @property
+    def magnets(self):
+        return [el for el in self.seq if not isinstance(el, Drift)]
+
+    @property
+    def magnet_lengths(self):
+        return [el.l for el in self.seq if not isinstance(el, Drift)]
+
     def calculate_optics_parameters(self):
         """
         Calculates the key descriptive parameters of insert based on length and phase advance
