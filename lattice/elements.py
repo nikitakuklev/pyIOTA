@@ -90,6 +90,14 @@ class LatticeContainer:
         return [(el.id, el.__class__.__name__, el.l) for el in self.lattice.sequence]
 
     @property
+    def bpms(self):
+        return self.get_elements(Monitor)
+
+    @property
+    def octupoles(self):
+        return self.get_elements(Octupole)
+
+    @property
     def sequence(self):
         return self.lattice.sequence
 
@@ -134,7 +142,7 @@ class LatticeContainer:
 
     def replace_elements(self, old_el: Union[Element, Iterable], new_el: Union[Element, Iterable]) -> LatticeContainer:
         """
-        Swaps out elements. Throws exception if more than one match found.
+        Swaps out elements. Raises exception if more than one match found.
         :param old_el: Old element, or list of elements
         :param new_el: New element, or list of elements
         :return: LatticeContainer
@@ -159,10 +167,10 @@ class LatticeContainer:
             else:
                 if nel.l != oel.l:
                     print(f'New length ({nel.l}) does not match old one ({oel.l}) - careful!')
-                i = seq.index(old_el)
-                seq[i] = new_el
+                i = seq.index(oel)
+                seq[i] = nel
                 if not self.silent:
-                    print(f'Inserted at ({i}) - element is now ({seq[i].id})')
+                    print(f'Replaced element #({i}) - new element is ({seq[i].__class__.__name__}) ({seq[i].id})')
         return self
 
     def transmute_elements(self,
