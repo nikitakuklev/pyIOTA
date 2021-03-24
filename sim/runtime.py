@@ -35,7 +35,6 @@ class DaskSLURMSim(Sim):
                             'memory': '2GB',
                             'processes': 1,
                             # 'interface': 'ib0',
-                            'local-directory': None,
                             'shebang': '#!/usr/bin/env bash',
                             'queue': 'broadwl',
                             'walltime': '36:00:00',
