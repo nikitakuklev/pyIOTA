@@ -40,7 +40,7 @@ class DaskSLURMSim(Sim):
                             'walltime': '36:00:00',
                             # 'job-cpu': 1,
                             # 'job-mem': '2GB',
-                            'log-directory': "/home/nkuklev/scratch/slurm_logs/",
+                            #'log-directory': "/home/nkuklev/scratch/slurm_logs/",
                             }
             cluster_opts.update(kwargs)
             cluster = dask_jobqueue.SLURMCluster(interface='ib0', **cluster_opts)
