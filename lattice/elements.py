@@ -12,6 +12,7 @@ from ..util import *
 from .containers import ElementList
 from ocelot.cpbd.elements import *
 from ocelot import MagneticLattice, twiss, MethodTM, Twiss, periodic_twiss, lattice_transfer_map, trace_z
+import pandas as pd
 
 logger = logging.getLogger(__name__)
 
@@ -104,6 +105,19 @@ class LatticeContainer:
     @sequence.setter
     def sequence(self, v):
         self.lattice.sequence = v
+
+    @property
+    def df(self):
+        """ Compiles a summary dataframe """
+        columns = ['id', 'class', 'l', 'dx', 'dy', 'tilt', 's_start', 's_mid', 's_end']
+        self.update_element_positions()
+        data = {}
+        for c in columns:
+            if c == 'class':
+                data[c] = [el.__class__.__name__ for el in self.sequence]
+            else:
+                data[c] = [getattr(el, c) for el in self.sequence]
+        return pd.DataFrame(data=data)
 
     def insert_correctors(self, destroy_skew_quads: bool = True):
         """
@@ -1058,7 +1072,7 @@ class OctupoleInsert:
             assert all(not np.isnan(oqkt) for oqkt in oqK)
         else:
             assert not np.isnan(oqK)
-        olen_eff = olen_eff or olen or l0/nn
+        olen_eff = olen_eff or olen or l0 / nn
 
         if positions is None:
             perturbed_mode = False
