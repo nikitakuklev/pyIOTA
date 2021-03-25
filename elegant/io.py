@@ -1,5 +1,6 @@
 __all__ = ['SDDS', 'SDDSTrack',
-           'read_parameters_to_df', 'write_df_to_parameter_file', 'prepare_folders', 'prepare_folder_structure',
+           'read_parameters_to_df', 'write_df_to_parameter_file',
+           'prepare_folders', 'prepare_folder_structure',
            'write_df_to_parameter_file_v2']
 
 import gc
@@ -42,15 +43,17 @@ class SDDS:
                 raise e
             import sdds
 
-        sd = sdds.SDDS(15)
+        SDDS.sd = sdds.SDDS(15)
+        return SDDS.sd
 
     def __init__(self, path: Path, fast: bool = False):
+        sd = SDDS.sd
         if sd is None:
-            load_sdds()
+            sd = SDDS.load_sdds()
         if isinstance(path, Path):
             path = str(path)  # legacy code :(
         if not os.path.exists(path):
-            raise Exception(f'Path {path} is missing you fool!')
+            raise AttributeError(f'Path ({path}) is missing')
         sd.load(path)
         self.path = path
         self.cname = [sd.columnName[i] for i in range(len(sd.columnName))]
@@ -74,6 +77,9 @@ class SDDS:
         """
         print(f'File:{self.path}')
         print(f'Pages:{self.pagecnt} | Cols:{len(self.cname)} | Pars:{len(self.pname)}')
+
+    def prepare_for_serialization(self):
+        SDDS.sd = None
 
     def __getitem__(self, name: str):
         """
