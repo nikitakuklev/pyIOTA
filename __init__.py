@@ -8,7 +8,6 @@ __author__  = "Nikita Kuklev"
 # General imports - without these, most things will not work
 import sys
 import os
-
 import logging
 
 logging.basicConfig(format='[%(asctime)s] {%(name)s:%(funcName)s:%(lineno)d} %(levelname)s - %(message)s',
@@ -22,7 +21,7 @@ os.environ["NUMEXPR_MAX_THREADS"] = str(n_cores if n_cores <= N_CORES_MAX else N
 
 
 
-import pyIOTA.lattice as lat
+#import pyIOTA.lattice as lat
 
 #%(module)s
 #%(pathname)s
