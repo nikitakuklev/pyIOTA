@@ -1,6 +1,22 @@
+import random
+import string
 from collections.abc import Iterable
 import typing
 from typing import List, Generator, Tuple, Union
+
+def style_df(df):
+    td_props = [('font-size', '11px'), ('text-align', 'center'), ('border', '1px solid lightgray'),
+                ('padding', '0px 3px')]
+    th_props = [('font-size', '11px'), ('text-align', 'center'), ('font-weight', 'bold'),
+                ('border', '1px solid lightgray'), ('padding', '3px 3px')]
+    styles = [dict(selector="td", props=td_props), dict(selector="th", props=th_props)]
+    df = df.style.set_table_styles(styles)
+    return df
+
+
+def id_generator(size: int = 10, chars: str = string.ascii_uppercase + string.digits):
+    """ Generate random ID string """
+    return ''.join(random.choice(chars) for _ in range(size))
 
 
 def flatten(*args: typing.Iterable[Union[Tuple, List, typing.Iterable]]) -> Generator:
