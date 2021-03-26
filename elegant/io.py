@@ -1,17 +1,16 @@
-__all__ = ['SDDS', 'SDDSTrack',
-           'read_parameters_to_df', 'write_df_to_parameter_file',
-           'prepare_folders', 'prepare_folder_structure',
-           'write_df_to_parameter_file_v2']
-
-import gc
+__all__ = [  # 'SDDS', 'SDDSTrack',
+    'read_parameters_to_df', 'write_df_to_parameter_file',
+    'prepare_folders', 'prepare_folder_structure',
+    'write_df_to_parameter_file_v2']
 
 """
 Collection of IO-related functions for elegant and SDDS file formats
 """
 
+import sys
+import gc
 import os
 import shutil
-import sys
 from pathlib import Path
 from typing import Optional, List
 import numpy as np
@@ -27,7 +26,7 @@ class SDDS:
     sd = None
 
     @staticmethod
-    def load_sdds():
+    def load_sdds(num: int = 15):
         try:
             import sdds
         except ImportError as e:
@@ -35,7 +34,9 @@ class SDDS:
             import platform
             plt = platform.system()
             if plt == "Linux":
-                sys.path.insert(1, Path.home().joinpath('rpms/usr/lib/python3.6/site-packages').as_posix())
+                # SDDS py3.8 for linux is now included as package - throw exception if not found
+                raise e
+                # sys.path.insert(1, Path.home().joinpath('rpms/usr/lib/python3.6/site-packages').as_posix())
             elif plt == "Windows":
                 sys.path.insert(1, str(Path("C:\Python37\Lib")))
                 sys.path.insert(1, str(Path("C:\Python37\DLLs")))
@@ -43,15 +44,17 @@ class SDDS:
                 raise e
             import sdds
 
-        SDDS.sd = sdds.SDDS(15)
+        SDDS.sd = sdds.SDDS(num)
         return SDDS.sd
 
-    def __init__(self, path: Path, fast: bool = False):
+    def __init__(self, path: Path, fast: bool = False, blank: bool = False):
         sd = SDDS.sd
         if sd is None:
             sd = SDDS.load_sdds()
         if isinstance(path, Path):
             path = str(path)  # legacy code :(
+        if blank:
+            return
         if not os.path.exists(path):
             raise AttributeError(f'Path ({path}) is missing')
         sd.load(path)
@@ -135,6 +138,34 @@ class SDDS:
         d = {k: v for (k, v) in zip(self.pname, self.pdata)}
         return pd.DataFrame(data=d)
 
+    def set(self, df: pd.DataFrame):
+        """ Set SDDS file to dataframe contents (single page) """
+        sd = self.sd = SDDS.load_sdds(10)
+        type_dict = {np.dtype(np.object_): sd.SDDS_STRING,
+                     np.dtype(np.float64): sd.SDDS_DOUBLE,
+                     np.dtype(np.int64): sd.SDDS_LONG}
+        columns = df.columns
+        for i, c in enumerate(df.columns):
+            sdds_type = type_dict.get(df[c].dtype, None)
+            if not sdds_type:
+                raise ValueError(f'Column ({c}) of dtype ({df[c].dtype}) has no SDDS mapping')
+            unit = df.attrs['units'][i] if hasattr(df, 'attrs') and 'units' in df.attrs else ''
+            sd.defineColumn(c, '', unit, '', '', sdds_type, 0)
+        column_data = [[[]] for i in range(len(columns))]
+        for row in df.itertuples(index=False):
+            for i, r in enumerate(row):
+                column_data[i][0].append(r)
+        for i, n in enumerate(columns):
+            sd.setColumnValueLists(columns[i], column_data[i])
+
+    def write(self, fpath: Path = None):
+        """ Write current data to file """
+        fpath = fpath or self.path
+        assert fpath
+        assert not fpath.exists()
+        self.sd.save(str(fpath))
+        del self.sd
+
     # def write(self, fpath: Path, parameters: dict = None, type_map: dict = None):
     #     assert not fpath.is_dir()
     #     if fpath.exists():
@@ -176,6 +207,7 @@ df_data_columns = ['x', 'xp', 'y', 'yp', 't', 'p', 'dt']
 df_data_columns_dict = {c: i for (c, i) in zip(df_data_columns, range(len(df_data_columns)))}
 df_columns = ['PARTICLE', 'N'] + [c + 'i' for c in df_data_columns] + df_data_columns
 df_dtypes = [np.float64] * len(df_data_columns)
+
 
 class SDDSTrack:
     """
