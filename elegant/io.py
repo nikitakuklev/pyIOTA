@@ -396,6 +396,9 @@ class SDDSTrack:
         """
         return self.pdata[self.pdict[name]]
 
+    def prepare_for_serialization(self):
+        if hasattr(self, 'sd'):
+            del self.sd
 
 def read_parameters_to_df(knob: Path,
                           columns: Optional[List] = None,
