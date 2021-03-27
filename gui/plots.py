@@ -535,7 +535,7 @@ def plot_disp(ax, tws, top_plot, font_size):
     leg2.get_frame().set_alpha(0.2)
 
 
-def plot_API(lat, fig=None, legend=False, fig_name=1, grid=True, font_size=12):
+def plot_API(lat, fig=None, legend=False, fig_name=1, grid=True, font_size=12, n_start=0, n_end=-1):
     """
     Function creates a picture with lattice on the bottom part of the picture and top part of the picture can be
     plot arbitrary lines.
@@ -578,7 +578,7 @@ def plot_API(lat, fig=None, legend=False, fig_name=1, grid=True, font_size=12):
 
     # plot_elems(ax_el, lat, nturns = 1, legend = True) # plot elements
     # new_plot_elems(fig, ax_el, lat, nturns = 1, legend = legend)
-    plot_elems(fig, ax_el, lat, legend=legend, y_scale=0.8, font_size=font_size)
+    plot_elems(fig, ax_el, lat, legend=legend, y_scale=0.8, font_size=font_size, n_start=n_start, n_end=n_end)
 
     return fig, ax_xy
 
@@ -820,7 +820,8 @@ dict_plot.update({ILMatrix:     {"scale": 0.7, "color": "pink",         "edgecol
 #         L += elem.l
 #         points_with_annotation.append([point, annotation])
 
-def plot_elems(fig, ax, lat, s_point=0, nturns=1, y_lim=None, y_scale=1, legend=True, font_size=18, excld_legend=None):
+def plot_elems(fig, ax, lat, s_point=0, nturns=1, y_lim=None, y_scale=1, legend=True, font_size=18, excld_legend=None,
+               n_start=0, n_end=-1):
     legend_font_size = font_size
 
     if excld_legend is None:
@@ -842,7 +843,7 @@ def plot_elems(fig, ax, lat, s_point=0, nturns=1, y_lim=None, y_scale=1, legend=
     rf = []
     m = []
     sol = []
-    for elem in lat.sequence:
+    for elem in lat.sequence[n_start:n_end]:
         if elem.__class__ == Quadrupole:
             q.append(elem.k1)
         elif elem.__class__ in [Bend, RBend, SBend]:
@@ -874,7 +875,7 @@ def plot_elems(fig, ax, lat, s_point=0, nturns=1, y_lim=None, y_scale=1, legend=
     labels_dict = {}
     for elem in dict_copy.keys():
         labels_dict[elem] = dict_copy[elem]["label"]
-    for elem in lat.sequence:
+    for elem in lat.sequence[n_start:n_end]:
         if elem.__class__ in excld_legend:
             L += elem.l
             continue
