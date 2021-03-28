@@ -18,6 +18,28 @@ import pandas as pd
 from time import perf_counter
 
 
+def load_sdds(num: int = 15):
+    try:
+        import sdds
+    except ImportError as e:
+        # Try fix sdds pythonpath issues by adding common paths I use
+        import platform
+        plt = platform.system()
+        if plt == "Linux":
+            # SDDS py3.8 for linux is now included as package - throw exception if not found
+            raise e
+            # sys.path.insert(1, Path.home().joinpath('rpms/usr/lib/python3.6/site-packages').as_posix())
+        elif plt == "Windows":
+            sys.path.insert(1, str(Path("C:\Python37\Lib")))
+            sys.path.insert(1, str(Path("C:\Python37\DLLs")))
+        else:
+            raise e
+        import sdds
+
+    SDDS.sd = sdds.SDDS(num)
+    return SDDS.sd
+
+
 class SDDS:
     """
     SDDSPython wrapper for elegant files that provides nice dictionary-like interface, or a DataFrame view
@@ -25,32 +47,10 @@ class SDDS:
 
     sd = None
 
-    @staticmethod
-    def load_sdds(num: int = 15):
-        try:
-            import sdds
-        except ImportError as e:
-            # Try fix sdds pythonpath issues by adding common paths I use
-            import platform
-            plt = platform.system()
-            if plt == "Linux":
-                # SDDS py3.8 for linux is now included as package - throw exception if not found
-                raise e
-                # sys.path.insert(1, Path.home().joinpath('rpms/usr/lib/python3.6/site-packages').as_posix())
-            elif plt == "Windows":
-                sys.path.insert(1, str(Path("C:\Python37\Lib")))
-                sys.path.insert(1, str(Path("C:\Python37\DLLs")))
-            else:
-                raise e
-            import sdds
-
-        SDDS.sd = sdds.SDDS(num)
-        return SDDS.sd
-
     def __init__(self, path: Path, fast: bool = False, blank: bool = False):
         sd = SDDS.sd
         if sd is None:
-            sd = SDDS.load_sdds()
+            sd = load_sdds()
         if isinstance(path, Path):
             path = str(path)  # legacy code :(
         if blank:
@@ -78,8 +78,9 @@ class SDDS:
         Print a brief file summary
         :return:
         """
-        print(f'File:{self.path}')
-        print(f'Pages:{self.pagecnt} | Cols:{len(self.cname)} | Pars:{len(self.pname)}')
+        s = f'File:{self.path}\n Pages:{self.pagecnt} | Cols:{len(self.cname)} | Pars:{len(self.pname)}'
+        print(s)
+        return s
 
     def prepare_for_serialization(self):
         SDDS.sd = None
@@ -140,7 +141,7 @@ class SDDS:
 
     def set(self, df: pd.DataFrame):
         """ Set SDDS file to dataframe contents (single page) """
-        sd = self.sd = SDDS.load_sdds(10)
+        sd = self.sd = load_sdds(10)
         type_dict = {np.dtype(np.object_): sd.SDDS_STRING,
                      np.dtype(np.float64): sd.SDDS_DOUBLE,
                      np.dtype(np.int64): sd.SDDS_LONG}
@@ -230,7 +231,7 @@ class SDDSTrack:
             path = str(path)
         if not os.path.exists(path):
             raise Exception(f'Path {path} is missing you fool!')
-        sd = sdds.SDDS(16)
+        sd = load_sdds(16)
         sd.load(path)
         self.path = path
         columns = columns or df_data_columns
@@ -399,6 +400,7 @@ class SDDSTrack:
     def prepare_for_serialization(self):
         if hasattr(self, 'sd'):
             del self.sd
+
 
 def read_parameters_to_df(knob: Path,
                           columns: Optional[List] = None,
