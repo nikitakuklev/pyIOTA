@@ -164,6 +164,11 @@ class Invariants:
 
 class Coordinates:
     @staticmethod
+    def matrix_Binv(beta: float, alpha: float) -> np.ndarray:
+        """ Courant-Snyder normalization matrix B^-1 """
+        return np.array([[1/np.sqrt(beta), 0.0], [alpha/np.sqrt(beta), np.sqrt(beta)]])
+
+    @staticmethod
     def normalize_x(x: np.ndarray, beta: float) -> np.ndarray:
         """
         Compute normalized transverse position
@@ -178,11 +183,20 @@ class Coordinates:
         return x / np.sqrt(beta), x * alpha / np.sqrt(beta) + np.sqrt(beta) * px
 
     @staticmethod
-    def calc_px_from_bpms(x1, x2, beta1, beta2, a1, a2, dphase):
+    def calc_px_from_bpms(x1, x2, beta1, beta2, a1, a2, dphase) -> np.ndarray:
         """ Compute momentum at location 1 from position readings at locations 1 and 2 and local optics funcs """
         px1 = x2 * (1 / np.sin(dphase)) * (1 / np.sqrt(beta1 * beta2)) - \
               x1 * (1 / np.tan(dphase)) * (1 / beta1) - x1 * a1 / beta1
         return px1
+
+    @staticmethod
+    def calc_px_from_normalized_bpms(x1n: np.ndarray, x2n: np.ndarray, dphase: float) -> np.ndarray:
+        """
+        Compute normalized momentum at location 1 from normalized positions 1 and 2
+        See https://journals.aps.org/prab/pdf/10.1103/PhysRevSTAB.8.024001
+        """
+        px1n = -x1n*(1/np.tan(dphase)) + x2n*(1/np.sin(dphase))
+        return px1n
 
     @staticmethod
     def calc_px_from_bpms_v2(x1, x2, beta1, beta2, a1, a2, dphase):
@@ -202,11 +216,25 @@ class Coordinates:
 
     @staticmethod
     def slopes_to_momenta(xp, yp, delta):
-        """ From elegant """
+        """ From elegant - convert (x, x') to canonical (x, px) """
         denom = np.sqrt(1 + xp ** 2 + yp ** 2)
         px = (1 + delta) * xp / denom
         py = (1 + delta) * yp / denom
         return px, py
+
+    @staticmethod
+    def slopes_to_canonical(x, xp, y, yp, cdt, delta):
+        factor = (1+delta)/np.sqrt(1+xp**2+yp**2)
+        px=xp*factor
+        py=yp*factor
+        return x, px, y, py, cdt, delta
+
+    @staticmethod
+    def canonical_to_slopes(x, px, y, py, cdt, delta):
+        factor = 1/np.sqrt((1+delta**2) - px**2 - py**2)
+        xp = px*factor
+        yp = py*factor
+        return x, xp, y, yp, cdt, delta
 
 
 class Phase:
