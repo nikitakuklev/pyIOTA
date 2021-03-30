@@ -10,8 +10,8 @@ from typing import Dict
 
 import numpy as np
 import pyIOTA
-from ocelot import Sextupole, Hcor, Vcor, Element, Edge, Marker, Octupole, Matrix, Quadrupole, SBend, Drift, Solenoid, \
-    Cavity, Monitor, Multipole
+from ocelot import Sextupole, Hcor, Vcor, Element, Edge, Marker, Octupole, Matrix, \
+    Quadrupole, SBend, Drift, Solenoid, Cavity, Monitor, Multipole
 from pyIOTA.lattice.elements import LatticeContainer, NLLens, HKPoly, ILMatrix, Recirculator
 
 logger = logging.getLogger(__name__)
@@ -290,23 +290,30 @@ class Writer:
             idx = el.id[:99]
             logger.warning(f'Name ({el.id}) is ({len(el.id)}) chars, truncating to 99')
             idx = el.id[:99]
-            raise Exception # temp
+            raise Exception  # temp
         else:
             idx = el.id
 
-        if idx in elements:
+        if idx in elements[0]:
             if self.verbose:
                 print(f'Found repeat definition: ({idx})')
-            return True
+            if not isinstance(el, Drift):
+                raise AttributeError(f'Repeat non-drift ({idx}) ({el.__class__.__name__})')
+            else:
+                e_orig = elements[1][elements[0].index(idx)]
+                if el.l != e_orig.l:
+                    raise AttributeError(f'Repeat drift ({idx}) has different lengths {el.l}|{e_orig.l}')
+                return True
         else:
-            elements.append(idx)
+            elements[0].append(idx)
+            elements[1].append(el)
             return False
 
     def _check_element_names(self, box: LatticeContainer):
         names = [el.id for el in box.lattice.sequence]
         n_uniques = len(set(names))
         if any(len(idx) >= 99 for idx in names):
-            raise Exception # temp
+            raise Exception  # temp
             names = [idx[:99] for idx in names]
             n_uniques2 = len(set(names))
             if n_uniques != n_uniques2:
@@ -334,7 +341,7 @@ class Writer:
         if debug:
             logger.info(opt)
         sl = []
-        elements = []
+        elements = [[], []]
 
         # Get a view that removes elements whenever they are looked at
         view = box.get_onetimeview()
@@ -380,8 +387,8 @@ class Writer:
         # sl.append(f'CHRG: CHARGE, TOTAL={lat.:e}\n')
 
         def ma(el):
-            if el.dx != 0.0 or el.dy != 0.0 or (el.tilt+el.dtilt) != 0.0:
-                return f' dx={el.dx:+.10e}, dy={el.dy:+.10e}, tilt={el.tilt+el.dtilt:+.10e},'
+            if el.dx != 0.0 or el.dy != 0.0 or (el.tilt + el.dtilt) != 0.0:
+                return f' dx={el.dx:+.10e}, dy={el.dy:+.10e}, tilt={el.tilt + el.dtilt:+.10e},'
             else:
                 return ''
 
@@ -390,7 +397,8 @@ class Writer:
             for el in dipoles:
                 if self._validate_element(el, elements): continue
                 sl.append(f"{el.id}: CSBEND, l={el.l:.10f}, angle={el.angle}, e1=0, e2=0, &\n")
-                sl.append(f" h1={el.h_pole1:+.10f}, h2={el.h_pole1:+.10f}, hgap={el.gap/2:+.10f}, fint={el.fint}, &\n")
+                sl.append(
+                    f" h1={el.h_pole1:+.10f}, h2={el.h_pole1:+.10f}, hgap={el.gap / 2:+.10f}, fint={el.fint}, &\n")
                 sl.append(f" EDGE_ORDER=1, EDGE1_EFFECTS=3, EDGE2_EFFECTS=3,{ma(el)} &\n")
                 sl.append(f' N_KICKS="dip_kicks", ISR="flag_isr", SYNCH_RAD="flag_synch"\n')
             sl.append('\n')
@@ -495,14 +503,24 @@ class Writer:
             sl.append('!MONITORS\n')
             for el in monitors:
                 if self._validate_element(el, elements): continue
-                sl.append(f'{el.id:<10}: MONI, l={el.l}, CO_FITPOINT=1\n')
+                if getattr(el,'elegant_co_fitpoint',False):
+                    sl.append(f'{el.id:<10}: MONI, l={el.l}, CO_FITPOINT=1\n')
+                else:
+                    sl.append(f'{el.id:<10}: MONI, l={el.l}\n')
             sl.append('\n')
 
         if markers:
-            sl.append('!MARKERS\n')
+            sl.append('!MARKERS/WPS\n')
             for el in markers:
                 if self._validate_element(el, elements): continue
-                sl.append(f'{el.id:<10}: MARKER\n')
+                if getattr(el, 'elegant_watchpoint', False):
+                    # Special watchpoints
+                    props_str = ''
+                    for (k, v) in el.elegant_watchpoint_props.items():
+                        props_str += f'{k} = {v}, '
+                    sl.append(f'{el.id:<10}: WATCH, {props_str}\n')
+                else:
+                    sl.append(f'{el.id:<10}: MARKER\n')
             sl.append('\n')
 
         if drifts:
@@ -576,8 +594,8 @@ class Writer:
                 if isinstance(v, tuple):
                     xm, ym = v
                 else:
-                    xm, ym = 0.0254*v, 0.0254*v
-                #xm, ym = 0.0381, 0.0381  # 1.5x aperture
+                    xm, ym = 0.0254 * v, 0.0254 * v
+                # xm, ym = 0.0381, 0.0381  # 1.5x aperture
                 logger.warning(f'Global aperture set at {xm:.5f}/{ym:.5f}')
                 # f.write('MA1: MAXAMP, X_MAX=0.025, Y_MAX=0.025, ELLIPTICAL=1 \n')
                 # f.write('MA1: MAXAMP, X_MAX=0.030, Y_MAX=0.030, ELLIPTICAL=1 \n')
@@ -610,12 +628,12 @@ class Writer:
             # sl.append('!For now, globally limit transverse aperture, since our beampipe is <=2in\n')
             # sl.append('!Also add worst restriction point in ring (at IOR)\n')
             # sl.append('!Will have to cut bucket escapes in post-processing\n')
-            #sl.append('!C0: CLEAN, DELTALIMIT=0.1\n')
+            # sl.append('!C0: CLEAN, DELTALIMIT=0.1\n')
             sl.append('\n')
         else:
             logger.warning(f'No apertures specified - internal elegant ones will apply!')
 
-        #sl.append('!Full line has everything\n')
+        # sl.append('!Full line has everything\n')
 
         # seq = list(iota.sequence)
         # markerdict = markers.data
@@ -663,5 +681,3 @@ class Writer:
                     f.write(result)
 
         return result
-
-
