@@ -3,6 +3,7 @@ from __future__ import annotations
 __all__ = ['LatticeContainer', 'NLLens', 'HKPoly', 'ILMatrix', 'OctupoleInsert', 'NLInsert', 'Recirculator']
 
 import logging
+from enum import Enum
 from pathlib import Path
 
 from typing import Union, List, Dict, Type, Iterable, Callable, Optional
@@ -15,6 +16,11 @@ from ocelot import MagneticLattice, twiss, MethodTM, Twiss, periodic_twiss, latt
 import pandas as pd
 
 logger = logging.getLogger(__name__)
+
+BETAX = 'BX'
+BETAY = 'BY'
+MUX = 'MUX'
+MUY = 'MUY'
 
 
 class LatticeContainer:
@@ -43,7 +49,9 @@ class LatticeContainer:
         self.pc = info['pc']
         self.variables = variables
         self.silent = silent
-        self.method = method
+        self.bpm_optics = {}
+        self.bpm_phases = {'x': {}, 'y': {}}
+        # self.method = method
 
         # These are often customized later anyways
         if reset_elements_to_defaults:
@@ -91,8 +99,12 @@ class LatticeContainer:
         return [(el.id, el.__class__.__name__, el.l) for el in self.lattice.sequence]
 
     @property
-    def bpms(self):
+    def bpms(self) -> List[Monitor]:
         return self.get_elements(Monitor)
+
+    @property
+    def bpm_names(self):
+        return [el.id for el in self.bpms]
 
     @property
     def octupoles(self):
@@ -107,17 +119,40 @@ class LatticeContainer:
         self.lattice.sequence = v
 
     @property
-    def df(self):
+    def method(self):
+        return self.lattice.method
+
+    @method.setter
+    def method(self, v):
+        self.lattice.method = v
+
+    def df(self, n_turns: int = 1) -> pd.DataFrame:
         """ Compiles a summary dataframe """
-        columns = ['id', 'class', 'l', 'dx', 'dy', 'tilt', 's_start', 's_mid', 's_end']
-        self.update_element_positions()
-        data = {}
-        for c in columns:
-            if c == 'class':
-                data[c] = [el.__class__.__name__ for el in self.sequence]
-            else:
-                data[c] = [getattr(el, c) for el in self.sequence]
-        return pd.DataFrame(data=data)
+        if n_turns == 1:
+            columns = ['id', 'class', 'l', 'dx', 'dy', 'tilt', 's_start', 's_mid', 's_end']
+            self.update_element_positions()
+            data = {}
+            for c in columns:
+                if c == 'class':
+                    data[c] = [el.__class__.__name__ for el in self.sequence]
+                else:
+                    data[c] = [getattr(el, c) for el in self.sequence]
+            return pd.DataFrame(data=data)
+        else:
+            columns = ['id', 'class', 'l', 'dx', 'dy', 'tilt', 's_start', 's_mid', 's_end']
+            self.update_element_positions()
+            data = {}
+            for c in columns:
+                if c == 'class':
+                    data[c] = [el.__class__.__name__ for el in self.sequence] * n_turns
+                elif c in ['s', 's_start', 's_mid', 's_end']:
+                    base_s = np.array([getattr(el, c) for el in self.sequence])
+                    data[c] = np.hstack([base_s + i * self.totallen for i in range(n_turns)])
+                else:
+                    data[c] = [getattr(el, c) for el in self.sequence] * n_turns
+            df = pd.DataFrame(data=data)
+            assert len(df) == len(self.lattice.sequence) * n_turns
+            return df
 
     def insert_correctors(self, destroy_skew_quads: bool = True):
         """
@@ -141,7 +176,7 @@ class LatticeContainer:
         if new_start not in seq:
             raise Exception(f'Element ({new_start.id}) not in current lattice')
         elif seq[0] == new_start:
-            print(f'Lattice already starts with {new_start.id}')
+            logger.warning(f'Lattice already starts with {new_start.id}')
         elif len([el for el in seq if el == new_start]) > 1:
             raise Exception(
                 f'Too many element matches ({len([el for el in seq if el == new_start])}) to ({new_start.id})')
@@ -300,7 +335,7 @@ class LatticeContainer:
                         before: Element = None,
                         after: Element = None) -> LatticeContainer:
         """
-        Inserts element before or after another element
+        Inserts elements before or after another element
         :param elements: Elements to insert
         :param before: Insert before this element
         :param after: Insert after this element (if before is not specified)
@@ -322,7 +357,10 @@ class LatticeContainer:
                     seq_new.extend(elements)
             else:
                 seq_new.append(el)
-        logger.info(f'Inserted ({len(seq_new) - len(seq)}) markers')
+        if before:
+            logger.info(f'Inserted ({len(seq_new) - len(seq)}) elements before ({target.id})')
+        else:
+            logger.info(f'Inserted ({len(seq_new) - len(seq)}) elements after ({target.id})')
         self.lattice.sequence = seq_new
         return self
 
@@ -377,6 +415,11 @@ class LatticeContainer:
                                                     bpms=self.get_elements(Monitor))
         return ringrm.calculate()
 
+    def update(self):
+        """ Update box maps and positions """
+        self.lattice.update_transfer_maps()
+        self.update_element_positions()
+
     def update_element_positions(self):
         """
         Updates the s-values of all elements. Does not overwrite default ocelot 's' parameter - use 's_mid' instead
@@ -427,7 +470,47 @@ class LatticeContainer:
         tws1 = trace_z(self.lattice, tws0, [s])
         return tws1[0]
 
-    def twiss_model(self, bpm_names: List[str]):
+    def compute_bpm_tables(self, bpm_names: List[str, Monitor], active_only: bool = False):
+        """ Creates lookup tables for various BPM properties """
+        twiss_model = self.twiss_model(bpm_names)
+        if active_only:
+            bpms = [b for (b, t) in twiss_model if getattr(b, 'active', False)]
+        else:
+            bpms = [b for (b, t) in twiss_model]
+        bpm_names = [b.id for b in bpms]
+        for (b, t) in twiss_model:
+            b.tws = t
+        assert isinstance(self.bpm_optics, dict)
+        assert isinstance(self.bpm_phases, dict)
+        assert isinstance(self.bpm_phases['x'], dict)
+        assert isinstance(self.bpm_phases['y'], dict)
+
+        col_names = ['S', 'BX', 'BY', 'AX', 'AY', 'MUX', 'MUY']
+        col_attrs = ['s', 'beta_x', 'beta_y', 'alpha_x', 'alpha_y', 'mux', 'muy']
+        data = np.zeros((len(bpm_names), len(col_names)))
+        for i, b in enumerate(bpms):
+            for j, (c, cn) in enumerate(zip(col_names, col_attrs)):
+                data[i, j] = getattr(b.tws, cn)
+        table_optics = pd.DataFrame(index=bpm_names, columns=col_names, data=data)
+        assert isinstance(self.bpm_optics, dict)
+        self.bpm_optics['model'] = table_optics
+
+        data = np.zeros((len(bpm_names), len(bpm_names)))
+        for i, b in enumerate(bpms):
+            data[:, i] = b.tws.mux
+        for i, b in enumerate(bpms):
+            data[i, :] -= b.tws.mux
+
+        self.bpm_phases['x']['model'] = pd.DataFrame(index=bpm_names, columns=bpm_names, data=data)
+
+        data = np.zeros((len(bpm_names), len(bpm_names)))
+        for i, b in enumerate(bpms):
+            data[:, i] = b.tws.muy
+        for i, b in enumerate(bpms):
+            data[i, :] -= b.tws.muy
+        self.bpm_phases['y']['model'] = pd.DataFrame(index=bpm_names, columns=bpm_names, data=data)
+
+    def twiss_model(self, bpm_names: List[str, Monitor]) -> List[Tuple]:
         """
         Compiles twiss model - list of (bpm,twiss) tuples for all bpm names
         Adjusts phases if there is a wrap around the origin
@@ -439,16 +522,19 @@ class LatticeContainer:
         assert len(tws) == len(self.sequence)
         nux, nuy = tws[-1].mux, tws[-1].muy
 
-        start_name = bpm_names[0]
-        start_bpm = self.get_first(el_name=start_name, exact=True, singleton_only=True)
+        bpms = [
+            self.get_first(el_name=bpm_name, exact=True, singleton_only=True) if isinstance(bpm_name, str) else bpm_name
+            for bpm_name in bpm_names]
+
+        start_bpm = bpms[0]
         start_idx = last_idx = self.sequence.index(start_bpm)
 
         twiss_model = [(start_bpm, tws[start_idx])]
         wrapped_around = False  # indicates we have crossed origin
-        for bpm_name in bpm_names[1:]:
-            bpm = self.get_first(el_name=bpm_name, exact=True, singleton_only=True)
+        for bpm in bpms[1:]:
             idx = self.sequence.index(bpm)
             tw = tws[idx]
+            assert tw.s == bpm.s_end
             if idx > last_idx:
                 if wrapped_around:
                     tw.mux += nux
@@ -462,14 +548,14 @@ class LatticeContainer:
                     raise Exception(
                         f"Backwards ordering after wrap - {self.sequence[last_idx].id} -> {bpm.id} ({last_idx}->{idx})")
             else:
-                raise Exception('Should be unreachable')
+                raise Exception(f'{idx=} should be unreachable')
 
             twiss_model.append((bpm, tw))
             last_idx = idx
         assert util.strictly_increasing([t.mux for (b, t) in twiss_model])
         assert util.strictly_increasing([t.muy for (b, t) in twiss_model])
         assert len(twiss_model) == len(bpm_names)
-        assert bpm_names[0] == twiss_model[0][0].id
+        assert bpms[0] == twiss_model[0][0]
         return twiss_model
 
     def insert_extra_markers(self, spacing: float = 1.0):
