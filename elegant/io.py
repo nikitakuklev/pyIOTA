@@ -252,7 +252,10 @@ class SDDSTrack:
         # print(self.cdata)
         self.pdata = [np.array(sd.parameterData[i]) for i in range(len(sd.parameterName))]
         if len(self.cname) > 0:
-            self.pagecnt = self.cdata[0].shape[0]
+            if self.cdata is not None:
+                self.pagecnt = self.cdata[0].shape[0]
+            else:
+                self.pagecnt = 0
         else:
             self.pagecnt = self.pdata[0].shape[0]
         if as_df:
@@ -284,6 +287,9 @@ class SDDSTrack:
         n_pages_l = [len(data[i]) for i in range(n_cols)]
         assert len(np.unique(n_pages_l)) == 1
         n_pages = n_pages_l[0]
+
+        if n_pages == 0:
+            return None
 
         # Entries are particles - number varies per page
         n_entries = max([len(v) for v in data[0]])
