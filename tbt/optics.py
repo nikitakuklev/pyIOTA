@@ -451,6 +451,7 @@ class SVD:
         """
         Clean kick using SVD, reconstructing each BPM from specified number of components
         """
+        raise Exception
         families = families or ['H', 'V', 'S']
         assert kick.__class__.__name__ == 'Kick'  # assert isinstance(kick, Kick)
         for family in families:
@@ -470,7 +471,7 @@ class SVD:
         :param data:
         :param plane:
         :param use_kick_trim:
-        :return:
+        :return: U, S, V, vh
         """
         if data.__class__.__name__ == 'Kick':
             # isinstance(data, Kick):
