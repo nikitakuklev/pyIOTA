@@ -1,8 +1,9 @@
-import logging, time
+import logging
+import time
 from typing import Union, Tuple, List
 
 import numpy as np, scipy as sc
-import numba
+#import numba
 from numba import jit
 import numexpr as ne
 import scipy.integrate as sci
@@ -294,6 +295,15 @@ class NAFF:
             return results
         else:
             return [r[0] for r in results]
+
+    # Found in another implementation, but disagree on amplitude calc?
+    # # Predefined functions
+    # HANNING = lambda t: np.sin(np.pi * np.arange(t) / (t - 1)) ** 2  # hanning window filter
+    # FREQ = lambda t: np.arange(t * 1.0) / t  # norm. freq
+    # EXPO = lambda f, n: np.exp(-1j * 2 * np.pi * f * n)  # complex exponential
+    # NAFFfreq = lambda f, X, W: -1 * np.abs(np.sum(EXPO(f, np.arange(1, len(X) + 1)) * X * W))  # NAFF freq algorithm
+    # NAFFamp = lambda f, X: np.sum(np.real(EXPO(f, np.arange(len(X))) * X)) / len(X) + 1j * np.sum(
+    #     np.imag(EXPO(f, np.arange(len(X))) * X)) / len(X)  # NAFF amp algorithm
 
     def run_naff_v2(self, data: np.ndarray, data_trim: slice = None, xatol: float = 1e-8,
                     n_components: int = 2, full_data: bool = True, spacing: float = 1.0,
