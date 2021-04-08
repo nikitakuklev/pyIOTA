@@ -10,8 +10,9 @@ import pandas as pd
 import pyIOTA.iota.run2 as iota
 
 # special_keys = ['idx', 'kickv', 'kickh', 'state', 'custom']
-from ocelot import Twiss
-#from pyIOTA.tbt.naff import NAFF
+from ..lattice import LatticeContainer
+from ocelot import Twiss, Monitor
+# from pyIOTA.tbt.naff import NAFF
 from .naff import NAFF
 
 import pyIOTA.acnet.utils as acutils
@@ -362,7 +363,7 @@ class Kick:
                  df: pd.DataFrame,
                  kick_id: int = -1,
                  id_offset: int = 0,
-                 bpm_list: Optional[Iterable] = None,
+                 bpm_list: Optional[List] = None,
                  parent_sequence: Optional['KickSequence'] = None,
                  file_name: str = None,
                  trim: Tuple = None,
@@ -381,6 +382,8 @@ class Kick:
             if ck not in df.columns:
                 raise Exception(f'Missing critical dataframe column: ({ck})')
 
+        self.v2 = False
+
         self.df = df
         self.idx = kick_id
         self.idx_offset = id_offset
@@ -390,31 +393,45 @@ class Kick:
         self.ks = parent_sequence
         self.file_name = file_name
         self.matrix_cache = {}  # old way of caching BPM matrices
-        self.trim = self.default_trim = trim
+        self.trim = copy.copy(trim)
+        self.default_trim = copy.copy(trim)
         self.force_own_trim = False  # if True, all analysis method will use kick trim instead of their own
 
-        if not bpm_list:
+        if bpm_list is None:
             if iota_defaults:
                 bpm_list = set([k[:-1] for k in pyIOTA.iota.run2.BPMS.ALLA])
                 logger.info(f'BPM list not specified - deducing ({len(bpm_list)}) IOTA BPMs: ({bpm_list})')
             else:
                 bpm_list = set(
                     [k[:-1] for k in df.columns if k not in special_keys and k.endswith(('V', 'H', 'S', 'C'))])
-                print('WARN - deducing BPMs')
+                logger.warning('Deducing BPMs!')
                 logger.info(f'BPM list not specified - deducing ({len(bpm_list)}) BPMs: ({bpm_list})')
 
-        self.H = [i + "H" for i in bpm_list]
-        self.V = [i + "V" for i in bpm_list]
-        self.S = [i + "S" for i in bpm_list]
+        self.bpm_list_orig = list(copy.copy(bpm_list))
+        self.bpm_list = list(copy.copy(bpm_list))
+
+        self.H = [i + "H" for i in bpm_list if i + "H" in df.columns]
+        self.PX = [i + "PX" for i in bpm_list if i + "PX" in df.columns]
+        self.V = [i + "V" for i in bpm_list if i + "V" in df.columns]
+        self.PY = [i + "PY" for i in bpm_list if i + "PY" in df.columns]
+        self.S = [i + "S" for i in bpm_list if i + "S" in df.columns]
         self.ALL = []
         self.C = []  # Calculated
         self.CH = []
         self.CV = []
+        self.bpm_default_families = ['H', 'PX', 'V', 'PY', 'S']
         self.bpms_update()
 
-        self.bpm_families_active = {'H': self.H, 'V': self.V, 'S': self.S, 'A': self.ALL, 'C': self.C,
-                                    'CH': self.CH, 'CV': self.CV}
+        self.bpm_families_active = {'H': self.H, 'V': self.V, 'PX': self.PX, 'PY': self.PY,
+                                    'S': self.S,
+                                    'A': self.ALL,
+                                    'C': self.C, 'CH': self.CH, 'CV': self.CV}
         self.bpm_families_all = copy.deepcopy(self.bpm_families_active)
+
+        # Store original data
+        for f, bpms in self.bpm_families_active.items():
+            for i, b in enumerate(bpms):
+                self.set(b + self.Datatype.ORIG.value, self.col(b).copy())
 
         # Convenience attributes
         self.n_turns = self.get_turns()
@@ -424,6 +441,191 @@ class Kick:
         self.nux = None  # main tune
         self.nuy = None  # main tune
         self.fft_pwr = self.fft_freq = self.peaks = None
+
+        # v2
+        self.props: Dict[str, pd.DataFrame] = {}
+        self.svd: Dict[str, Tuple] = {}
+        self.tracks: Dict[str, Dict[str, pd.DataFrame]] = {}
+        self.roll_bpm: Optional[str] = None
+        self.box: Optional[LatticeContainer] = None
+
+    def upgrade(self, box: LatticeContainer):
+        """ Upgrade this kick to v2 """
+        if self.v2:
+            # pass
+            raise AttributeError('Already upgraded!')
+        self.box = box
+        self.svd = {}  # Stores SVD data
+        self.tracks = {'raw': {}, 'orig': {}}  # Stores matrix-format BPM data
+        self.props = {}
+        self.v2 = True
+
+        # Make sure bpms match
+        bpm_names = box.bpm_names
+        if bpm_names != self.bpm_list_orig:
+            raise Exception(f'BPM mismatch - ({bpm_names}) vs ({self.bpm_list_orig})')
+        for bpm_name in self.bpm_list_orig:
+            bpm = box.get_first(el_name=bpm_name, el_type=Monitor, exact=True)
+            bpm.active = True if bpm_name in self.bpm_list else False
+
+        bpms = box.bpms
+        active, disabled = [], []
+        for b in bpms:
+            if b.active:
+                active.append(b.id)
+            else:
+                disabled.append(b.id)
+        logger.info(f'Lattice sync - ({len(active)})({active}) active')
+        logger.info(f'({len(disabled)})({disabled}) disabled')
+
+        for f in self.bpm_families_active:
+            if len(self.bpm_families_active[f]) > 0:
+                df = pd.DataFrame(index=self.bpm_list)
+                self.props[f] = df
+
+        self.sync()
+
+        if np.any([np.any(v.isnull()) for v in self.tracks['raw'].values()]):
+            raise Exception(f'Null values found in data!')
+        if np.any([np.any(v.isnull()) for v in self.tracks['orig'].values()]):
+            raise Exception(f'Null values found in data!')
+
+        logger.info(f'Upgraded to v2 - ({len(self.tracks["orig"])})/({len(self.tracks["raw"])}) orig/raw frames')
+        logger.info(f'Sizes o: ({ {k: v.shape for k, v in self.tracks["orig"].items()} })')
+        logger.info(f'Sizes r: ({ {k: v.shape for k, v in self.tracks["raw"].items()} })')
+
+    def sync(self, to_v2: bool = True):
+        """ Syncs v1 and v2 data structures - used to keep matrices/dfs current """
+        assert hasattr(self, 'v2')
+        if to_v2:
+            families = self.bpm_default_families
+            for f in families:
+                if len(self.bpm_families_active[f]) == 0:
+                    continue
+                # Get original data
+                data = self.get_bpm_data(family=f,
+                                         data_type=self.Datatype.ORIG,
+                                         no_trim=True)
+                array_lengths = [len(v) for v in data.values()]
+                assert len(set(array_lengths)) == 1
+                assert len(data) == len(self.get_bpms(f))
+                ld = array_lengths[0]
+                track_data = np.zeros((len(data), ld))
+                index = list([k[:-len(f)] for k in data.keys()])
+                assert set(index) == set(self.bpm_list_orig)
+                for i, (k, v) in enumerate(data.items()):
+                    track_data[i, :] = v
+                df = pd.DataFrame(index=index, data=track_data)
+                df = df.reindex(index=self.bpm_list_orig)
+                assert len(df) == len(self.bpm_list_orig)
+                self.tracks['orig'][f] = df
+
+                self.v2_raw_from_orig(f)
+
+    def roll(self, bpm_name: str):
+        """ Rotate dataset and lattice to a new BPM """
+        assert bpm_name in self.bpm_list_orig and bpm_name in self.bpm_list
+        bpm = self.box.get_first(bpm_name, el_type=Monitor, exact=True)
+        idx_orig = self.bpm_list_orig.index(bpm_name)
+        idx = self.bpm_list.index(bpm_name)
+        logger.info(f'Rolling data to BPM: ({bpm_name}), {idx=}, {idx_orig=}')
+        if self.bpm_list[0] == bpm_name:
+            logger.warning(f'Kick already starts at ({bpm_name})')
+
+        # Rotate list
+        self.bpm_list = self.bpm_list[idx:] + self.bpm_list[:idx]
+        bpm_list_orig_rolled = self.bpm_list_orig[idx_orig:] + self.bpm_list_orig[:idx_orig]
+
+        # Rotate lattice
+        self.box.rotate_lattice(bpm)
+        self.box.update()
+
+        self.roll = 'bpm_name'
+
+        inactive_bpms = [b for b in self.bpm_list_orig if b not in self.bpm_list]
+
+        self.v2_drop_stale_tracks()
+
+        families = self.bpm_default_families
+        # Regenerate raw data in default order and roll
+        for f in families:
+            if len(self.bpm_families_active[f]) == 0:
+                continue
+            df_orig = self.tracks['orig'][f]
+            assert np.all(df_orig.index == self.bpm_list_orig)
+            data_rolled = self._roll_bpm_matrix(df_orig.values, idx_orig)
+            df = pd.DataFrame(index=bpm_list_orig_rolled, data=data_rolled[:, self.trim])
+            df.drop(index=inactive_bpms, inplace=True)
+            self.tracks['raw'][f] = df
+            assert len(df) == len(self.bpm_list)
+            assert np.all(df.index == self.bpm_list)
+            assert df.index[0] == bpm_name
+            if df.iloc[0, 0] != df_orig.loc[bpm_name, :].values[self.trim][0]:
+                raise ValueError(
+                    f'Error rolling ({f}): {df.iloc[0, 0:5]} != {df_orig.loc[bpm_name, :].values[self.trim][0:5]}')
+        rlen = self.tracks['raw'][families[0]].shape[1]
+        olen = self.tracks['orig'][families[0]].shape[1]
+
+        logger.info(f'Rolled to ({bpm_name}), orig length ({olen}), raw length ({rlen}),'
+                    f' ({len(self.bpm_list)})/({len(inactive_bpms)}) active/inactive bpms')
+
+    @property
+    def N(self):
+        """ Current number of turns in raw set """
+        return self.tracks['raw'][self.bpm_default_families[0]].shape[1]
+
+    @property
+    def NB(self):
+        """ Current number of enabled default family BPMs """
+        return len(self.bpm_list)
+
+    def v2_raw_from_orig(self, f):
+        """ Raw matrices from orig ones """
+        df_orig = self.tracks['orig'][f]
+        assert np.all(df_orig.index == self.bpm_list_orig)
+        inactive_bpms = [b for b in self.bpm_list_orig if b not in self.bpm_list]
+        df = pd.DataFrame(index=df_orig.index, data=df_orig.values[:, self.trim])
+        assert np.all(df.index == self.bpm_list_orig)
+        df.drop(index=inactive_bpms, inplace=True)
+        assert np.all(df.index == self.bpm_list)
+        self.tracks['raw'][f] = df
+        return df
+
+    def v2_drop_stale_tracks(self, extras_to_save: List = None):
+        """ Dump all data except orig """
+        extras_to_save = extras_to_save or []
+        to_save = set(['orig'] + extras_to_save)
+        keys_track_other = set(self.tracks.keys()) - to_save
+        logger.info(f'Wiping tracks: ({keys_track_other})')
+        for k in keys_track_other:
+            del self.tracks[k]
+        if 'raw' not in to_save:
+            self.tracks['raw'] = {}
+
+    def v2_drop_bpms(self, bpms):
+        if len(bpms) == 0:
+            raise Exception('Empty bpm update?')
+        logger.info(f'Removing bpm ({bpms})')
+        self.v2_drop_stale_tracks(extras_to_save=['raw'])
+
+        for k, df in self.tracks['orig'].items():
+            assert np.all(df.index == self.bpm_list_orig)
+
+        for k, df in self.tracks['raw'].items():
+            for b in bpms:
+                if b in df.index:
+                    df.drop(index=b, inplace=True)
+            assert np.all(df.index == self.bpm_list)
+
+        for k, df in self.props.items():
+            for b in bpms:
+                if b in df.index:
+                    df.drop(index=bpms, inplace=True)
+            assert np.all(df.index == self.bpm_list)
+        self.svd = {}
+
+    def _roll_bpm_matrix(self, mat, idx):
+        return np.vstack([mat[idx:, :-1], mat[:idx, 1:]])
 
     def __getitem__(self, key):
         return self.get(key)
@@ -635,6 +837,10 @@ class Kick:
         assert columns is None or isinstance(columns, list)
         assert bpms is None or isinstance(bpms, list)
         assert columns or bpms or family
+
+        if columns is not None and bpms is not None:
+            raise Exception(f'Both columns and bpms specified - this is deprecated')
+
         if columns is None:
             columns = self.get_column_names(bpms, family, data_type)
             if not columns:
@@ -762,16 +968,36 @@ class Kick:
             else:
                 raise Exception
         if len(bpms) == 0:
-            if not soft_fail: raise Exception(f'No BPMs found for families: ({family})')
+            if not soft_fail:
+                raise Exception(f'No BPMs found for families: ({family})')
         # Order-preserving unique list conversion
         seen = set()
         bpms = [x for x in bpms if not (x in seen or seen.add(x))]
         return bpms
 
     def bpms_update(self):
+        """ Process BPM list update """
         self.ALL = self.H + self.V + self.S
+        if self.v2:
+            self.ALL = self.H + self.V + self.S + self.PX + self.PY
+            bpm_sets = {}
+            for sp in self.bpm_default_families:
+                bpm_sets[sp] = {b[:-len(sp)] for b in self.bpm_families_active[sp]}
+            nonzero_sets = [v for k, v in bpm_sets.items() if len(v) > 0]
+            assert all(nonzero_sets[0] == nz for nz in nonzero_sets)
+            assert len(self.bpm_list) >= len(nonzero_sets[0])  # only removals supported
+            assert not nonzero_sets[0] - set(self.bpm_list)
+            diff = set(self.bpm_list) - nonzero_sets[0]
+            for b in diff:
+                self.bpm_list.remove(b)
+                bpm = self.box.get_first(el_name=b, el_type=Monitor, exact=True)
+                bpm.active = False
+            logger.info(f'BPM update - removed ({diff}), remaining ({self.bpm_list})')
+            self.v2_drop_bpms(diff)
 
     def bpms_add(self, bpms: List, family: str = 'C'):
+        """ Add bpm id to an active family - typically implies it already has data """
+        raise Exception  # temp disable
         for b in bpms:
             fam = family or 'C'
             fam_list = self.bpm_families_active[fam]
@@ -781,26 +1007,29 @@ class Kick:
             fam_list = self.bpm_families_all[fam]
             if b not in fam_list:
                 fam_list.append(b)
+        self.bpms_update()
 
     def bpms_disable(self, bpms: List, plane: str = 'A'):
+        """ Disable BPM, remove from active list - it will not be used in any future calcs """
         # Old signature fix
         if isinstance(bpms, str):
             bpms = [bpms]
         for bpm in bpms:
             if plane == 'A':
-                n_removed = 0
-                for sp in ['H', 'V', 'S']:
+                planes_missing = []
+                for sp in self.bpm_default_families:
                     bpm_list = self.bpm_families_active[sp]
-                    if bpm + sp in bpm_list:
-                        bpm_list.remove(bpm + sp)
-                        n_removed += 1
-                if n_removed not in [0, 3]:
-                    raise Exception(f'BPM ({bpm}) only got removed from ({n_removed}) lists, not 3 or 0')
+                    if len(bpm_list) > 0:
+                        if bpm + sp in bpm_list:
+                            bpm_list.remove(bpm + sp)
+                        else:
+                            planes_missing.append(sp)
+                if planes_missing:
+                    raise Exception(f'BPM ({bpm}) not active in planes ({planes_missing})')
                 for sp in ['C']:
                     bpm_list = self.bpm_families_active[sp]
                     if bpm + sp in bpm_list:
                         bpm_list.remove(bpm + sp)
-                self.bpms_update()
             elif plane == 'C':
                 sp = plane
                 bpm_list = self.bpm_families_active[sp]
@@ -1056,6 +1285,60 @@ class Kick:
         return len(self.col(bpm))
 
     ### Physics starts here
+
+    def add_noise(self, families, noise_amp, output_key='raw_noised'):
+        """ For simulation studies, add fake gaussian noise """
+        families = families or self.bpm_default_families
+        if output_key not in self.tracks:
+            self.tracks[output_key] = {}
+        for family in families:
+            df = self.tracks['raw'][family]
+            v = df.values.copy()
+            v += np.random.randn(*v.shape) * noise_amp
+            if family in self.tracks[output_key]:
+                logger.warning(f'Key ({family}) in dict ({output_key}) already exists, overwriting')
+            self.tracks[output_key][family] = pd.DataFrame(index=df.index, data=v)
+            assert np.all(self.tracks[output_key][family].index == df.index)
+
+    def clean_svd(self,
+                  n_comp: int = 5,
+                  families: List[str] = None,
+                  key: str = 'raw',
+                  key_out: str = 'clean'
+                  ):
+        """
+        Clean kick using SVD, reconstructing each BPM from specified number of components
+        """
+        families = families or self.bpm_default_families
+        for family in families:
+            if len(self.bpm_families_active[family]) == 0:
+                continue
+            # matrix = self.get_bpm_data(family=family, return_type='matrix')
+            df = self.tracks[key][family]
+            matrix = df.values
+            matrix = matrix - np.mean(matrix, axis=1)[:, np.newaxis]
+            U, S, vh = np.linalg.svd(matrix, full_matrices=False)
+            V = vh.T  # transpose it back to conventional U @ S @ V.T
+            self.svd[family] = (U, S, vh, np.diag(S) @ vh)
+
+            # Check dominance
+            if not np.all(np.max(np.abs(U), axis=0) < 0.95):
+                raise ValueError(f'Dominance detected: {np.max(np.abs(U), axis=0)}')
+
+            # Reconstruct signal
+            signal = U[:, :n_comp] @ np.diag(S[:n_comp]) @ vh[:n_comp, :]
+            assert signal.shape == matrix.shape
+
+            self.props[family]['svd_noise'] = (signal - matrix).std(axis=1)
+            self.props[family]['clean_mean'] = signal.mean(axis=1)
+            self.props[family]['clean_std'] = signal.std(axis=1)
+
+            if key_out not in self.tracks:
+                self.tracks[key_out] = {}
+            self.tracks[key_out][family] = pd.DataFrame(index=df.index, data=signal)
+
+            # for i, b in enumerate(df.index):
+            #    self.set(b + family + self.Datatype.RAW.value, signal[i, :].copy())
 
     def calculate_tune(self,
                        naff: NAFF,
