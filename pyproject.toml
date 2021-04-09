@@ -1,6 +1,8 @@
-[build-system]
-requires = ["flit_core >=2,<4"]
-build-backend = "flit_core.buildapi"
+# Editable pip installs are borked...fall back to setup.py...yay...
+#[build-system]
+#requires = ["setuptools"]
+#requires = ["flit_core >=2,<4"]
+#build-backend = "flit_core.buildapi"
 
 [tool.flit.metadata]
 module = "pyiota"
