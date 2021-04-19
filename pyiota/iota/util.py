@@ -3,9 +3,10 @@ from typing import Callable
 import ocelot
 from ocelot.cpbd.elements import *
 
-import pyIOTA.lattice as lat
-import pyIOTA.iota
-import pyIOTA.sixdsim as sixdsim
+from .. import lattice as lat
+from .. import sixdsim
+import pyiota.iota
+
 
 
 def load_iota(method, file_name: str = None):
@@ -21,7 +22,7 @@ def load_iota(method, file_name: str = None):
                                monitors=monitors, info=info, variables=variables, silent=False, method=method)
     box.correctors = [c for c in box.correctors if
                       not c.end_turn and not isinstance(c.ref_el, Drift) and not 'M' in c.id]
-    box.monitors = [el for el in box.monitors if any([el.id in bpm for bpm in pyIOTA.iota.run2.BPMS.ALL])]
+    box.monitors = [el for el in box.monitors if any([el.id in bpm for bpm in pyiota.iota.run2.BPMS.ALL])]
     box.pc = 100.0
     box.remove_elements(box.get_all(CouplerKick))
     box.transmute_elements(box.get_all(Cavity), Drift)

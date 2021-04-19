@@ -5,17 +5,16 @@ You will notice a huge number of almost-duplicates - this is for performance rea
 import time
 import logging
 import re
+import copy
 from pathlib import PurePath
 from typing import List, Type
 
-# import ocelot
-from ocelot import Particle, Monitor, ParticleArray, Navigator, MagneticLattice,\
-    merger, Element, SecondTM, Marker, TransferMap
 import numpy as np
-from ocelot import Track_info, merge_maps, SecondOrderMult
-from pyIOTA.lattice import LatticeContainer
-import copy
 import pandas as pd
+
+from ..lattice import LatticeContainer
+from ocelot import Particle, Monitor, ParticleArray, Navigator, MagneticLattice,\
+    merger, Element, SecondTM, Marker, TransferMap, Track_info, merge_maps, SecondOrderMult
 
 logger = logging.getLogger(__name__)
 

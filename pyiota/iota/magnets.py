@@ -1,6 +1,6 @@
 import numpy as np
 import scipy.constants
-from pyIOTA.sixdsim.io import KnobVariable
+from ..sixdsim.io import KnobVariable
 
 
 def calc_octupole_strengths_run1(current: float, energy: float):

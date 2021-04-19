@@ -8,7 +8,7 @@ from scipy import integrate
 from typing import Dict
 from ocelot import Twiss, MagneticLattice, Edge, twiss
 from ocelot.cpbd.elements import SBend, RBend, Bend, Quadrupole, Multipole, Sextupole
-from pyIOTA.tbt import NAFF
+from ..tbt import NAFF
 
 """
 Improved chromaticity calculations

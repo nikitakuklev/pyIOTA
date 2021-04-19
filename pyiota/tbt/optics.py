@@ -4,12 +4,12 @@ import logging
 from typing import Tuple, List
 
 import numpy as np
-from pyIOTA.tbt.tbt import Kick
+from .tbt import Kick
 from numba import jit
 from scipy.optimize import curve_fit
 from scipy.signal import hilbert
 
-import pyIOTA.math as pmath
+from .. import math as pmath
 from sklearn import decomposition
 
 logger = logging.getLogger(__name__)
@@ -268,7 +268,6 @@ class Phase:
         """
         phases_rel = phases.copy()
         phases_cum = np.zeros_like(phases)
-        import pyIOTA.math as pmath
         phases_rel = pmath.addsubtract_wrap(phases_rel, -phases_rel[0], -np.pi, np.pi)
         for i in range(1, len(phases)):
             phases_cum[i] = phases_cum[i - 1] + pmath.forward_distance(phases_rel[i - 1], phases_rel[i], -np.pi, np.pi)

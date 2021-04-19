@@ -11,8 +11,8 @@ import numpy as np
 
 from ocelot import Monitor, Vcor, Hcor, Solenoid, SBend, Cavity, Edge,\
     Quadrupole, Drift, Element, Sextupole, Multipole
-from pyIOTA.acnet.frontends import DoubleDevice, DoubleDeviceSet
-import pyIOTA.iota.run2
+from ..acnet.frontends import DoubleDevice, DoubleDeviceSet
+from ..iota import run2 as iota, magnets as iotamags
 
 logger = logging.getLogger(__name__)
 
@@ -512,14 +512,14 @@ class Knob(AbstractKnob):
 
         if split_types:
             skews = [(DoubleDevice(d.acnet_var), d.value) for d in self.vars.values() if d.acnet_var in
-                     pyIOTA.iota.run2.SKEWQUADS.ALL_CURRENTS]
+                     iota.SKEWQUADS.ALL_CURRENTS]
             corrV = [(DoubleDevice(d.acnet_var), d.value) for d in self.vars.values() if d.acnet_var in
-                     pyIOTA.iota.run2.CORRECTORS.VIRTUAL_V]
+                     iota.CORRECTORS.VIRTUAL_V]
             corrH = [(DoubleDevice(d.acnet_var), d.value) for d in self.vars.values() if d.acnet_var in
-                     pyIOTA.iota.run2.CORRECTORS.VIRTUAL_H]
+                     iota.CORRECTORS.VIRTUAL_H]
             other = [(DoubleDevice(d.acnet_var), d.value) for d in self.vars.values()
-                     if d.acnet_var not in pyIOTA.iota.run2.SKEWQUADS.ALL_CURRENTS
-                     and d.acnet_var not in pyIOTA.iota.run2.CORRECTORS.COMBINED_VIRTUAL]
+                     if d.acnet_var not in iota.SKEWQUADS.ALL_CURRENTS
+                     and d.acnet_var not in iota.CORRECTORS.COMBINED_VIRTUAL]
             # random.shuffle(dlist3)
 
             if len(other) >= 2:
@@ -557,10 +557,10 @@ class Knob(AbstractKnob):
                 # devs2 = [d.acnet_var for d in self.vars.values() if
                 #          d.acnet_var in pyIOTA.iota.run2.CORRECTORS.VIRTUAL_V]
                 devs1 = [d.acnet_var for d in self.vars.values() if
-                         d.acnet_var in pyIOTA.iota.run2.CORRECTORS.COMBINED_COILS_I]
+                         d.acnet_var in iota.CORRECTORS.COMBINED_COILS_I]
                 devs2 = []
                 devs3 = [d.acnet_var for d in self.vars.values() if
-                         d.acnet_var in pyIOTA.iota.run2.SKEWQUADS.ALL_CURRENTS]
+                         d.acnet_var in iota.SKEWQUADS.ALL_CURRENTS]
                 dev_temp = devs1 + devs2 + devs3
                 devs4 = [d.acnet_var for d in self.vars.values() if d.acnet_var not in dev_temp]
                 devs = devs1 + devs2 + devs3 + devs4
@@ -568,10 +568,10 @@ class Knob(AbstractKnob):
                 acnet_dict = {d.acnet_var: d for d in self.vars.values()}
                 ds.set([acnet_dict[d].value for d in devs], verbose=verbose, split=split)
             else:
-                devs_h = pyIOTA.iota.CORRECTORS.VIRTUAL_H
-                devs_v = pyIOTA.iota.CORRECTORS.VIRTUAL_V
-                devs_s = pyIOTA.iota.run2.SKEWQUADS.ALL_CURRENTS
-                coils = pyIOTA.iota.run2.CORRECTORS.COMBINED_COILS_I
+                devs_h = iota.CORRECTORS.VIRTUAL_H
+                devs_v = iota.CORRECTORS.VIRTUAL_V
+                devs_s = iota.SKEWQUADS.ALL_CURRENTS
+                coils = iota.CORRECTORS.COMBINED_COILS_I
 
                 def grouper(n, iterable):
                     it = iter(iterable)
@@ -589,7 +589,7 @@ class Knob(AbstractKnob):
                     ver = devs_to_set.get(v, None)
                     skew = devs_to_set.get(s, None)
                     if any([hor, ver, skew]):
-                        currents = pyIOTA.iota.magnets.get_combfun_coil_currents(ch=hor, cv=ver, skew=skew)
+                        currents = iotamags.get_combfun_coil_currents(ch=hor, cv=ver, skew=skew)
                         if hor: del devs_to_set[h]
                         if ver: del devs_to_set[v]
                         if skew: del devs_to_set[s]
@@ -607,10 +607,10 @@ class Knob(AbstractKnob):
         :param copy: Whether to return a copy of the knob
         :return:
         """
-        devs_h = pyIOTA.iota.CORRECTORS.VIRTUAL_H
-        devs_v = pyIOTA.iota.CORRECTORS.VIRTUAL_V
-        devs_s = pyIOTA.iota.run2.SKEWQUADS.ALL_CURRENTS
-        coils = pyIOTA.iota.run2.CORRECTORS.COMBINED_COILS_I
+        devs_h = iota.CORRECTORS.VIRTUAL_H
+        devs_v = iota.CORRECTORS.VIRTUAL_V
+        devs_s = iota.SKEWQUADS.ALL_CURRENTS
+        coils = iota.CORRECTORS.COMBINED_COILS_I
         #initial_len = len(self.vars)
 
         def grouper(n, iterable):
@@ -629,7 +629,7 @@ class Knob(AbstractKnob):
             ver = devs_to_set.get(v, None)
             skew = devs_to_set.get(s, None)
             if any([hor, ver, skew]):
-                currents = pyIOTA.iota.magnets.get_combfun_coil_currents(ch=hor, cv=ver, skew=skew)
+                currents = iotamags.get_combfun_coil_currents(ch=hor, cv=ver, skew=skew)
                 if hor: del devs_to_set[h]
                 if ver: del devs_to_set[v]
                 if skew: del devs_to_set[s]

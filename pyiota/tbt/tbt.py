@@ -7,7 +7,8 @@ from typing import Union, Callable, Dict, List, Iterable, Tuple, Optional, Any, 
 
 import numpy as np
 import pandas as pd
-import pyIOTA.iota.run2 as iota
+from ..iota import run2 as iota
+from ..acnet import utils as acutils
 
 # special_keys = ['idx', 'kickv', 'kickh', 'state', 'custom']
 from ..lattice import LatticeContainer
@@ -15,7 +16,7 @@ from ocelot import Twiss, Monitor
 # from pyIOTA.tbt.naff import NAFF
 from .naff import NAFF
 
-import pyIOTA.acnet.utils as acutils
+
 
 logger = logging.getLogger(__name__)
 
@@ -311,8 +312,8 @@ class SimKick:
     def calculate_invariants(self, beta_x, alpha_x, beta_y, alpha_y,
                              i1_str=0.0,
                              data_trim: slice = None):
-        from pyIOTA.tbt import Coordinates
-        from pyIOTA.tbt import Invariants
+        from .optics import Coordinates
+        from .optics import Invariants
         assert self.has_track
         data_trim = data_trim or np.s_[:]
         data = self.df.iloc[0, self.df.columns.get_loc('track')].df
@@ -399,7 +400,7 @@ class Kick:
 
         if bpm_list is None:
             if iota_defaults:
-                bpm_list = set([k[:-1] for k in pyIOTA.iota.run2.BPMS.ALLA])
+                bpm_list = set([k[:-1] for k in iota.BPMS.ALLA])
                 logger.info(f'BPM list not specified - deducing ({len(bpm_list)}) IOTA BPMs: ({bpm_list})')
             else:
                 bpm_list = set(
@@ -1253,31 +1254,31 @@ class Kick:
 
     def get_optics(self) -> Dict[str, float]:
         """ Gets all relevant optics settings """
-        quads = [q + '.SETTING' for q in pyIOTA.iota.QUADS.ALL_CURRENTS]
-        squads = [q + '.SETTING' for q in pyIOTA.iota.SKEWQUADS.ALL_CURRENTS]
+        quads = [q + '.SETTING' for q in iota.QUADS.ALL_CURRENTS]
+        squads = [q + '.SETTING' for q in iota.SKEWQUADS.ALL_CURRENTS]
         return {k: self.state(k) for k in quads + squads}
 
     def get_correctors(self, include_physical=False) -> Dict[str, float]:
         """ Gets all available corrector settings """
         if include_physical:
-            elements = [q + '.SETTING' for q in pyIOTA.iota.CORRECTORS.ALL]
+            elements = [q + '.SETTING' for q in iota.CORRECTORS.ALL]
         else:
-            elements = [q + '.SETTING' for q in pyIOTA.iota.CORRECTORS.ALL_VIRTUAL]
+            elements = [q + '.SETTING' for q in iota.CORRECTORS.ALL_VIRTUAL]
         return {k: self.state(k) for k in elements}
 
     def get_quadrupoles(self) -> Dict[str, float]:
         """ Gets quarupole settings """
-        elements = [q + '.SETTING' for q in pyIOTA.iota.QUADS.ALL_CURRENTS]
+        elements = [q + '.SETTING' for q in iota.QUADS.ALL_CURRENTS]
         return {k: self.state(k) for k in elements}
 
     def get_skewquads(self) -> Dict[str, float]:
         """ Gets quarupole settings """
-        elements = [q + '.SETTING' for q in pyIOTA.iota.SKEWQUADS.ALL_CURRENTS]
+        elements = [q + '.SETTING' for q in iota.SKEWQUADS.ALL_CURRENTS]
         return {k: self.state(k) for k in elements}
 
     def get_sextupoles(self) -> Dict[str, float]:
         """ Gets sextupole settings """
-        elements = [q + '.SETTING' for q in pyIOTA.iota.SEXTUPOLES.ALL_CURRENTS]
+        elements = [q + '.SETTING' for q in iota.SEXTUPOLES.ALL_CURRENTS]
         return {k: self.state(k) for k in elements}
 
     def get_turns(self) -> int:
