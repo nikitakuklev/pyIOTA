@@ -1,4 +1,7 @@
 import logging
+import warnings
+
+import math
 import time
 from typing import Union, Tuple, List
 
@@ -108,7 +111,8 @@ class NAFF:
             window_power: int = None,
             pad_zeros_power: int = None,
             output_trim: slice = None,
-            data_trim: slice = None) -> Tuple[np.ndarray, np.ndarray]:
+            data_trim: slice = None,
+            amplitude: bool = True) -> Tuple[np.ndarray, np.ndarray]:
         """
         It is me, your personal FFT. Really...just FFT, so I don't have to rewrite same thing 10 times.
 
@@ -145,8 +149,11 @@ class NAFF:
         else:
             len_padded = n_turns
 
-        #fft_power = np.abs(np.fft.fft(data_centered, n=len_padded)) ** 2 / (n_turns * n_turns)
-        fft_power = np.abs(np.fft.fft(data_centered, n=len_padded)) / (n_turns * n_turns)
+        if amplitude:
+            #fft_power = np.abs(np.fft.fft(data_centered, n=len_padded)) ** 2 / (n_turns * n_turns)
+            fft_power = np.abs(np.fft.fft(data_centered, n=len_padded)) / n_turns#(n_turns * n_turns)
+        else:
+            fft_power = np.fft.fft(data_centered, n=len_padded) / n_turns
         fft_freq = np.fft.fftfreq(len_padded, d=spacing)
         # Keep half
         fft_power = fft_power[fft_freq >= 0]
@@ -157,6 +164,7 @@ class NAFF:
             fft_freq = fft_freq[output_trim]
 
         return fft_freq, fft_power
+
 
     def fft_hanning_peaks(self, data: np.ndarray, window_power: int = None, just_do_fft: bool = False,
                           search_peaks: bool = False):
@@ -239,6 +247,8 @@ class NAFF:
         :param full_data: Return debug and other information in addition to tunes
         :return:
         """
+        warnings.warn("This method is deprecated - use v2!")
+
         data_trim = data_trim or self.data_trim
         if data_trim:
             if data_trim.stop is not None and data_trim.stop > len(data):
@@ -307,7 +317,8 @@ class NAFF:
 
     def run_naff_v2(self, data: np.ndarray, data_trim: slice = None, xatol: float = 1e-8,
                     n_components: int = 2, full_data: bool = True, spacing: float = 1.0,
-                    perf_mode: bool = False, freq_trim: tuple = None):
+                    perf_mode: bool = False, freq_trim: tuple = None,
+                    orthogonal: bool = True):
         """
         Numeric analysis of fundamental frequencies
         Iterative method that maximizes inner product of data and oscillatory signal, finding best frequencies
@@ -321,6 +332,7 @@ class NAFF:
         :param perf_mode: Enables certain optimizations and shortcuts to maximize performance
         :return:
         """
+        assert data.dtype == np.float64
         # Preprocessing
         sp = spacing
         data_trim = data_trim or self.data_trim
@@ -329,20 +341,25 @@ class NAFF:
                 raise Exception(f"Trim end ({data_trim.stop}) exceeds available data length ({len(data)})")
             data = data[data_trim]
         data = data - np.mean(data)  # NOT INPLACE, VERY IMPORTANT
-        data = data.astype(complex)
+        data = data.astype(np.complex128)
         n_turns = len(data)
         window = self.window(n_turns, self.window_power)
 
         # Internal functions
 
         def get_top_freq(signal: np.ndarray):
+            """ Get top FFT bin frequency """
+            # Cut fft to positive freqs, since we should only have real signal inputs
+
             if self.fft_pad_zeros_power is not None:
                 len_padded = 2 ** self.fft_pad_zeros_power
-                fft_power = np.fft.rfft(signal, n=len_padded)
-                fft_freq = np.fft.rfftfreq(len_padded, d=spacing)
+                len_real = math.floor(len_padded / 2 + 1)
+                fft_power = np.abs(np.fft.fft(signal, n=len_padded))[:len_real]
+                fft_freq = np.fft.fftfreq(len_padded, d=spacing)[:len_real]
             else:
-                fft_power = np.fft.rfft(signal)
-                fft_freq = np.fft.rfftfreq(len(signal), d=spacing)
+                len_real = math.floor(len(signal) / 2 + 1)
+                fft_power = np.abs(np.fft.fft(signal))[:len_real]
+                fft_freq = np.fft.fftfreq(len(signal), d=spacing)[:len_real]
             if freq_trim is not None:
                 mask = np.argwhere((fft_freq > freq_trim[0]) & (fft_freq < freq_trim[1])).flatten()
                 assert np.any(mask)
@@ -366,30 +383,45 @@ class NAFF:
                 Ai += projections[j] * np.exp(1.0j * 2 * np.pi * tunes[j] * np.arange(n_turns))
             return np.sum(signal * np.conjugate(Ai) * window) / np.sum(Ai * np.conjugate(Ai) * window)
 
-        def remove_frequencies(signal, tunes, normalized_amplitudes, i, window):
-            projections = np.zeros(i + 1, dtype=np.complex128)
-            normalized_amplitudes.append(projections)  # i.e. projections = normalized_amplitudes[i]
-            fc = np.exp(1.0j * 2 * np.pi * tunes[i] * np.arange(n_turns))
+        def remove_frequencies(signal, tunes, normalized_amplitudes, i, window, orthogonal=True):
+            """ Remove previous frequencies from signal """
+            if orthogonal:
+                projections = np.zeros(i + 1, dtype=np.complex128)
+                normalized_amplitudes.append(projections)  # i.e. projections = normalized_amplitudes[i]
+                fc = np.exp(1.0j * 2 * np.pi * tunes[i] * np.arange(n_turns))
 
-            # First, compute the frequency correlations
-            for j in range(0, i):
-                Pij = freq_projection(fc, tunes, normalized_amplitudes[j], j + 1, window)
-                for k in range(0, j + 1):
-                    normalized_amplitudes[i][k] -= Pij * normalized_amplitudes[j][k]
+                # First, compute the frequency correlations
+                for j in range(0, i):
+                    Pij = freq_projection(fc, tunes, normalized_amplitudes[j], j + 1, window)
+                    for k in range(0, j + 1):
+                        normalized_amplitudes[i][k] -= Pij * normalized_amplitudes[j][k]
 
-            # Self projection is unity
-            normalized_amplitudes[i][i] = 1.0
+                # Self projection is unity
+                normalized_amplitudes[i][i] = 1.0
 
-            # Scale frequency amplitudes by actual signal factor, except last (self) one
-            freq_amp = signal_projection(signal, tunes, projections, i + 1, window)
-            for k in range(0, i + 1):
-                normalized_amplitudes[i][k] *= freq_amp
+                # Scale frequency amplitudes by actual signal factor, except last (self) one
+                freq_amp = signal_projection(signal, tunes, projections, i + 1, window)
+                for k in range(0, i + 1):
+                    normalized_amplitudes[i][k] *= freq_amp
 
-            # Subtract out scaled frequencies
-            for j in range(0, i + 1):
-                signal -= normalized_amplitudes[i][j] * np.exp(1.0j * 2 * np.pi * tunes[j] * np.arange(n_turns))
+                # Subtract out scaled frequencies
+                for j in range(0, i + 1):
+                    signal -= normalized_amplitudes[i][j] * np.exp(1.0j * 2 * np.pi * tunes[j] * np.arange(n_turns))
 
-            return freq_amp
+                return freq_amp
+            else:
+                # Subtract latest tune
+                # For compatibility, add blank objects
+                projections = np.zeros(i + 1, dtype=np.complex128)
+                normalized_amplitudes.append(projections)
+                fc = np.exp(1.0j * 2 * np.pi * tunes[i] * np.arange(n_turns))
+                fcn = np.exp(-1.0j * 2 * np.pi * tunes[i] * np.arange(n_turns))
+                #  Note Ai * cAi = np.sum([1, 1, ...]) = n_turns, if no window
+                #freq_amp = np.sum(fcn * signal * window) / np.sum(fc * np.conjugate(fc) * window)
+                freq_amp = np.sum(fcn * signal) / n_turns
+                signal -= freq_amp * fc
+
+                return freq_amp
 
         f = lambda *args: -1 * get_amplitude(*args)
 
@@ -427,17 +459,20 @@ class NAFF:
             # Remove frequencies
             if not perf_mode:
                 data_original = data.copy()
-            amplitude = remove_frequencies(data, tunes, normalized_amplitudes, i, window)
-            amplitude_neg = remove_frequencies(data, tunes_neg, normalized_amplitudes_neg, i, window)
+            amplitude = remove_frequencies(data, tunes, normalized_amplitudes, i, window, orthogonal)
+            amplitude_neg = remove_frequencies(data, tunes_neg, normalized_amplitudes_neg, i, window, orthogonal)
 
             if perf_mode:
                 results.append({'tune': tune / sp})
             else:
                 results.append({'tune': tune / sp,
                                 'tunes': (tune0 / sp, tune / sp, tune_neg / sp),
-                                'namps': (normalized_amplitudes.copy(), normalized_amplitudes_neg.copy()),
-                                'amps': (amplitude, amplitude_neg),
-                                'absamps': (np.abs(amplitude), np.abs(amplitude_neg)),
+                                'namps': normalized_amplitudes.copy(),
+                                'namps_neg': normalized_amplitudes_neg.copy(),
+                                'amps': amplitude,
+                                'amps_neg': amplitude_neg,
+                                'absamps': np.abs(amplitude),
+                                'absamps_neg': np.abs(amplitude_neg),
                                 'fit': (res, res2),
                                 'signal': data_original})
             self.naff_runtimes.append(time.perf_counter() - tic)
@@ -505,6 +540,8 @@ class NAFF:
         :param magnitude_only:
         :return:
         """
+        warnings.warn("This method is known to produce slightly wrong output - use v2!")
+
         window_order = window_order or self.window_power
 
         single_freq_mode = False
@@ -635,14 +672,14 @@ class NAFF:
 
         if isinstance(frequencies, float) or isinstance(frequencies, int):
             # Single freq mode
-            # correlation = np.sum(dataw * np.exp(-1.0j * 2 * np.pi * frequencies * i_line)) / N
-            pi = np.pi
-            correlation = ne.evaluate("sum(dataw * exp(-1.0j * 2 * pi * frequencies * i_line))")
+            correlation = np.sum(dataw * np.exp(-2.0j * np.pi * frequencies * i_line)) / N
+            #pi = np.pi
+            #correlation = ne.evaluate("sum(dataw * exp(-2.0j * pi * frequencies * i_line))")
             return np.abs(correlation), np.real(correlation), np.imag(correlation)
         else:
             integral = []
             for tune in frequencies:
-                correlation = np.sum(dataw * np.exp(-1.0j * 2 * np.pi * tune * i_line)) / N
+                correlation = np.sum(dataw * np.exp(-2.0j * np.pi * tune * i_line)) / N
                 integral.append((np.abs(correlation), np.real(correlation), np.imag(correlation)))
             if magnitude_only:
                 return np.array(integral)[:, 0]
