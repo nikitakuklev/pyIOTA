@@ -217,6 +217,7 @@ class Coordinates:
     @staticmethod
     def slopes_to_momenta(xp, yp, delta):
         """ From elegant - convert (x, x') to canonical (x, px) """
+        # ref - LS-356
         denom = np.sqrt(1 + xp ** 2 + yp ** 2)
         px = (1 + delta) * xp / denom
         py = (1 + delta) * yp / denom
@@ -224,6 +225,7 @@ class Coordinates:
 
     @staticmethod
     def slopes_to_canonical(x, xp, y, yp, cdt, delta):
+        """ Same as above """
         factor = (1+delta)/np.sqrt(1+xp**2+yp**2)
         px=xp*factor
         py=yp*factor
@@ -231,6 +233,8 @@ class Coordinates:
 
     @staticmethod
     def canonical_to_slopes(x, px, y, py, cdt, delta):
+        """ Convert canonical momenta to slopes """
+        # LS-356
         factor = 1/np.sqrt((1+delta**2) - px**2 - py**2)
         xp = px*factor
         yp = py*factor
