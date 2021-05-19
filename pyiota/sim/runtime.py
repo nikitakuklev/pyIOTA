@@ -6,7 +6,6 @@ from pathlib import PurePath
 import pandas as pd
 
 
-
 def slurm_available():
     return which('srun') is not None
 
@@ -104,7 +103,7 @@ class DaskClient:
 
     def __init__(self, address: str = None, autorestart: bool = False):
         from distributed import Client
-        import pyIOTA.util.config as cfg
+        from ..util import config as cfg
         address = address or cfg.DASK_SCHEDULER_ADDRESS
         if address in cfg.CLIENT_CACHE:
             client = cfg.CLIENT_CACHE[address]
@@ -125,8 +124,8 @@ class DaskClient:
 
     def submit_to_elegant(self, tasks: List, fnf: bool = False, dry_run: bool = True, pure: bool = True):
         import dask.distributed
-        #assert all(isinstance(t, ElegantSimJob) for t in tasks)
-        #assert all(t.__class__ == ElegantSimJob.__class__ for t in tasks) # to help autoreload
+        # assert all(isinstance(t, ElegantSimJob) for t in tasks)
+        # assert all(t.__class__ == ElegantSimJob.__class__ for t in tasks) # to help autoreload
 
         fun = run_elegant_job
         futures = []
@@ -175,6 +174,7 @@ class ElegantSimJob:
     """
     Object for storing all job file paths and metadata - gets passed around by dask many times
     """
+
     def __init__(self,
                  label: str,
                  lattice_options: Dict,
@@ -284,7 +284,7 @@ def run_elegant_job(task: ElegantSimJob, dry_run: bool = True):
         task_file_abs_path.write_text(task.task_file_contents)
         lattice_file_abs_path.write_text(task.lattice_file_contents)
         if task.parameter_file_map is not None:
-            from pyIOTA.elegant.io import SDDS
+            from ..elegant.io import SDDS
             for (k, v) in task.parameter_file_map.items():
                 k2 = Path(k)
                 assert not k2.exists()
@@ -294,7 +294,7 @@ def run_elegant_job(task: ElegantSimJob, dry_run: bool = True):
                 sdds.write(k2)
     else:
         if task.parameter_file_map is not None:
-            from pyIOTA.elegant.io import SDDS
+            from ..elegant.io import SDDS
             for (k, v) in task.parameter_file_map.items():
                 l.info(f'>{delta():.3f} FAKE Writing ({k})')
                 sdds = SDDS(k, blank=True)
@@ -331,7 +331,7 @@ def run_elegant_sdds_import(task, dry_run: bool = True):
     l.info(f'{delta():.3f} Elegant SDDS read starting')
 
     from pathlib import Path
-    from pyIOTA.elegant.io import SDDS, SDDSTrack
+    from ..elegant.io import SDDS, SDDSTrack
 
     run_folder = Path(task.run_folder)
     l.info(f'{delta():.3f} Run folder: {run_folder}')

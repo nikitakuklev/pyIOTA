@@ -989,12 +989,12 @@ class LatticeContainer:
         :param dry_run: If true, writing is done regardless of fpath parameter
         :return: Export output
         """
-        import pyIOTA.elegant as elegant
+        from ..elegant import Writer
         if fpath:
             assert isinstance(fpath, Path)
         if lattice_options:
             assert isinstance(lattice_options, dict)
-        wr = elegant.Writer(options=lattice_options)
+        wr = Writer(options=lattice_options)
         return wr.write_lattice_ng(fpath=fpath, box=self, save=not dry_run)
 
 
