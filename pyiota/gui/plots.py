@@ -9,11 +9,12 @@ import matplotlib as mpl
 from matplotlib import font_manager
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
+from matplotlib.font_manager import FontProperties
 
-from ..lattice.elements import ILMatrix
+from ..lattice.elements import ILMatrix, LatticeContainer
 from ocelot import Quadrupole, Bend, SBend, RBend, Vcor, Hcor, Sextupole, Undulator, \
     Cavity, Multipole, Marker, Edge, Octupole, Matrix, Monitor, Drift, Solenoid, UnknownElement, TDCavity, TWCavity, \
-    MagneticLattice, Element
+    MagneticLattice, Element, Twiss
 
 logger = logging.getLogger(__name__)
 
@@ -399,7 +400,188 @@ def arc_patch(center, w, h, theta1, theta2, resolution=50, t_out=0.2, t_in=0.2, 
     return poly
 
 
-def plot_opt_func(fig, lat, tws, top_plot=["Dx"], legend=False, fig_name=None, grid=True, font_size=12,
+def plot_optics(box: LatticeContainer,
+                fig: plt.Figure = None,
+                tws: List[Twiss] = None,
+                top_plot: List[str] = None,
+                top_separate: bool = True,
+                legend: bool = False,
+                fig_name: str = None,
+                grid: bool = True,
+                font_size: int = 12,
+                excld_legend: bool = None,
+                ):
+    """
+    Gen 2 plots
+
+    Plot:
+     lattice (bottom section),
+     vertical and horizontal beta-functions (middle section),
+     other parameters (top or middle section, optional)
+
+
+    :param fig: Figure to use - if it has any existing axes, they will be removed
+    :param lat: MagneticLattice
+    :param tws: list if Twiss objects
+    :param top_plot: parameters for top section, any attribute of Twiss class e.g. top_plot=["Dx", "Dy", "alpha_x"]
+                    "Dx", "Dy", "E", "mux", "muy", "alpha_x", "alpha_y", "gamma_x", "gamma_y"
+    :param top_separate: True - plot extra attributes on separate, top plot. If False, use second y-axis on middle plot.
+    :param legend: True - displaying legend of element types in bottom section,
+    :param fig_name: None - name of figure
+    :param grid: True - grid
+    :param font_size: 16 - font size for any element of plot
+    :param excld_legend: None, exclude type of element from the legend, e.g. excld_legend=[Hcor, Vcor]
+    :return:
+    """
+    if fig is None:
+        if fig_name is None:
+            fig = plt.figure()
+        else:
+            fig = plt.figure(fig_name)
+    else:
+        for ax in fig.axes:
+            ax.remove()
+
+    if tws is None:
+        tws = box.update_twiss()
+
+    if top_plot is None:
+        top_plot = ["Dx"]
+
+    left, width = 0.09, 0.87
+    if top_separate:
+        # left, bottom, width, height
+        rect1 = [left, 0.67, width, 0.25]#[left, 0.65, width, 0.3]
+        rect2 = [left, 0.19, width, 0.48]#[left, 0.19, width, 0.46]
+        rect3 = [left, 0.07, width, 0.12]
+
+        ax_top = fig.add_axes(rect1)
+        ax_bot = fig.add_axes(rect2, sharex=ax_top)
+        ax_el = fig.add_axes(rect3, sharex=ax_top)
+        axes = [ax_top, ax_bot, ax_el]
+    else:
+        rect2 = [left, 0.19, width, 0.46+0.3]
+        rect3 = [left, 0.07, width, 0.12]
+
+        ax_bot = fig.add_axes(rect2)
+        ax_el = fig.add_axes(rect3, sharex=ax_bot)
+        axes = [ax_bot, ax_el]
+
+    fig.subplots_adjust(hspace=0)
+    for ax in axes:
+        ax.grid(grid)
+
+    font_props = font_manager.FontProperties(size=font_size)
+
+    tws_list = [tws]
+    for i, tws in enumerate(tws_list):
+        beta_x = [p.beta_x for p in tws]
+        beta_y = [p.beta_y for p in tws]
+        s = [p.s for p in tws]
+        plt.xlim(s[0], s[-1])
+        label = str(i + 1) if i > 0 else ''
+        _plot_beta(ax_bot, s, beta_x, beta_y, font_props, label)
+
+        if top_separate:
+            _plot_extra_parameters(ax_top, s, tws, top_plot, font_props)
+        else:
+            ax_bot2 = ax_bot.twinx()
+            _plot_extra_parameters(ax_bot2, s, tws, top_plot, font_props, twinx=True)
+
+    # new_plot_elems(ax_el, lat, s_point = S[0], legend = legend, y_scale=0.8)  # plot elements
+    plot_elems(fig, ax_el, box.lattice, s_point=s[0], legend=legend, y_scale=0.8, font_size=font_size,
+               excld_legend=excld_legend)
+
+    ax_el.set_yticks([])
+    ax_el.set_yticklabels([])
+    for ax in axes:
+        if ax != ax_el:
+            ax.xaxis.set_tick_params(labelbottom=False)
+            #ax.set_xticklabels([]) doesn't work for shared x
+
+    return fig, *axes
+
+def _plot_extra_parameters(ax: plt.Axes, s: List[float], tws: List[Twiss],
+                           attributes: List[str], font_props: FontProperties, twinx: bool = False):
+    """
+     Gen 2 plots
+
+     Plot extra attributes, most typically dispersion
+    """
+    color_map_extra = {'Dx': 'limegreen'}
+
+    vspan = []
+    vmin = []
+    vmax = []
+    names = []
+    for elem in attributes:
+        values = [getattr(p, elem) for p in tws]
+        vmin.append(min(values))
+        vmax.append(max(values))
+        vspan.append(max(values) - min(values))
+
+        color = color_map_extra.get(elem, None)
+        greek = ""
+        if "beta" in elem or "alpha" in elem or "mu" in elem:
+            greek = "\\"
+        if "mu" in elem:
+            elem = elem.replace("mu", "mu_")
+        if elem == 'Dx':
+            elem = 'D_{x}'
+        top_label = r"$" + greek + elem + "$"
+        names.append(greek+elem)
+        ax.plot(s, values, lw=2, label=top_label, c=color)
+
+    d_F = max(vspan)
+    if d_F == 0:
+        d_Dx = 1
+        ax.set_ylim((min(vmin) - d_Dx * 0.1, max(vmax) + d_Dx * 0.1))
+    if attributes[0] == "E":
+        top_ylabel = r"$" + "/".join(names) + "$" + " [GeV]"
+    elif attributes[0] in ["mux", 'muy']:
+        top_ylabel = r"$" + "/".join(names) + "$" + " [rad]"
+    else:
+        top_ylabel = r"$" + "/".join(names) + "$" + " [m]"
+
+    # yticks = ax.get_yticks()
+    # yticks = yticks[2::2]
+    # ax.set_yticks(yticks)
+    # for i, label in enumerate(ax.get_yticklabels()):
+    #    if i == 0 or i == 1:
+    #        label.set_visible(False)
+    if twinx:
+        ax.set_ylabel(top_ylabel, font=font_props, rotation=270, va='center')
+        leg2 = ax.legend(loc='upper right', shadow=False, fancybox=True, facecolor='gray',
+                         prop=font_props)
+    else:
+        ax.set_ylabel(top_ylabel, font=font_props)
+        leg2 = ax.legend(loc='upper left', shadow=False, fancybox=True, facecolor='gray',
+                         prop=font_props)
+    ax.tick_params(axis='both', labelsize=font_props.get_size())
+    leg2.get_frame().set_alpha(0.2)
+
+
+def _plot_beta(ax: plt.Axes, s: List[float], beta_x, beta_y, font_props, label='', madx_colors=True):
+    """
+     Gen 2 plots
+
+     Plot beta functions
+    """
+    if madx_colors:
+        cbx, cby = 'k', 'r'
+    else:
+        cbx, cby = 'b', 'r--'
+    ax.set_ylabel(r"$\beta_{x,y}$ [m]", font=font_props)
+    ax.plot(s, beta_x, cbx, lw=2, label=r"$\beta_{x}$" + f" {label}")
+    ax.plot(s, beta_y, cby, lw=2, label=r"$\beta_{y}$" + f" {label}")
+    ax.tick_params(axis='both', labelsize=font_props.get_size())
+    ax.set_ylim(bottom=0.0)
+    leg = ax.legend(loc='upper left', shadow=False, fancybox=True, facecolor='gray', prop=font_props)
+    leg.get_frame().set_alpha(0.2)
+
+
+
+def plot_opt_func(fig, lat, tws, top_plot=None, legend=False, fig_name=None, grid=True, font_size=12,
                   excld_legend=None, ontop: bool = False):
     """
     Modified from OCELOT
@@ -422,6 +604,9 @@ def plot_opt_func(fig, lat, tws, top_plot=["Dx"], legend=False, fig_name=None, g
             fig = plt.figure()
         else:
             fig = plt.figure(fig_name)
+
+    if top_plot is None:
+        top_plot = ["Dx"]
 
     left, width = 0.1, 0.85
 
@@ -466,12 +651,6 @@ def plot_opt_func(fig, lat, tws, top_plot=["Dx"], legend=False, fig_name=None, g
 def plot_betas(ax, S, beta_x, beta_y, font_size, label=''):
     """
     From OCELOT
-    :param ax:
-    :param S:
-    :param beta_x:
-    :param beta_y:
-    :param font_size:
-    :return:
     """
     ax.set_ylabel(r"$\beta_{x,y}$ [m]", fontsize=font_size)
     ax.plot(S, beta_x, 'b', lw=2, label=r"$\beta_{x}$" + f" {label}")
