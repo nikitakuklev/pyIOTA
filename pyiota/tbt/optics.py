@@ -34,6 +34,11 @@ class Physics:
         """ Computes magnetic rigidity in T*m for energy given in MeV - only valid for E>>rest energy """
         return pc / 300.0
 
+    @staticmethod
+    def beta_gamma(p_central_mev: float):
+        import scipy.constants
+        return np.sqrt(p_central_mev**2 / (scipy.constants.value('electron mass energy equivalent in MeV')**2) - 1)
+
 
 class NIO:
     @staticmethod
