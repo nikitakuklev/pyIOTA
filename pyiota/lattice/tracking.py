@@ -175,9 +175,9 @@ def track_single_particle_nturns_store_at_tags(box: LatticeContainer, p: Particl
         return df_ocelot, None
 
     elif backend == 'elegant':
-        import pyIOTA.sim as sim
-        import pyIOTA.elegant as elegant
-        import pyIOTA.util.config as cfg
+        from ..sim import DaskClient, STATE
+        from ..elegant import Task, routines
+        from ..util import config as cfg
 
         for el in box.sequence:
             if getattr(el, 'elegant_temporary', False):
@@ -196,7 +196,7 @@ def track_single_particle_nturns_store_at_tags(box: LatticeContainer, p: Particl
         sdds_file_name = 'bunch_in.sddsinput'
         parameter_file_map = {PurePath(sdds_file_name): df}
 
-        sj = elegant.routines.standard_sim_job(work_folder=cfg.DASK_DEFAULT_WORK_FOLDER,
+        sj = routines.standard_sim_job(work_folder=cfg.DASK_DEFAULT_WORK_FOLDER,
                                                lattice_options=lattice_options,
                                                add_random_id=True,
                                                parameter_file_map=parameter_file_map,
@@ -227,12 +227,12 @@ def track_single_particle_nturns_store_at_tags(box: LatticeContainer, p: Particl
                 raise AttributeError(f'Element ({el.id}) has temporary elegant flag - state inconsistent')
 
         # Elegant taskfile
-        t = elegant.Task(relative_mode=True, run_folder=sj.run_subfolder, lattice_path=sj.lattice_file_abs_path)
-        elegant.routines.template_task_track_watchpoint(box, t, n_turns=n_turns, sdds_beam=sdds_file_name,
+        t = Task(relative_mode=True, run_folder=sj.run_subfolder, lattice_path=sj.lattice_file_abs_path)
+        routines.template_task_track_watchpoint(box, t, n_turns=n_turns, sdds_beam=sdds_file_name,
                                                         orbit='reference')
         sj.task_file_contents = t.compile()
 
-        dc = sim.DaskClient()
+        dc = DaskClient()
         futures = dc.submit_to_elegant([sj], dry_run=dry_run, pure=False)
         future = futures[0]
         try:
@@ -241,7 +241,7 @@ def track_single_particle_nturns_store_at_tags(box: LatticeContainer, p: Particl
             import traceback
             print(traceback.format_tb(future.traceback()))
             raise e
-        assert etaskresp.state == sim.STATE.ENDED
+        assert etaskresp.state == STATE.ENDED
         if data.returncode != 0:
             logger.error(data)
             raise ValueError(f'Job returned with error code {data.returncode}!')
@@ -257,7 +257,7 @@ def track_single_particle_nturns_store_at_tags(box: LatticeContainer, p: Particl
             print(data.stderr)
             print(etaskresp)
             raise e
-        assert etaskresp2.state == sim.STATE.ENDED_READ
+        assert etaskresp2.state == STATE.ENDED_READ
 
         df_ocelot = box.df()
         df_ocelot['wp'] = [getattr(el, 'coordinate_watchpoint', False) for el in box.sequence]
@@ -338,9 +338,9 @@ def track_single_particle_1turn_store_particles(box: LatticeContainer, p: Partic
         return df_ocelot, None
 
     elif backend == 'elegant':
-        import pyIOTA.sim as sim
-        import pyIOTA.elegant as elegant
-        import pyIOTA.util.config as cfg
+        from .. import sim
+        from .. import elegant
+        from ..util import config as cfg
 
         # Create elegant task
         lattice_options = {'sr': 0, 'isr': 0, 'dip_kicks': 64, 'quad_kicks': 32,
