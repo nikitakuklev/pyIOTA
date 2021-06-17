@@ -3,7 +3,7 @@ import warnings
 
 import math
 import time
-from typing import Union, Tuple, List
+from typing import Union, Tuple, List, Dict
 
 import numpy as np, scipy as sc
 #import numba
@@ -78,8 +78,9 @@ class NAFF:
     hann_cache = {}
 
     def __init__(self,
-                 window_type: str = 'hanning',
+                 window_type: str = 'hann2',
                  window_power: int = 0,
+                 window_opts: Dict = None,
                  wp: int = None,
                  fft_pad_zeros_power: int = None,
                  pp: int = None,
@@ -88,7 +89,7 @@ class NAFF:
         """
         Create new NAFF object that can be passed to various methods or used directly
 
-        :param window_type: The type of window to use. Currently only Hanning is available, should be best.
+        :param window_type: The type of window to use - 'hann', 'hann2', 'halfhann', 'tukey'.
         :param window_power: Window power - there is theoretically better resolution at higher powers, but only on
         near perfect data. For experimental sources, 1 is ok.
         :param fft_pad_zeros_power: Optional FFT zero-pad to length 2**pad_power - can be used to find tunes directly,
@@ -98,6 +99,7 @@ class NAFF:
         """
         self.window_type = window_type
         self.window_power = wp or window_power
+        self.window_opts = window_opts
         self.data_trim = data_trim
         self.fft_pad_zeros_power = pp or fft_pad_zeros_power
         self.output_trim = output_trim
@@ -315,7 +317,7 @@ class NAFF:
     # NAFFamp = lambda f, X: np.sum(np.real(EXPO(f, np.arange(len(X))) * X)) / len(X) + 1j * np.sum(
     #     np.imag(EXPO(f, np.arange(len(X))) * X)) / len(X)  # NAFF amp algorithm
 
-    def run_naff_v2(self, data: np.ndarray, data_trim: slice = None, xatol: float = 1e-8,
+    def run_naff_v2(self, data: np.ndarray, data_trim: slice = None, xatol: float = 1e-9,
                     n_components: int = 2, full_data: bool = True, spacing: float = 1.0,
                     perf_mode: bool = False, freq_trim: tuple = None,
                     orthogonal: bool = True):
@@ -677,14 +679,18 @@ class NAFF:
             #correlation = ne.evaluate("sum(dataw * exp(-2.0j * pi * frequencies * i_line))")
             return np.abs(correlation), np.real(correlation), np.imag(correlation)
         else:
-            integral = []
-            for tune in frequencies:
-                correlation = np.sum(dataw * np.exp(-2.0j * np.pi * tune * i_line)) / N
-                integral.append((np.abs(correlation), np.real(correlation), np.imag(correlation)))
             if magnitude_only:
-                return np.array(integral)[:, 0]
+                integral = np.zeros((len(frequencies), 1))
+                for i, tune in enumerate(frequencies):
+                    correlation = np.sum(dataw * np.exp(-2.0j * np.pi * tune * i_line)) / N
+                    integral[i, 0] = np.abs(correlation)
+                return integral
             else:
-                return np.array(integral)
+                integral = np.zeros((len(frequencies), 4), dtype=np.complex128)
+                for i, tune in enumerate(frequencies):
+                    correlation = np.sum(dataw * np.exp(-2.0j * np.pi * tune * i_line)) / N
+                    integral[i, :] = (np.abs(correlation), np.real(correlation), np.imag(correlation), correlation)
+                return integral
 
     correlation = compute_correlations_v2
 
@@ -695,16 +701,20 @@ class NAFF:
         # <v,v> = 1 * len(v) because frequency vector has entries of magnitude 1
         return np.sum(np.conjugate(u) * v) / len(u)
 
-    def window(self, N: int, power: int, kind: str = 'hann2', copy: bool = False):
+    def get_current_window(self, N):
+        return self.window(N, self.window_power)
+
+    def window(self, N: int, power: int, kind: str = None, **kwargs):
         """
         Returns a windowing function.
         For cache, manual management is used (vs lru_cache), so as to provide extra options
         :param power:
         :param N:
         :param kind:
-        :param copy:
         :return:
         """
+        kind = kind or self.window_type
+        opts = kwargs or self.window_opts
         key = (kind, N, power)
         if key in self.window_cache:
             window = self.window_cache[key]
@@ -717,11 +727,24 @@ class NAFF:
                     T = np.linspace(0, N - 1, num=N, endpoint=True) * 2.0 * np.pi - np.pi * (N - 1)
                     window = ((2 ** power * np.math.factorial(power) ** 2) /
                               np.math.factorial(2 * power)) * (1.0 + np.cos(T / (N - 1))) ** power
+                    self.window_cache[key] = window
                 elif kind == 'hann2':
                     window = np.hanning(N) ** power
+                    self.window_cache[key] = window
+                elif kind == 'halfhann':
+                    # Half-window for impulse data windowing (preserving more at the start)
+                    # Suitable for cases like fast decaying kicks
+                    window = np.hanning(N*2)[N:] ** power
+                    self.window_cache[key] = window
+                elif kind == 'tukey':
+                    # Cosine taper, another option to preserve signal at ends (see obspy for inspiration)
+                    import scipy.signal as ss
+                    assert power == 1
+                    assert len(opts) == 1 and 'alpha' in opts
+                    window = ss.windows.tukey(N, **opts)
+                    # dont cache for now
                 else:
                     raise Exception(f'Unknown window type:{kind}')
-            self.window_cache[key] = window
         return window
 
     def reset_perf_counters(self):
