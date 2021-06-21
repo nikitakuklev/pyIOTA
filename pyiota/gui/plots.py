@@ -554,7 +554,7 @@ def _plot_extra_parameters(ax: plt.Axes, s: List[float], tws: List[Twiss],
         leg2 = ax.legend(loc='upper right', shadow=False, fancybox=True, facecolor='gray',
                          prop=font_props)
     else:
-        ax.set_ylabel(top_ylabel, font=font_props)
+        ax.set_ylabel(top_ylabel, font=font_props, va='center')
         leg2 = ax.legend(loc='upper left', shadow=False, fancybox=True, facecolor='gray',
                          prop=font_props)
     ax.tick_params(axis='both', labelsize=font_props.get_size())

@@ -195,7 +195,7 @@ class Coordinates:
         return px1
 
     @staticmethod
-    def calc_px_from_normalized_bpms(x1n: np.ndarray, x2n: np.ndarray, dphase: float) -> np.ndarray:
+    def calc_pxn_from_normalized_bpms(x1n: np.ndarray, x2n: np.ndarray, dphase: float) -> np.ndarray:
         """
         Compute normalized momentum at location 1 from normalized positions 1 and 2
         See https://journals.aps.org/prab/pdf/10.1103/PhysRevSTAB.8.024001
