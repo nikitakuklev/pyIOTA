@@ -134,7 +134,7 @@ class Task:
                    f'use_beamline = {beamline}',
                    #f'tracking_updates = 1',
                    f'p_central_mev = {p}',  # iota.header["PC"] * 1000
-                   #f'default_order = 3',
+                   f'default_order = 3',
                    ]
         if rootname != '':
             strings.append(f'rootname = {rootname}')
