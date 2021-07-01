@@ -122,15 +122,14 @@ class DaskClient:
         r = future.result(timeout=2)
         assert r == run_dummy_task(*args)
 
-    def submit_to_elegant(self, tasks: List, fnf: bool = False, dry_run: bool = True, pure: bool = True):
+    def submit_to_elegant(self, tasks: List, fnf: bool = False, dry_run: bool = True, mpi: int = 0, pure: bool = True):
         import dask.distributed
         # assert all(isinstance(t, ElegantSimJob) for t in tasks)
         # assert all(t.__class__ == ElegantSimJob.__class__ for t in tasks) # to help autoreload
-
         fun = run_elegant_job
         futures = []
         for t in tasks:
-            future = self.client.submit(fun, t, dry_run, pure=pure)
+            future = self.client.submit(fun, t, dry_run, mpi, pure=pure)
             if fnf:
                 dask.distributed.fire_and_forget(future)
             else:
@@ -231,7 +230,7 @@ def run_dummy_task(*args, **kwargs):
         return 42
 
 
-def run_elegant_job(task: ElegantSimJob, dry_run: bool = True):
+def run_elegant_job(task: ElegantSimJob, dry_run: bool = True, mpi: int = 0, mpi_lib: str = None):
     """ Dask elegant worker function """
     from time import perf_counter
     start = perf_counter()
@@ -305,7 +304,15 @@ def run_elegant_job(task: ElegantSimJob, dry_run: bool = True):
     if dry_run:
         result = subprocess.run(['echo', str(42)], capture_output=True, text=True)
     else:
-        result = subprocess.run(['elegant', str(task_file_abs_path)], capture_output=True, text=True)
+        if mpi > 0:
+            from ..util.config import ELEGANT_MPI_MODULE, ELEGANT_MPI_ARGS
+            mpi_lib = ELEGANT_MPI_MODULE
+            mpi_extra = ELEGANT_MPI_ARGS
+            assert mpi_lib is not None
+            result = subprocess.run(f'module load {mpi_lib}; mpiexec -n {mpi} {mpi_extra} Pelegant {str(task_file_abs_path)}',
+                                    shell=True, capture_output=True, text=True)
+        else:
+            result = subprocess.run(['elegant', str(task_file_abs_path)], capture_output=True, text=True)
     task.state = STATE.ENDED
     l.info(f'{delta():.3f} Finished')
     l.info('--------------------------')
@@ -336,7 +343,7 @@ def run_elegant_sdds_import(task, dry_run: bool = True):
     run_folder = Path(task.run_folder)
     l.info(f'{delta():.3f} Run folder: {run_folder}')
 
-    extensions_to_import = ['twi', 'clo', 'cen', 'fin', 'track', 'sdds']
+    extensions_to_import = ['twi', 'clo', 'cen', 'fin', 'track', 'sdds', 'fma']
     data = {}
     for ext in extensions_to_import:
         l.info(f'>{delta():.3f} Checking ({ext})')
