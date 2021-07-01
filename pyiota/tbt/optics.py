@@ -190,26 +190,43 @@ class Coordinates:
     @staticmethod
     def calc_px_from_bpms(x1, x2, beta1, beta2, a1, a2, dphase) -> np.ndarray:
         """ Compute momentum at location 1 from position readings at locations 1 and 2 and local optics funcs """
-        px1 = x2 * (1 / np.sin(dphase)) * (1 / np.sqrt(beta1 * beta2)) - \
-              x1 * (1 / np.tan(dphase)) * (1 / beta1) - x1 * a1 / beta1
+        #px1 = x2 * (1 / np.sin(dphase)) * (1 / np.sqrt(beta1 * beta2)) - \
+        #      x1 * (1 / np.tan(dphase)) * (1 / beta1) - x1 * a1 / beta1
+        csc, cot = 1 / np.sin(dphase), 1 / np.tan(dphase)
+        px1 = - x1 * cot / beta1 + - x1 * a1 / beta1 + x2 * csc / np.sqrt(beta1 * beta2)
         return px1
+
+    @staticmethod
+    def calc_px_from_bpms_v2(x1, x2, beta1, beta2, a1, a2, dphase) -> Tuple[np.ndarray, np.ndarray]:
+        """
+        Compute momentum at location 1 and 2 from position readings and local optics funcs
+        See 'phasespace.nb', fixed Jun 2021
+        """
+        csc, cot = 1 / np.sin(dphase), 1 / np.tan(dphase)
+        px1 = - x1 * cot / beta1 + - x1 * a1 / beta1 + x2 * csc / np.sqrt(beta1 * beta2)
+        px2 = - x1 * csc / np.sqrt(beta1 * beta2) + x2 * cot / beta2 - x2 * a2 / beta2
+        return px1, px2
 
     @staticmethod
     def calc_pxn_from_normalized_bpms(x1n: np.ndarray, x2n: np.ndarray, dphase: float) -> np.ndarray:
         """
         Compute normalized momentum at location 1 from normalized positions 1 and 2
-        See https://journals.aps.org/prab/pdf/10.1103/PhysRevSTAB.8.024001
+        See https://journals.aps.org/prab/pdf/10.1103/PhysRevSTAB.8.024001 and 'phasespace.nb' notebook
         """
-        px1n = -x1n*(1/np.tan(dphase)) + x2n*(1/np.sin(dphase))
+        csc, cot = 1 / np.sin(dphase), 1 / np.tan(dphase)
+        px1n = -x1n*cot + x2n*csc
         return px1n
 
     @staticmethod
-    def calc_px_from_bpms_v2(x1, x2, beta1, beta2, a1, a2, dphase):
-        """ Compute momentum at location 1 and 2 from position readings and local optics funcs """
-        px1 = x2 * (1 / np.sin(dphase)) * (1 / np.sqrt(beta1 * beta2)) - \
-              x1 * (1 / np.tan(dphase)) * (1 / beta1) - x1 * a1 / beta1
-        px2 = (1 / beta1) * (x2 * (1 / np.tan(dphase)) - x2 * a2 - x1 * (1 / np.sin(dphase)) * np.sqrt(beta2 / beta1))
-        return px1, px2
+    def calc_pxn_from_normalized_bpms_v2(x1n: np.ndarray, x2n: np.ndarray, dphase: float) -> Tuple[np.ndarray, np.ndarray]:
+        """
+        Compute normalized momentum at location 1 and 2 from normalized positions 1 and 2
+        Same refs as above
+        """
+        csc, cot = 1 / np.sin(dphase), 1 / np.tan(dphase)
+        px1n = -x1n*cot + x2n*csc
+        px2n = -x1n*csc + x2n*cot
+        return px1n, px2n
 
     @staticmethod
     def calc_px_from_bpms_mat(x1, x2, M11, M12):
