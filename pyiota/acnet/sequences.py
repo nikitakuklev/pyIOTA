@@ -1,13 +1,13 @@
 import uuid
 from pathlib import Path
 
-import pyIOTA
+import pyiota
 from .frontends import DeviceSet, StatusDevice, DoubleDevice, DoubleDeviceSet, BPMDevice, BPMDeviceSet, ACNETRelay, ACL, \
     StatusDeviceSet
 import time, datetime
-import pyIOTA.iota as iota
-from pyIOTA.sixdsim.io import Knob
-import pyIOTA.acnet.utils as acutils
+import pyiota.iota as iota
+from pyiota.sixdsim.io import Knob
+import pyiota.acnet.utils as acutils
 import numpy as np
 import pandas as pd
 
@@ -305,7 +305,7 @@ def inject(arm_bpms: bool = False, debug: bool = False):
         raise Exception("MPS FAULT - ABORT")
 
     if debug: print('>>Awaiting A8')
-    acl = pyIOTA.acnet.frontends.ACL(fallback=True)
+    acl = pyiota.acnet.frontends.ACL(fallback=True)
     acl._raw_command("wait/nml/event/timeout=2 A8")
 
     if debug: print('>>Firing')

@@ -4,7 +4,7 @@ import numpy as np
 import unittest
 
 from .frontends import *
-import pyIOTA.iota as iota
+import pyiota.iota as iota
 
 
 class TestWrap(TestCase):
