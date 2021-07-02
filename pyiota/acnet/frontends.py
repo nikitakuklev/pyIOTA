@@ -565,12 +565,12 @@ class ACL(Adapter):
             import httpx
         except ImportError:
             raise Exception('HTTP functionality requires httpx library')
-        tm = httpx.Timeout(timeout=20, connect_timeout=5)
-        pool = httpx.PoolLimits(soft_limit=25, hard_limit=25)
+        tm = httpx.Timeout(timeout=20, connect=5)
+        #pool = httpx.PoolLimits(soft_limit=25, hard_limit=25)
         # self.aclient = httpx.AsyncClient()
         # self.client = httpx.Client()
         if fallback:
-            self.client = httpx.Client(timeout=tm, pool_limits=pool)
+            self.client = httpx.Client(timeout=tm)
         else:
             # define async client in separate variable to not forget
             import nest_asyncio
