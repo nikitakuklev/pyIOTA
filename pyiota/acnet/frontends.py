@@ -737,11 +737,11 @@ class ACNETRelay(Adapter):
         except ImportError:
             raise Exception('Relay functionality requires certain libraries')
         tm = httpx.Timeout(timeout=20, connect=2)
-        pool = httpx.PoolLimits(soft_limit=5, hard_limit=5)
+        #pool = httpx.PoolLimits(soft_limit=5, hard_limit=5)
         # self.aclient = httpx.AsyncClient()
         self.aclient = httpx.AsyncClient(timeout=tm)
         # self.client = httpx.Client()
-        self.client = httpx.Client(timeout=tm, pool_limits=pool)
+        self.client = httpx.Client(timeout=tm)
 
     def check_available(self, devices: dict, method=None):
         return len(devices) < 500
