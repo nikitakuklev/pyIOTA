@@ -736,7 +736,7 @@ class ACNETRelay(Adapter):
             nest_asyncio.apply()
         except ImportError:
             raise Exception('Relay functionality requires certain libraries')
-        tm = httpx.Timeout(timeout=20, connect_timeout=2)
+        tm = httpx.Timeout(timeout=20, connect=2)
         pool = httpx.PoolLimits(soft_limit=5, hard_limit=5)
         # self.aclient = httpx.AsyncClient()
         self.aclient = httpx.AsyncClient(timeout=tm)
