@@ -268,10 +268,13 @@ class Writer:
         for k in ['dip_kicks', 'quad_kicks', 'sext_kicks', 'oct_kicks']:
             assert isinstance(self.options[k], int) and 1 <= self.options[k] <= 128
 
+        assert self.options['oct_kicks'] >= 4  # Elegant would bump to 4 anyways
+        assert self.options['sext_kicks'] >= 4  # Elegant would bump to 4 anyways
+
         if 'global_aperture' not in self.options:
             self.options['global_aperture'] = False
         else:
-            assert isinstance(self.options['global_aperture'], (int, float))
+            assert isinstance(self.options['global_aperture'], (int, float,tuple))
 
         if 'limiting_aperture' not in self.options:
             self.options['limiting_aperture'] = False
@@ -324,11 +327,15 @@ class Writer:
                          box: LatticeContainer,
                          debug: bool = True,
                          save: bool = False,
+                         silent: bool = False,
                          # add_limiting_aperture: bool = True,
                          # add_misalignment_el: bool = True
                          ):
         """
         Writes current lattice to the specified path.
+        Options should be supplied at writer creation, and include kicks per element and apertures
+        opt.global_aperture -> if tuple, rectangle in meter; if number, inches of aperture
+        opt.limiting_aperture -> DN aperture, number scales, 1 -> actual
         :param fpath: Full file path
         """
         if isinstance(fpath, str):
@@ -679,7 +686,8 @@ class Writer:
 
         if save:
             if not fpath:
-                logger.warning(f'File path not specified, no writes will be performed')
+                if not silent:
+                    logger.warning(f'File path not specified, no writes will be performed')
             else:
                 print(f'Writing lattice to: {fpath}')
                 with open(str(fpath), 'w', newline='\n') as f:
