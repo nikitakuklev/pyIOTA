@@ -164,7 +164,7 @@ class Generator:
                             if isinstance(v, str):
                                 s.append(f'{k}_{v}_')
                             elif isinstance(v, int):
-                                assert v < 1e6
+                                assert v <= 1e7
                                 s.append(f'{k}_{v:+06d}_')
                             elif isinstance(v, float):
                                 s.append(f'{k}_{v:+.6e}_')
