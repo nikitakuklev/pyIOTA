@@ -11,7 +11,7 @@ from typing import Dict
 import numpy as np
 from ocelot import Sextupole, Hcor, Vcor, Element, Edge, Marker, Octupole, Matrix, \
     Quadrupole, SBend, Drift, Solenoid, Cavity, Monitor, Multipole
-from ..lattice.elements import LatticeContainer, NLLens, HKPoly, ILMatrix, Recirculator
+from ..lattice.elements import LatticeContainer, NLLens, HKPoly, ILMatrix, Recirculator, IBScatter
 from .. import __version__ as pyiotaver
 
 logger = logging.getLogger(__name__)
@@ -368,6 +368,7 @@ class Writer:
         matrices = view.get_elements(Matrix)
         ilmatrices = view.get_elements(ILMatrix)
         recirculators = view.get_elements(Recirculator)
+        ibscatters = view.get_elements(IBScatter)
         multipoles = view.get_elements(Multipole)
 
         # The edges in sequences are ocelot-based, and so can be ignored
@@ -392,6 +393,8 @@ class Writer:
         # Set charge
         # sl.append(f'CHRG: CHARGE, TOTAL={header["NPART"] * 1.602176634e-19:e}\n')
         # sl.append(f'CHRG: CHARGE, TOTAL={lat.:e}\n')
+
+
 
         def ma(el):
             if el.dx != 0.0 or el.dy != 0.0 or (el.tilt + el.dtilt) != 0.0:
@@ -431,14 +434,15 @@ class Writer:
                 if self._validate_element(el, elements): continue
                 add_hcor = 0
                 add_vcor = 0
-                for c in box.correctors:
-                    if c.ref_el is el:
-                        if isinstance(c, Hcor):
-                            add_hcor = 1
-                        elif isinstance(c, Vcor):
-                            add_vcor = 1
-                        else:
-                            continue
+                if not getattr(el,'elegant_skip_steering', False):
+                    for c in box.correctors:
+                        if c.ref_el is el:
+                            if isinstance(c, Hcor):
+                                add_hcor = 1
+                            elif isinstance(c, Vcor):
+                                add_vcor = 1
+                            else:
+                                continue
                 sl.append(
                     f'{el.id:<6}: KQUAD, l={el.l:.10f}, k1={el.k1:+.10e},{ma(el)}'
                     f' HSTEERING={add_hcor}, VSTEERING={add_vcor},'
@@ -525,7 +529,11 @@ class Writer:
             sl.append('!MARKERS/WPS\n')
             for el in markers:
                 if self._validate_element(el, elements): continue
-                if getattr(el, 'elegant_watchpoint', False):
+                wp = getattr(el, 'elegant_watchpoint', False)
+                #wp2 = getattr(el, 'coordinate_watchpoint', False)
+                #wp3 = getattr(el, 'centroid_watchpoint', False)
+                #wp4 = getattr(el, 'parameters_watchpoint', False)
+                if wp:
                     # Special watchpoints
                     props_str = ''
                     for (k, v) in el.elegant_watchpoint_props.items():
@@ -571,6 +579,17 @@ class Writer:
                 sl.append(f"{el.id:<10}: ILMATRIX, l={el.l}, {', '.join(arg_string)}\n")
             sl.append('\n')
 
+        if ibscatters:
+            sl.append('!IBSCATTER \n')
+            for el in ibscatters:
+                if self._validate_element(el, elements): continue
+                if hasattr(el, 'extra_args'):
+                    arg_string = [f'{k.upper()}={v}' for (k, v) in el.extra_args.items()]
+                else:
+                    arg_string = []
+                sl.append(f"{el.id:<10}: IBSCATTER, {', '.join(arg_string)}\n")
+            sl.append('\n')
+
         preamble = ''
         if recirculators:
             if opt.add_mal:
@@ -586,6 +605,10 @@ class Writer:
                 sl.append('MAL: MALIGN \n')
                 sl.append('\n')
                 preamble += 'MAL, RC,'
+
+        if getattr(box, 'npart', None) is not None:
+            sl.append(f'CHRG: CHARGE, TOTAL={box.npart * 1.602176634e-19:e}\n\n')
+            preamble += ' CHRG,'
 
         # names = []
         # for el in markers:
@@ -617,7 +640,7 @@ class Writer:
                 # f.write('APER: ECOL, X_MAX=0.008, Y_MAX=0.008 \n')
                 # sl.append('APER: ECOL, X_MAX=0.005925, Y_MAX=0.00789 \n')  # 1.5x actual NL aperture
                 if xm == ym:
-                    sl.append(f'MA1: MAXAMP, X_MAX={xm:+.10f}, Y_MAX={ym:+.10f} \n')
+                    sl.append(f'MA1: MAXAMP, X_MAX={xm:+.10f}, Y_MAX={ym:+.10f}, ELLIPTICAL=1 \n')
                 else:
                     sl.append(f'MA1: MAXAMP, X_MAX={xm:+.10f}, Y_MAX={ym:+.10f}, ELLIPTICAL=1 \n')
 
