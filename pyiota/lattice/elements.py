@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-__all__ = ['LatticeContainer', 'NLLens', 'HKPoly', 'ILMatrix', 'OctupoleInsert', 'NLInsert', 'Recirculator']
+__all__ = ['LatticeContainer', 'NLLens', 'HKPoly', 'IBScatter', 'HKPoly', 'ILMatrix', 'OctupoleInsert', 'NLInsert', 'Recirculator']
 
 import logging
+import math
 from enum import Enum
 from pathlib import Path
 
@@ -95,6 +96,13 @@ class LatticeContainer:
         return [el.id for el in self.lattice.sequence]
 
     @property
+    def beamsheet(self):
+        return pd.DataFrame(data=[{'name': el.id, 'type': el.__class__.__name__, 'l': el.l,
+                                   's_start': el.s_start, 's_mid': el.s_mid, 's_end': el.s_end,
+                                   'k3': getattr(el,'k3',0.0)}
+                                  for el in self.lattice.sequence])
+
+    @property
     def elements(self):
         return [(el.id, el.__class__.__name__, el.l) for el in self.lattice.sequence]
 
@@ -109,6 +117,18 @@ class LatticeContainer:
     @property
     def octupoles(self):
         return self.get_elements(Octupole)
+
+    @property
+    def sextupoles(self):
+        return self.get_elements(Sextupole)
+
+    @property
+    def quadrupoles(self):
+        return self.get_elements(Quadrupole)
+
+    @property
+    def dipoles(self):
+        return self.get_elements(SBend)
 
     @property
     def sequence(self):
@@ -225,7 +245,8 @@ class LatticeContainer:
     def transmute_elements(self,
                            elements: Union[Element, Iterable[Element]],
                            new_type: Type[Element],
-                           verbose: bool = False) -> LatticeContainer:
+                           verbose: bool = False,
+                           return_new: bool = False):
         """
         Transmutes element type to new one. Only length and id are preserved. Refs are transferred.
         :param elements: Elements to transmute
@@ -238,6 +259,7 @@ class LatticeContainer:
             return self
         seq = self.lattice.sequence
         l_seq = len(seq)
+        added = []
         if isinstance(elements, List) and isinstance(elements, List):
             assert all(isinstance(e, Element) for e in elements)
         elif isinstance(elements, Element):
@@ -259,6 +281,7 @@ class LatticeContainer:
                     raise Exception(f'Target ({target.id}) has no length attribute - is it an Element?')
                 i = seq.index(target)
                 seq[i] = new_el
+                added.append(new_el)
                 if verbose: print(f'Transmuted ({new_el.id}) at pos ({i}) from ({matches[0].__class__.__name__}) '
                                   f'to ({seq[i].__class__.__name__})')
                 # Preserve references
@@ -270,7 +293,10 @@ class LatticeContainer:
 
         # if not self.silent: print(f'Transmuted ({len(elements)}) elements')
         if not self.silent: logger.info(f'Transmuted ({len(elements)}) elements')
-        return self
+        if return_new:
+            return added
+        else:
+            return self
 
     def split_elements(self, elements: Union[Element, Iterable[Element]], n_parts: int = 2,
                        return_new_elements: bool = False, at: float = None) -> Union[LatticeContainer, List]:
@@ -422,16 +448,20 @@ class LatticeContainer:
 
     def update_element_positions(self):
         """
-        Updates the s-values of all elements. Does not overwrite default ocelot 's' parameter - use 's_mid' instead
+        Updates the s-values of all elements. Does not overwrite default ocelot 's' parameter - use 's_mid' instead.
+        Uses special pairwise partial sums to increase precision at cost of performance scaling.
         :return: None
         """
-        l = 0.0
+        #l = 0.0
         slist = []
+        llist = [0.0]
         for i, el in enumerate(self.lattice.sequence):
+            l = math.fsum(llist)
             el.s_start = l
             el.s_mid = l + el.l / 2
             el.s_end = l + el.l
-            l += el.l
+            #l += el.l
+            llist.append(el.l)
             slist.append(el.s_mid)
         self.totallen = self.lattice.sequence[-1].s_end
         return slist
@@ -693,10 +723,12 @@ class LatticeContainer:
         def name_check(name, mode='trunc'):
             if len(name) > lim:
                 if mode == 'rand':
-                    logger.warning(f'Merged drift name ({name}) too long - generating new random one')
+                    if not silent:
+                        logger.warning(f'Merged drift name ({name}) too long - generating new random one')
                     return "ID_{0}_".format(np.random.randint(100000000))
                 elif mode == 'trunc':
-                    logger.warning(f'Merged drift name ({name}) too long - truncating to ({lim}) chars')
+                    if not silent:
+                        logger.warning(f'Merged drift name ({name}) too long - truncating to ({lim}) chars')
                     return name[:lim]
             else:
                 return name
@@ -746,10 +778,11 @@ class LatticeContainer:
         if not np.isclose(l_total, sum([el.l for el in seq_new])):
             raise Exception(f'New sequence length ({sum([el.l for el in seq_new])} different from old ({l_total})!!!')
         self.lattice.sequence = seq_new
+        self.update()
 
     # Getters/setters
 
-    def at(self, s):
+    def at(self, s: float) -> List[Element]:
         """
         Get all elements at position s. Element is considered to be present if it is thick and intersects
         the location, or if element starts there (regardless of length). Results are in sequence order.
@@ -832,6 +865,13 @@ class LatticeContainer:
                  exact: bool = False,
                  singleton_only: bool = False):
         return self.get_first(el_name, el_type, exact, singleton_only, last=True)
+
+    def get_one(self,
+                el_name: str = None,
+                el_type: Union[str, type] = None,
+                exact: bool = False,
+                ):
+        return self.get_first(el_name, el_type, exact, singleton_only=True)
 
     def get_before(self, target):
         for i, el in enumerate(self.lattice.sequence):
@@ -979,8 +1019,22 @@ class LatticeContainer:
 
     # Conversion functions
 
-    def to_elegant(self, fpath: Path = None, lattice_options: Dict = None,
-                   dry_run: bool = False):
+    def ensure_unique_names(self):
+        names = {}
+        for el in self.sequence:
+            if el.id in names:
+                seq = names[el.id]
+                names[el.id] += 1
+                el.id = el.id + f'_{seq}'
+                #logger.info(f'New name {el.id}')
+            else:
+                names[el.id] = 1
+        self.update()
+
+    def to_elegant(self, fpath: Path = None,
+                   lattice_options: Dict = None,
+                   dry_run: bool = False,
+                   **kwargs):
         """
         Calls elegant module to produce elegant lattice.
         Should fail-fast if incompatible features are found.
@@ -995,7 +1049,7 @@ class LatticeContainer:
         if lattice_options:
             assert isinstance(lattice_options, dict)
         wr = Writer(options=lattice_options)
-        return wr.write_lattice_ng(fpath=fpath, box=self, save=not dry_run)
+        return wr.write_lattice_ng(fpath=fpath, box=self, save=not dry_run, **kwargs)
 
 
 # class NLLens(Element):
@@ -1034,6 +1088,12 @@ class Recirculator(Element):
     RECIRC element for ELEGANT
     """
 
+    def __init__(self, eid: str = None):
+        Element.__init__(self, eid)
+
+
+class IBScatter(Element):
+    """ IBSCATTER """
     def __init__(self, eid: str = None):
         Element.__init__(self, eid)
 
@@ -1130,16 +1190,25 @@ class OctupoleInsert:
     def __init__(self, **kwargs):
         self.l0 = self.mu0 = None
         self.seq = []
+        self.otype = 1
         self.configure(**kwargs)
 
     def configure(self, oqK: Union[float, np.ndarray] = 1.0,
-                  run: int = 2, l0: float = 1.8, mu0: float = 0.3, otype: int = 1,
-                  olen: float = 0.07, nn: int = 17, ospacing: float = None,
-                  current: float = None, tn=0.4, cn=0.01, debug: bool = False,
+                  run: int = None, l0: float = 1.8, mu0: float = 0.3, otype: int = 1,
+                  olen: Union[float,None] = 0.07, nn: int = 17,
+                  ospacing: float = None,
+                  current: float = None,
+                  tn=0.4, cn=0.01,
+                  debug: bool = False,
                   positions: np.ndarray = None,
-                  olen_eff: float = None):
+                  olen_eff: float = None,
+                  drop_empty_drifts: bool = False,
+                  replace_zero_strength_octupoles: bool = False):
         """
         Initialize QI configuration. Notation matches that used in original MADX scripts.
+
+        :param drop_empty_drifts: Drop drift to the left and drift of octupole if they are 0
+
         :param tn:    #tn = 0.4  # strength of nonlinear lens
         :param cn:    #cn = 0.01  # dimentional parameter of nonlinear lens #cn is [m^1/2], c^2=0.01cm=0.0001m
         :param oqK:   Octupole strength scale factor
@@ -1148,6 +1217,7 @@ class OctupoleInsert:
         :param run:   # which run configuration to use, 1 or 2
         :param otype: # type of magnet (0) thin, (1) thick, (2) HKPoly, only works for octupoles (ncut=4)
         :param olen:  #olen = 0.07  # length of octupole for thick option.must be < l0 / nn
+        :param ospacing: #0.03 ; Octupole spacing. If None then calculated from lengths. Only one of length or spacing!
         :param nn:    # number of nonlinear elements
         """
         self.l0 = l0
@@ -1158,26 +1228,34 @@ class OctupoleInsert:
             assert all(not np.isnan(oqkt) for oqkt in oqK)
         else:
             assert not np.isnan(oqK)
+
+        if sum(1 for ct in [olen is not None, ospacing is not None] if ct) != 1:
+            raise Exception("Exactly one length spec allowed")
+        if ospacing is not None:
+            oqSpacing = ospacing
+            olen = (l0 - ospacing * nn) / nn
+        else:
+            oqSpacing = (l0 - olen * nn) / nn
+
         olen_eff = olen_eff or olen or l0 / nn
+
+        print(f'QI element - l0:{l0}|nn:{nn}|run:{run}|olen:{olen:.3f}|oqSpacing:{oqSpacing:.3f}|drop:{drop_empty_drifts}')
 
         if positions is None:
             perturbed_mode = False
             if run is None:
-                # Ideal configuration
-                if ospacing:
-                    oqSpacing = ospacing
-                else:
-                    oqSpacing = (l0 - olen * nn) / nn
+                # Ideal configuration - all magnets equidistant
                 margin = 0.0
                 positions = l0 / nn * (np.arange(1, nn + 1) - 0.5)
             elif run == 1:
+                if ospacing is not None:
+                    raise Exception
                 # Margins on the sides were present
                 oqSpacing = 0.03325  # (1.8-0.022375-0.022375-17*0.07)/17
                 margin = 0.022375  # extra margin at the start and end of insert
                 positions = margin + (l0 - 2 * margin) / nn * (np.arange(1, nn + 1) - 0.5)
             elif run == 2:
                 # Perfect spacing with half drift on each end
-                oqSpacing = (l0 - olen * nn) / nn
                 margin = 0.0
                 positions = l0 / nn * (np.arange(1, nn + 1) - 0.5)
             else:
@@ -1203,6 +1281,8 @@ class OctupoleInsert:
             scale_factor = self.beta(positions) ** -3 / self.beta_star ** -3
             k3_arr = current * cal_factor * scale_factor
         else:
+            self.tn = tn
+            self.cn = cn
             # Use DN formalism to derive k3 from t-strength
             sn = positions
             bn = l0 * (1 - sn * (l0 - sn) / l0 / f0) / np.sqrt(1.0 - (1.0 - l0 / 2.0 / f0) ** 2)
@@ -1234,18 +1314,25 @@ class OctupoleInsert:
                     seq.append(Drift(l=(positions[i + 1] - positions[i]) - olen, eid=f'D{i + 1:02}'))
             seq.append(Drift(l=l0 - positions[-1] - olen / 2, eid='DmarginR'))
         else:
+            # Octupole locations are ideal
             seq.append(Drift(l=margin, eid='oQImarginL'))
             for i, k3 in zip(range(1, nn + 1), k3_arr):
                 k3l = k3 * olen_eff
                 if otype == 0:
-                    assert olen == 0.0
+                    assert olen == 0.0 and oqSpacing != 0.0
                     seq.append(Drift(l=oqSpacing / 2 + olen / 2, eid=f'oQI{i:02}l'))
                     seq.append(Multipole(kn=[0., 0., 0., k3l], eid=f'QI{i:02}'))
                     seq.append(Drift(l=oqSpacing / 2 + olen / 2, eid=f'oQI{i:02}r'))
                 elif otype == 1:
-                    seq.append(Drift(l=oqSpacing / 2, eid=f'oQI{i:02}l'))
-                    seq.append(Octupole(l=olen, k3=k3, eid=f'QI{i:02}'))
-                    seq.append(Drift(l=oqSpacing / 2, eid=f'oQI{i:02}r'))
+                    # Thick octupoles
+                    if not (drop_empty_drifts and oqSpacing == 0.0):
+                        seq.append(Drift(l=oqSpacing / 2, eid=f'oQI{i:02}l'))
+                    if replace_zero_strength_octupoles and k3 == 0.0:
+                        seq.append(Drift(l=olen, eid=f'QI{i:02}'))
+                    else:
+                        seq.append(Octupole(l=olen, k3=k3, eid=f'QI{i:02}'))
+                    if not (drop_empty_drifts and oqSpacing == 0.0):
+                        seq.append(Drift(l=oqSpacing / 2, eid=f'oQI{i:02}r'))
                 elif otype == 2:
                     assert olen == 0.0
                     seq.append(Drift(l=oqSpacing / 2 + olen / 2, eid=f'oQI{i:02}l'))
@@ -1330,7 +1417,8 @@ class OctupoleInsert:
     def integral_invbeta(self, s0, s1):
         """ Computes integral of 1/beta (i.e. potential*detuning) based on Mathematica derivation """
         assert s0 < s1
-        assert 0 < s0 < self.l0 and 0 < s1 < self.l0
+        assert 0 <= s0 < self.l0
+        assert 0 < s1 <= self.l0 or np.isclose(s1, self.l0, atol=1e-10, rtol=0.0)
         s0 -= self.l0 / 2
         s1 -= self.l0 / 2
         l2 = self.l0 / 2
@@ -1342,7 +1430,8 @@ class OctupoleInsert:
     def integral_beta2(self, s0, s1):
         """ Computes integral of beta^2 (i.e. detuning) based on Mathematica derivation """
         assert s0 < s1
-        assert 0 < s0 < self.l0 and 0 < s1 < self.l0
+        assert 0 <= s0 < self.l0
+        assert 0 < s1 <= self.l0 or np.isclose(s1, self.l0, atol=1e-10, rtol=0.0)
         s0 -= self.l0 / 2
         s1 -= self.l0 / 2
         l2 = self.l0 / 2
@@ -1375,6 +1464,11 @@ class OctupoleInsert:
             return np.sum(detuning_str * central_k3_str)
         else:
             raise Exception("Unsuitable otype!")
+
+    def compute_theoretical_detuning(self):
+        """ Computes continuous integral dQ = Int[1/beta^3 * beta^2]"""
+        integral = self.integral_invbeta(0, self.l0)
+        return 16 * self.tn / (self.cn*self.cn) * integral
 
     def scale_strength(self, factor):
         for el in self.seq:
