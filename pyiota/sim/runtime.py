@@ -177,6 +177,7 @@ class ElegantSimJob:
     def __init__(self,
                  label: str,
                  lattice_options: Dict,
+                 task_options: Dict,
                  work_folder: PurePath,
                  data_folder: Optional[PurePath],
                  run_subfolder: PurePath,
@@ -206,6 +207,7 @@ class ElegantSimJob:
         else:
             self.parameter_file_map = None
         self.lattice_options = lattice_options
+        self.task_options = task_options
         self.task_file_abs_path = self.run_subfolder / task_file_name
         self.lattice_file_abs_path = self.run_subfolder / lattice_file_name
         self.state = STATE.NOT_STARTED
@@ -343,7 +345,8 @@ def run_elegant_sdds_import(task, dry_run: bool = True):
     run_folder = Path(task.run_folder)
     l.info(f'{delta():.3f} Run folder: {run_folder}')
 
-    extensions_to_import = ['twi', 'clo', 'cen', 'fin', 'track', 'sdds', 'fma']
+    extensions_to_import = ['twi', 'clo', 'cen', 'fin', 'track', 'ctrack',
+                            'sdds', 'fma', 'mom', 'bun', 'twi2']
     data = {}
     for ext in extensions_to_import:
         l.info(f'>{delta():.3f} Checking ({ext})')
@@ -352,6 +355,7 @@ def run_elegant_sdds_import(task, dry_run: bool = True):
         if ext == 'sdds' and len(files) > 0:
             raise Exception('.sdds file found?')
         elif ext == 'track':
+            # Track watchpoints
             if len(files) > 0:
                 if dry_run:
                     data[ext] = ['42']
@@ -363,8 +367,26 @@ def run_elegant_sdds_import(task, dry_run: bool = True):
                             sdds.prepare_for_serialization()
                         except Exception as e:
                             l.error(f'>{delta():.3f} Error parsing ({f}), dumping as SDDS:')
-                            sdds = SDDS(files[0], fast=True)
+                            sdds = SDDS(f, fast=True)
                             l.error(sdds.summary())
+                            raise e
+                        tracks.append(sdds)
+                    data[ext] = tracks
+            else:
+                l.info(f'>{delta():.3f} Missing ({ext})')
+        elif ext == 'ctrack':
+            # Centroids watchpoints
+            if len(files) > 0:
+                if dry_run:
+                    data[ext] = ['42']
+                else:
+                    tracks = []
+                    for f in files:
+                        try:
+                            sdds = SDDS(f, fast=False)
+                            sdds.prepare_for_serialization()
+                        except Exception as e:
+                            l.error(f'>{delta():.3f} Error parsing ({f})')
                             raise e
                         tracks.append(sdds)
                     data[ext] = tracks
@@ -381,7 +403,7 @@ def run_elegant_sdds_import(task, dry_run: bool = True):
                 if dry_run:
                     data[ext] = '42'
                 else:
-                    sdds = SDDS(files[0], fast=True)
+                    sdds = SDDS(files[0], fast=False)
                     sdds.prepare_for_serialization()
                     data[ext] = sdds
 
