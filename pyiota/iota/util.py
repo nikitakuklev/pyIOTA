@@ -146,6 +146,32 @@ def build_lattice(lattice_style: str, insert_style: str, nn: int, tn: int, empty
         box.sequence = [ocelot.Marker(eid='START')] + box.sequence + [ocelot.Marker(eid='END')]
         box.update()
         assert np.isclose(l_orig, box.totallen)
+    elif lattice_style == 'iota_iol':
+        # full lattice at iol
+        box = load_iota(method, insert_monitors=insert_monitors)
+        l_orig = box.totallen
+        if insert_style is not None:
+            e1, e2 = box['NLMLDOWN_2'], box['NLMLUP_1']
+            i1, i2 = box.sequence.index(e1), box.sequence.index(e2)
+            qiseq = qi.to_sequence()
+            assert nn % 2 == 0
+            assert len(qiseq) % 2 == 0
+            m = Marker(eid='IOL')
+            qiseq = qiseq[:len(qiseq)//2] + [m] + qiseq[len(qiseq)//2:]
+            seq = box.sequence[:i1 + 1] + qiseq + box.sequence[i2:]
+            box.sequence = seq
+            box.update_element_positions()
+            box.rotate_lattice(m)
+            box.update_element_positions()
+            assert np.isclose(l_orig, box.totallen)
+        else:
+            els_center = box.get_one('OQ09',exact=True)
+            assert isinstance(els_center, Drift)
+            splits = box.split_elements(els_center, n_parts=2, return_new_elements=True)
+            box.rotate_lattice(splits[0][1])
+        box.sequence = [ocelot.Marker(eid='START')] + box.sequence + [ocelot.Marker(eid='END')]
+        box.update()
+        assert np.isclose(l_orig, box.totallen)
     elif lattice_style == 'ideal':
         # just insert
         seq = []
