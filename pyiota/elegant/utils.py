@@ -6,16 +6,19 @@ import h5py
 import numpy as np
 import pandas as pd
 
+
 def compare_twiss_to_box(box, twi: pd.DataFrame):
     df_t = box.twiss_df()
-    df_t['name'] = df_t['name'].shift(1)
+    df_t['name'] = df_t['name'].shift(1).str.lower()
+    twi['ElementName'] = twi['ElementName'].str.lower()
     df_m = df_t.merge(twi, right_on=['ElementName'], left_on=['name'])
     pairs = [('beta_x', 'betax'), ('mux', 'psix'), ('Dx', 'etax'), ('Dxp', 'etaxp'), ('beta_y', 'betay'),
              ('muy', 'psiy'), ('Dy', 'etay'), ('Dyp', 'etayp'), ]
+    assert len(df_m) == min(len(twi)-2, len(df_t)-2)
     for p in pairs:
         v = (df_m.loc[:, p[0]] - df_m.loc[:, p[1]]).abs().max()
         if v > 1e-8:
-            raise Exception(f'Twiss mismatch - failed on pair {p} {v}')
+            raise Exception(f'Twiss mismatch - failed on pair {p}, delta: {v}')
 
 
 # This is a legacy function, deprecated
