@@ -621,7 +621,21 @@ class Writer:
 
         if opt.global_aperture or opt.limiting_aperture:
             sl.append('!APERTURES\n')
-            sl.append('!Default escape criterions in Elegant (from source code): SLOPE_LIMIT=1.0L, COORD_LIMIT=10.0L\n')
+            sl.append('!Default escape in Elegant (from source): SLOPE_LIMIT=1.0L, COORD_LIMIT=10.0L\n')
+
+            if opt.limiting_aperture:
+                preamble += ' APER,'
+                if opt.limiting_aperture != 1:
+                    logger.warning(f'Limiting aperture scaled by ({opt.limiting_aperture})')
+                    sl.append(f'! Limiting aperture scaled by ({opt.limiting_aperture}) from actual\n')
+                    sl.append(f'APER: ECOL, X_MAX={3.9446881e-3 * opt.limiting_aperture:+.10f},'
+                              f' Y_MAX={5.25958413e-3 * opt.limiting_aperture:+.10f}\n')
+                else:
+                    # 1x actual NL aperture
+                    logger.warning(f'Realistic DN aperture added (X_MAX={3.9446881e-3:+.10f},'
+                                   f' Y_MAX={5.25958413e-3:+.10f})')
+                    sl.append(f'! Limiting aperture is not scaled (i.e. is actual)\n')
+                    sl.append('APER: ECOL, X_MAX=3.9446881e-3, Y_MAX=5.25958413e-3\n')
 
             if opt.global_aperture:
                 v = opt.global_aperture
@@ -639,24 +653,11 @@ class Writer:
                 # sl.append('MA1: MAXAMP, X_MAX=0.0381, Y_MAX=0.0381, ELLIPTICAL=1 \n')  # 1.5x aperture
                 # f.write('APER: ECOL, X_MAX=0.008, Y_MAX=0.008 \n')
                 # sl.append('APER: ECOL, X_MAX=0.005925, Y_MAX=0.00789 \n')  # 1.5x actual NL aperture
+                #Jul 2021 - always elliptical now
                 if xm == ym:
                     sl.append(f'MA1: MAXAMP, X_MAX={xm:+.10f}, Y_MAX={ym:+.10f}, ELLIPTICAL=1 \n')
                 else:
                     sl.append(f'MA1: MAXAMP, X_MAX={xm:+.10f}, Y_MAX={ym:+.10f}, ELLIPTICAL=1 \n')
-
-            if opt.limiting_aperture:
-                preamble += ' APER,'
-                if opt.limiting_aperture != 1:
-                    logger.warning(f'Limiting aperture scaled by ({opt.limiting_aperture})')
-                    sl.append(f'! Limiting aperture scaled by ({opt.limiting_aperture}) from actual\n')
-                    sl.append(f'APER: ECOL, X_MAX={3.9446881e-3 * opt.limiting_aperture:+.10f},'
-                              f' Y_MAX={5.25958413e-3 * opt.limiting_aperture:+.10f}\n')
-                else:
-                    # 1x actual NL aperture
-                    logger.warning(f'Realistic DN aperture added (X_MAX={3.9446881e-3:+.10f},'
-                                   f' Y_MAX={5.25958413e-3:+.10f})')
-                    sl.append(f'! Limiting aperture is not scaled (i.e. is actual)\n')
-                    sl.append('APER: ECOL, X_MAX=3.9446881e-3, Y_MAX=5.25958413e-3\n')
 
             #           'is very large (10m), and there are timing issues with CLEAN\n')
             # sl.append('!It needs change_t, which doesnt work for 4D tracking (when RF has not been setup)\n')

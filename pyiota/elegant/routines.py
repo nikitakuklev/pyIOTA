@@ -89,6 +89,7 @@ def template_task_track_watchpoint(box: LatticeContainer, t: Task, **kwargs):
     create_file = kwargs.get('create_file', False)
     rf_mode = kwargs.get('rf_mode', None)
 
+    t.setup_global_settings()
     t.setup_run_setup(p=box.pc, beamline='iota', rootname='test')
     assert isinstance(box.sequence[0], Marker)
 
@@ -124,6 +125,7 @@ def template_task_closed_orbit(box: LatticeContainer, t: Task, **kwargs):
     # Expect no extra parameters
     assert len(kwargs) == 0
     # t.setup_subprocess_mkdir()
+    t.setup_global_settings()
     t.setup_run_setup(p=box.pc, beamline='iota', rootname='test')
     t.setup_run_control()
     t.action_twiss(create_file=True, output_at_each_step=1)
@@ -234,7 +236,3 @@ def template_fma_setup(box: LatticeContainer, t: Task, **kwargs):
         raise Exception('RF mode MUST be specified')
 
     t.setup_bunched_beam()
-
-
-def fma_read_results():
-    pass
