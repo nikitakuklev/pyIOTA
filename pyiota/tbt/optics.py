@@ -289,8 +289,6 @@ class Phase:
     def relative_to_absolute(phases: np.ndarray) -> np.ndarray:
         """
         Converts relative phases to absolutes, assuming first phase is 0. Only works if all deltas < 2pi
-        :param phases:
-        :return:
         """
         phases_rel = phases.copy()
         phases_cum = np.zeros_like(phases)
@@ -361,6 +359,34 @@ class Envelope:
     def __init__(self, data_trim=None, output_trim=None):
         self.data_trim = data_trim
         self.output_trim = output_trim
+
+    # The following F4 terms are from lee/nadolski 4D treatment
+    @staticmethod
+    def F4D_chroma(n, chrom_x, sigma_e, nu_s):
+        theta = 2*np.pi*chrom_x*sigma_e*np.sin(np.pi*n*nu_s)/nu_s
+        F = np.exp(-theta*theta/2)
+        return F
+
+    @staticmethod
+    def F4D_xx(n, j_x, sigma_x, k_xx):
+        theta = 4 * np.pi * k_xx * sigma_x * sigma_x * n
+        F = 1 / (1+theta*theta) * np.exp(-(j_x * theta * theta) / (2 * sigma_x * sigma_x * (1 + theta * theta)))
+        return F
+
+    @staticmethod
+    def F4D_xy(n, j_y, sigma_y, k_xy):
+        theta = 4 * np.pi * k_xy * sigma_y * sigma_y * n
+        F = 1 / (1+theta*theta) * np.exp(-(j_y * theta * theta) / (2 * sigma_y * sigma_y * (1 + theta * theta)))
+        return F
+
+    @staticmethod
+    def lee_4D(x, chrom_x, sigma_e, nu_s, j_x, sigma_x, k_xx, j_y, sigma_y, k_xy):
+        chroma = Envelope.F4D_chroma(x, chrom_x, sigma_e, nu_s,)
+        xx = Envelope.F4D_xx(x, j_x, sigma_x, k_xx)
+        xy = Envelope.F4D_xy(x, j_y, sigma_y, k_xy)
+        return chroma, xx, xy
+
+
 
     # def budkerfit(xdata, amplitude, tau, c2, freq, ofsx, ofsy):
     #     return amplitude*np.exp(-tau*(xdata-ofsx)**2)*np.exp(-c2*(1-np.cos(freq*(xdata-ofsx)))) + ofsy
