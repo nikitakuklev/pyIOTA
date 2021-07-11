@@ -1,9 +1,11 @@
 __all__ = ['Knob', 'KnobVariable', 'parse_knobs', 'parse_lattice']
 
+import functools
 import itertools
 import logging
 import operator
 import time
+import re
 from pathlib import Path
 from typing import Callable, Dict
 
@@ -18,6 +20,11 @@ logger = logging.getLogger(__name__)
 
 # Static methods to parse files from 6Dsim format
 
+@functools.lru_cache(maxsize=None)
+def __get_pattern(k):
+    ke = re.escape(k)
+    pattern = r'([()\s=\-+*/])' + f'({ke})' + r'([\s()=\-+*/])'
+    return re.compile(pattern)
 
 def __replace_vars(assign: str, variables: Dict) -> str:
     """
@@ -26,8 +33,24 @@ def __replace_vars(assign: str, variables: Dict) -> str:
     :param variables:
     :return: Processed string
     """
+    assign = ' ' + assign + ' '
     for k, v in variables.items():
-        assign = assign.replace(k, '(' + v + ')', 1)
+        if k in assign:
+            #ke = re.escape(k)
+            p = __get_pattern(k)
+            #pattern = r'[()\s=\-+*/]' + f'({ke})' + r'[\s()=\-+*/]'
+            assign = p.sub(r'\1' + f'({v})' + r'\3', assign)
+            #print(assign)
+            #match = re.search(pattern, assign)
+            # matches = re.findall(pattern, assign)
+            # for match in matches:
+            #     if match is not None:
+            #         #print(k, pattern, match)
+            #         s = match.start(1)
+            #         assign = assign[:s] + f'({v})' + assign[match.end(1):]
+            #         #print(assign)
+            #         #assign = assign.replace(k, '(' + v + ')', 1)
+    assign = assign.strip()
     return assign
 
 
@@ -83,7 +106,7 @@ def __parse_id_line(line: str, output_dict: Dict, resolve_against: Dict, verbose
     output_dict[name] = (element, pars_dict)
 
 
-def parse_lattice(fpath: Path, verbose: bool = False):
+def parse_lattice(fpath: Path, verbose: bool = False, allow_edgeless_dipoles=False, unsafe: bool = False):
     """
     Parses 6Dsim lattice into native OCELOT object, preserving all compatible elements. All variables
     are resolved to their final numeric values, and evaluated - this is an UNSAFE operation for unstrusted
@@ -111,7 +134,9 @@ def parse_lattice(fpath: Path, verbose: bool = False):
 
     with open(str(fpath), 'r') as f:
         lines = f.readlines()
+        lcnt = 0
         for line in lines:
+            lcnt += 1
             line = line.strip()
             if line.startswith('//') or line == '':
                 continue
@@ -141,10 +166,22 @@ def parse_lattice(fpath: Path, verbose: bool = False):
                     assign = assign.strip()
                     # print('Analyzing line: {}'.format(line))
                     assign = __resolve_vars(assign, variables)
-                    variables[var] = assign
+                    #variables[var] = assign
                     # print('Variable ({}) resolved to ({})'.format(var, assign))
                     # print(variables)
-                    value = eval(assign)
+                    #extra funcs
+                    sqrt = np.sqrt
+                    tan = Tan = np.tan
+                    sin = Sin = np.sin
+                    cos = Cos = np.cos
+                    try:
+                        value = eval(assign)
+                        variables[var] = value
+                    except Exception as e:
+                        print(f'Failed parse on line #{lcnt}')
+                        print(variables)
+                        print(assign)
+                        raise e
                     if verbose: print(f'Variable ({var}) evaluated to ({value})')
                     lattice_vars[var.strip('$')] = value
                     continue
@@ -201,55 +238,79 @@ def parse_lattice(fpath: Path, verbose: bool = False):
 
     for item in lattice:
         (el_type, props) = elements[item]
-        if el_type not in mapping:
-            raise Exception(f'Type {el_type} not in translation map')
-        type_mapped = mapping[el_type]
-        if type_mapped is None:
-            continue
-        shared_kwargs = {}
-        for k, v in shared_parameter_map.items():
-            result = props.get(k, None)
-            if result is not None:
-                shared_kwargs[v[0]] = v[1](result)
-        shared_kwargs['eid'] = item.upper()
-        if type_mapped == Drift:
-            oel = Drift(**shared_kwargs)
-        elif type_mapped == SBend:
-            oel = SBend(angle=props['L'] / ((pc / 0.299792458) / props['Hy']),
-                        k1=props['G'] / field_to_gradient_factor,
-                        **shared_kwargs)
-        elif type_mapped == Edge:
-            oel = Edge(gap=props['poleGap'] / 100,  # full gap, not half
-                       fint=props['fringeK'],
-                       **shared_kwargs)
-        elif type_mapped == Quadrupole:
-            if el_type == 'SQuad':
-                oel = Quadrupole(k1=props['G'] / field_to_gradient_factor,
-                                 tilt=np.pi / 4,
-                                 **shared_kwargs)
+        try:
+            if el_type not in mapping:
+                raise Exception(f'Type {el_type} not in translation map')
+            type_mapped = mapping[el_type]
+            if type_mapped is None:
+                continue
+            shared_kwargs = {}
+            for k, v in shared_parameter_map.items():
+                result = props.get(k, None)
+                if result is not None:
+                    shared_kwargs[v[0]] = v[1](result)
+            shared_kwargs['eid'] = item.upper()
+            if type_mapped == Drift:
+                oel = Drift(**shared_kwargs)
+            elif type_mapped == SBend:
+                if 'G' in props:
+                    k1 = props['G'] / field_to_gradient_factor
+                else:
+                    k1 = 0
+                oel = SBend(angle=props['L'] / ((pc / 0.299792458) / props['Hy']),
+                            k1=k1,
+                            **shared_kwargs)
+                if unsafe:
+                    oel.e1 = props.get('inA',0.0)
+                    oel.e2 = props.get('outA',0.0)
+            elif type_mapped == Edge:
+                if ('poleGap' not in props or getattr(props, 'inA', 0.0) != 0.0) and unsafe:
+                    logger.warning(f'Weird edge {item} - {props}, ignoring inv. curvature')
+                    oel = Edge(**shared_kwargs, edge=props['inA'])
+                    #oel.angle = props['L'] / ((pc / 0.299792458) / props['Hy'])
+                    #oel.inA = props['inA']
+                    oel.Hy = props['Hy']
+                else:
+                    oel = Edge(gap=props['poleGap'] / 100,  # full gap, not half
+                               fint=props['fringeK'],
+                               **shared_kwargs)
+            elif type_mapped == Quadrupole:
+                if el_type == 'SQuad':
+                    oel = Quadrupole(k1=props['G'] / field_to_gradient_factor,
+                                     tilt=np.pi / 4,
+                                     **shared_kwargs)
+                else:
+                    oel = Quadrupole(k1=props['G'] / field_to_gradient_factor,
+                                     **shared_kwargs)
+            elif type_mapped == Multipole:
+                if 'M2N' in props and len(props) <= 3:
+                    # Sextupole (length and M2N props)
+                    oel = Sextupole(k2=float(props['M2N']) / field_to_gradient_factor, **shared_kwargs)
+                else:
+                    if unsafe:
+                        logger.warning(f'Missing multipole strengths, using drift ({item}|{props})')
+                        oel = Drift(**shared_kwargs)
+                    else:
+                        raise Exception(f"Multipole that is not a sextupole detected ({item}|{el_type}|{type_mapped}|{props})")
+            elif type_mapped == Solenoid:
+                oel = Drift(**shared_kwargs)
+            elif type_mapped == Cavity:
+                oel = Cavity(v=props['U'],
+                             freq=props['F'],
+                             **shared_kwargs)
             else:
-                oel = Quadrupole(k1=props['G'] / field_to_gradient_factor,
-                                 **shared_kwargs)
-        elif type_mapped == Multipole:
-            if 'M2N' in props and len(props) <= 2:
-                # Sextupole (length and M2N props)
-                oel = Sextupole(k2=float(props['M2N']) / field_to_gradient_factor, **shared_kwargs)
-            else:
-                raise Exception(f"Multipole that is not a sextupole detected ({item}|{el_type}|{type_mapped}|{props})")
-        elif type_mapped == Solenoid:
-            oel = Drift(**shared_kwargs)
-        elif type_mapped == Cavity:
-            oel = Cavity(v=props['U'],
-                         freq=props['F'],
-                         **shared_kwargs)
-        else:
-            raise Exception(f'Empty ocelot object produced converting ({item}|{el_type}|{type_mapped}|{props})')
-        lattice_list.append(oel)
+                raise Exception(f'Empty ocelot object produced converting ({item}|{el_type}|{type_mapped}|{props})')
+            lattice_list.append(oel)
+        except Exception as e:
+            print('Element conversion failed!')
+            print((item,el_type, props))
+            raise e
 
     # Dipole edge combination
     lattice_ocelot = lattice_list.copy()
     assert len(lattice) == len(lattice_list)
     edge_count = 0
+    edge_warn_exclusions = []
     for i, (k, v) in enumerate(zip(lattice, lattice_list)):
         if isinstance(v, Edge):
             edge_count += 1
@@ -257,7 +318,13 @@ def parse_lattice(fpath: Path, verbose: bool = False):
             e1 = lattice_list[i - 1]
             e2 = lattice_list[i + 1]
             if not isinstance(e1, Edge) or not isinstance(e2, Edge):
-                raise Exception(f'Found sector bend {k} without edge elements - this is not allowed')
+                if allow_edgeless_dipoles:
+                    if k not in edge_warn_exclusions:
+                        logger.warning(f'Found sector bend {k} without edge elements (e1={e1.id}, e2={e2.id})')
+                        edge_warn_exclusions.append(k)
+                    continue
+                else:
+                    raise Exception(f'Found sector bend {k} without edge elements - this is not allowed')
             assert e1.gap == e2.gap
             assert e1.fint == e2.fint
             v.fint = e1.fint
