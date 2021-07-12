@@ -1,10 +1,12 @@
 __all__ = ['ErrorGenerator']
 
+import logging
 from typing import List
 import numpy as np
 import scipy.stats as stats
-from ocelot import Element, Quadrupole, Sextupole, Octupole
+from ocelot import Element, Quadrupole, Sextupole, Octupole, SBend
 
+logger = logging.getLogger(__name__)
 
 class ErrorGenerator:
     """
@@ -27,7 +29,7 @@ class ErrorGenerator:
         self.dtilt = dtilt
         self.cutoff = cutoff_sigma
 
-    ref_params = {Quadrupole: 'k1', Sextupole: 'k2', Octupole: 'k3'}
+    ref_params = {SBend: 'fse', Quadrupole: 'k1', Sextupole: 'k2', Octupole: 'k3'}
 
     @property
     def summary(self):
@@ -46,7 +48,7 @@ class ErrorGenerator:
                    ref_str: List[float] = None,
                    param_dict=None):
         """
-        Adds normally distributed error to specified elements and parameters. BY default, saves previous values
+        Adds normally distributed error to specified elements and parameters. By default, saves previous values
         of strength to reference parameters if they don't already exist.
         Can be used standalone, but intended for repeated calls without arguments to keep generating new seeds
         :param elements: Elements to apply errors to
@@ -60,11 +62,11 @@ class ErrorGenerator:
         :return: 2D array of generated errors in parameter order
         """
         elements = elements or self.elements
-        abse = abse or self.abse
-        fse = fse or self.fse
-        dx = dx or self.dx
-        dy = dy or self.dy
-        dtilt = dtilt or self.dtilt
+        abse = abse or self.abse or 0.0
+        fse = fse or self.fse or 0.0
+        dx = dx or self.dx or 0.0
+        dy = dy or self.dy or 0.0
+        dtilt = dtilt or self.dtilt or 0.0
 
         for v in [abse, fse, dx, dy, dtilt]:
             assert v >= 0.0
@@ -85,6 +87,9 @@ class ErrorGenerator:
         for i, el in enumerate(elements):
             # Per element type errors
             param = param_dict[el.__class__]
+            if not hasattr(el, param):
+                logger.warning(f'Element {el.id}|{el.__class__.__name__} has no error attribute {param}')
+                continue
             param_ref = param + '_ref'
             if ref_str:
                 ref_k = ref_str[i]
@@ -97,6 +102,7 @@ class ErrorGenerator:
 
             v = errors[i, 0]  # fse
             v2 = errors[i, 1]  # abse
+            #if v > 0.0 and v2 > 0.0:
             setattr(el, param, ref_k + ref_k * v + v2)
 
             # These are shared for all elements, and are assumed to have 0.0 mean0
