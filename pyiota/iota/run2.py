@@ -31,6 +31,9 @@ class BPMS:
 
     ACNET_NAMES = to_acnet.__func__(LATTICE_NAMES)
 
+    ACNET_NAMES_LATTICE_ORDER = to_acnet.__func__(['IBA1C', 'IBA2R', 'IBA3R', 'IBB1R', 'IBB2R', 'IBC1R', 'IBC2R', 'IBD1R', 'IBD2R', 'IBE1R', 'IBE2R', 'IBE2L', 'IBE1L', 'IBD2L', 'IBD1L',
+                     'IBC2L', 'IBC1L', 'IBB2L', 'IBB1L', 'IBA3L', 'IBA2L'])
+
     H = add_axis.__func__(LATTICE_NAMES, 'H')
     HA = to_acnet.__func__(H)
 
