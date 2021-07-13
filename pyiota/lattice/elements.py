@@ -1,9 +1,11 @@
 from __future__ import annotations
 
-__all__ = ['LatticeContainer', 'NLLens', 'HKPoly', 'IBScatter', 'HKPoly', 'ILMatrix', 'OctupoleInsert', 'NLInsert', 'Recirculator']
+__all__ = ['LatticeContainer', 'NLLens', 'HKPoly', 'IBScatter', 'HKPoly', 'ILMatrix', 'OctupoleInsert', 'NLInsert',
+           'Recirculator']
 
 import logging
 import math
+import time
 from enum import Enum
 from pathlib import Path
 
@@ -98,8 +100,11 @@ class LatticeContainer:
     @property
     def beamsheet(self):
         return pd.DataFrame(data=[{'name': el.id, 'type': el.__class__.__name__, 'l': el.l,
+                                   'dx': el.dx, 'dy': el.dy, 'tilt': el.tilt,
                                    's_start': el.s_start, 's_mid': el.s_mid, 's_end': el.s_end,
-                                   'k3': getattr(el,'k3',0.0)}
+                                   'k1': getattr(el, 'k1', 0.0),
+                                   'k2': getattr(el, 'k2', 0.0),
+                                   'k3': getattr(el, 'k3', 0.0)}
                                   for el in self.lattice.sequence])
 
     @property
@@ -452,7 +457,7 @@ class LatticeContainer:
         Uses special pairwise partial sums to increase precision at cost of performance scaling.
         :return: None
         """
-        #l = 0.0
+        # l = 0.0
         slist = []
         llist = [0.0]
         for i, el in enumerate(self.lattice.sequence):
@@ -460,13 +465,81 @@ class LatticeContainer:
             el.s_start = l
             el.s_mid = l + el.l / 2
             el.s_end = l + el.l
-            #l += el.l
+            # l += el.l
             llist.append(el.l)
             slist.append(el.s_mid)
         self.totallen = self.lattice.sequence[-1].s_end
         return slist
 
-    def update_twiss(self, n_points: int = None, update_maps: bool = True, tws0: Twiss = None) -> List[Twiss]:
+    def _update_elements(self, el_list):
+        for el in el_list:
+            if el.__class__ == Edge:
+                raise Exception
+            el.transfer_map = self.lattice.method.create_tm(el)
+
+    # @staticmethod
+    # def _transfer_maps_mult_linear_py(Ra, Ta, Rb, Tb):
+    #     Rc = np.dot(Rb, Ra)
+    #     return Rc
+
+    def _update_linear_map(self, energy):
+        Ra = np.eye(6)
+        Ba = np.zeros((6, 1))
+        # Ta = np.zeros((6, 6, 6))
+        E = energy
+        for i, elem in enumerate(self.lattice.sequence):
+            # Rb = #elem.transfer_map.R0
+            Rb = elem.transfer_map.R(E)
+            Bb = elem.transfer_map.B(E)
+            Ba = np.dot(Rb, Ba) + Bb
+            E += elem.transfer_map.delta_e
+            # Ra, Ta = transfer_maps_mult(Ra, Ta, Rb, Tb=np.zeros((6, 6, 6)))
+            Ra = np.dot(Rb, Ra)
+        # self.lattice.T_sym = Ta
+        # self.lattice.T = unsym_matrix(deepcopy(Ta))
+        self.lattice.E = E
+        self.lattice.R = Ra
+        self.lattice.B = Ba
+        return Ra
+
+    def _twiss_at_elements(self, el_list, tws0=None, update_maps=True, debug=False):
+        """
+        Modified ocelot twiss for faster opti
+        """
+        if debug:
+            t1 = time.perf_counter()
+        if update_maps:
+            self.lattice.update_transfer_maps()
+        if debug:
+            t12 = time.perf_counter()
+        if tws0 is None:
+            m = self._update_linear_map(0.0)
+            tws0 = periodic_twiss(tws0, m)
+            if tws0 is None:
+                return None
+        tws0.gamma_x = (1. + tws0.alpha_x ** 2) / tws0.beta_x
+        tws0.gamma_y = (1. + tws0.alpha_y ** 2) / tws0.beta_y
+        obj_list = {}
+        if debug:
+            t2 = time.perf_counter()
+        for e in self.lattice.sequence:
+            tws0 = e.transfer_map * tws0
+            if e in el_list:
+                tws0.id = e.id
+                obj_list[e] = tws0
+        if debug:
+            t3 = time.perf_counter()
+        results = []
+        for e_ref in el_list:
+            results.append(obj_list[e_ref])
+        if debug:
+            t4 = time.perf_counter()
+            print(
+                f'(Sorting: {t4 - t3:.5f} | Apply: {t3 - t2:.5f} | Periodic: {t2 - t12:.5f} | upd {update_maps}: {t12 - t1:.5f}')
+        return results
+
+    def update_twiss(self, n_points: int = None, update_maps: bool = True,
+                     tws0: Twiss = None, at_start: bool = None, at_end: bool = None) -> List[Twiss]:
         """
         Update twiss and return list of Twiss objects
         :param n_points: Number of points or once per element (at end) if not specified
@@ -477,6 +550,12 @@ class LatticeContainer:
         if update_maps:
             self.lattice.update_transfer_maps()
         self.tws = twiss(self.lattice, nPoints=n_points, tws0=tws0)
+        if self.tws is None:
+            return None
+        if at_start:
+            return self.tws[:-1]
+        elif at_end:
+            return self.tws[1:]
         return self.tws
 
     twiss = update_twiss
@@ -540,6 +619,8 @@ class LatticeContainer:
             data[i, :] -= b.tws.muy
         self.bpm_phases['y']['model'] = pd.DataFrame(index=bpm_names, columns=bpm_names, data=data)
 
+        return table_optics
+
     def twiss_model(self, bpm_names: List[str, Monitor]) -> List[Tuple]:
         """
         Compiles twiss model - list of (bpm,twiss) tuples for all bpm names
@@ -564,7 +645,8 @@ class LatticeContainer:
         for bpm in bpms[1:]:
             idx = self.sequence.index(bpm)
             tw = tws[idx]
-            assert tw.s == bpm.s_end
+            if not np.isclose(tw.s, bpm.s_end, atol=1e-10, rtol=0.0):
+                raise ValueError(f'Twiss mismatch: {bpm.__dict__} vs {tw.__dict__}')
             if idx > last_idx:
                 if wrapped_around:
                     tw.mux += nux
@@ -587,6 +669,16 @@ class LatticeContainer:
         assert len(twiss_model) == len(bpm_names)
         assert bpms[0] == twiss_model[0][0]
         return twiss_model
+
+    def twiss_df(self, n_points: int = None, update_maps: bool = True, tws0: Twiss = None):
+        tws = self.update_twiss(n_points, update_maps, tws0)
+        attrs_list = ['s', 'beta_x', 'beta_y', 'mux', 'muy', 'alpha_x', 'alpha_y', 'Dx', 'Dxp', 'Dy', 'Dyp', 'gamma_x',
+                      'gamma_y']
+        rows = [{v: getattr(t, v) for v in attrs_list} for t in tws]
+        df = pd.DataFrame(data=rows)
+        if n_points is None:
+            df['name'] = [el.id for el in self.sequence] + ['TWISS_END']
+        return df
 
     def insert_extra_markers(self, spacing: float = 1.0):
         """
@@ -1026,7 +1118,7 @@ class LatticeContainer:
                 seq = names[el.id]
                 names[el.id] += 1
                 el.id = el.id + f'_{seq}'
-                #logger.info(f'New name {el.id}')
+                # logger.info(f'New name {el.id}')
             else:
                 names[el.id] = 1
         self.update()
@@ -1094,6 +1186,7 @@ class Recirculator(Element):
 
 class IBScatter(Element):
     """ IBSCATTER """
+
     def __init__(self, eid: str = None):
         Element.__init__(self, eid)
 
@@ -1195,7 +1288,7 @@ class OctupoleInsert:
 
     def configure(self, oqK: Union[float, np.ndarray] = 1.0,
                   run: int = None, l0: float = 1.8, mu0: float = 0.3, otype: int = 1,
-                  olen: Union[float,None] = 0.07, nn: int = 17,
+                  olen: Union[float, None] = 0.07, nn: int = 17,
                   ospacing: float = None,
                   current: float = None,
                   tn=0.4, cn=0.01,
@@ -1239,8 +1332,12 @@ class OctupoleInsert:
 
         olen_eff = olen_eff or olen or l0 / nn
 
-        print(f'QI element - l0:{l0}|nn:{nn}|run:{run}|olen:{olen:.3f}|oqSpacing:{oqSpacing:.3f}|drop:{drop_empty_drifts}')
-
+        if current:
+            print(
+                f'QI - l0:{l0}|nn:{nn}|c:{current}|run:{run}|olen:{olen:.3f}|space:{oqSpacing:.3f}|drop:{drop_empty_drifts}')
+        else:
+            print(
+                f'QI - l0:{l0}|nn:{nn}|tn:{tn}|cn:{cn}|run:{run}|olen:{olen:.3f}|space:{oqSpacing:.3f}|drop:{drop_empty_drifts}')
         if positions is None:
             perturbed_mode = False
             if run is None:
@@ -1468,7 +1565,7 @@ class OctupoleInsert:
     def compute_theoretical_detuning(self):
         """ Computes continuous integral dQ = Int[1/beta^3 * beta^2]"""
         integral = self.integral_invbeta(0, self.l0)
-        return 16 * self.tn / (self.cn*self.cn) * integral
+        return 16 * self.tn / (self.cn * self.cn) * integral
 
     def scale_strength(self, factor):
         for el in self.seq:
@@ -1487,7 +1584,7 @@ class OctupoleInsert:
                 raise Exception("Unsupported otype")
 
     def set_current(self):
-        pass
+        raise Exception
 
     def to_sequence(self):
         return self.seq
@@ -1503,7 +1600,8 @@ class NLInsert:
         self.seq = []
         self.configure(**kwargs)
 
-    def configure(self, oqK=1.0, tn=0.4, cn=0.01, run=2, l0=1.8, mu0=0.3, olen=0.06, nn=18):
+    def configure(self, oqK=1.0, tn=0.4, cn=0.01, run=2, l0=1.8, mu0=0.3, olen=0.06, nn=18,
+                  ospacing=None, olen_eff=None):
         """
         Initializes QI configuration
         :param l0: #l0     = 1.8;        # length of the straight section
@@ -1517,12 +1615,26 @@ class NLInsert:
         # tn = 0.4  # strength of nonlinear lens
         # cn = 0.01  # dimentional parameter of nonlinear lens
 
-        if run == 1:
+        if sum(1 for ct in [olen is not None, ospacing is not None] if ct) != 1:
+            raise Exception("Exactly one length spec allowed")
+        if ospacing is not None:
+            oqSpacing = ospacing
+            olen = (l0 - ospacing * nn) / nn
+        else:
+            oqSpacing = (l0 - olen * nn) / nn
+
+        olen_eff = olen_eff or olen or l0 / nn
+
+        if run is None:
+            # Ideal configuration - all magnets equidistant
+            margin = 0.0
+            positions = l0 / nn * (np.arange(1, nn + 1) - 0.5)
+        #elif run == 1:
             # Margins on the sides were present
-            oqSpacing = 0.03325  # (1.8-0.022375-0.022375-17*0.07)/17
-            margin = 0.022375  # extra margin at the start and end of insert
-            positions = margin + (l0 - 2 * margin) / nn * (np.arange(1, nn + 1) - 0.5)
-        elif run == 2:
+            #oqSpacing = 0.03325  # (1.8-0.022375-0.022375-17*0.07)/17
+            #margin = 0.022375  # extra margin at the start and end of insert
+            #positions = margin + (l0 - 2 * margin) / nn * (np.arange(1, nn + 1) - 0.5)
+        elif run == 2 or run == 1:
             # Perfect spacing with half drift on each end
             oqSpacing = (l0 - olen * nn) / nn
             margin = 0.0
@@ -1533,12 +1645,13 @@ class NLInsert:
         # musect = mu0 + 0.5
         f0, betae, alfae, betas = self.calculate_optics_parameters()
 
-        print(f"Insert optics: mu0:{mu0:.3f}|f0:{f0:.3f}|1/f0:{1 / f0:.3f}|"
-              f"betaedge:{betae:.3f}|alphaedge:{alfae:.3f}|betastar:{betas:.3f}")
+        print(f'ML - l0:{l0}|nn:{nn}|tn:{tn}|cn:{cn}|run:{run}|olen:{olen:.3f}|space:{oqSpacing:.3f}|bs:{betas:.3f}')
+        # print(f"Insert optics: mu0:{mu0:.3f}|f0:{f0:.3f}|1/f0:{1 / f0:.3f}|"
+        #       f"betaedge:{betae:.3f}|alphaedge:{alfae:.3f}|betastar:{betas:.3f}")
         # value, , oqK, nltype, otype;
 
         self.seq = seq = []
-        seq.append(Drift(l=margin, eid='oNLmargin'))
+        seq.append(Drift(l=margin, eid='oNLmarginL'))
         for i in range(1, nn + 1):
             sn = positions[i - 1]
             bn = l0 * (1 - sn * (l0 - sn) / l0 / f0) / np.sqrt(1.0 - (1.0 - l0 / 2.0 / f0) ** 2)
@@ -1548,12 +1661,13 @@ class NLInsert:
             k1 = knn * 2  # 1 * 2!
             k3 = knn / cn ** 2 / bn * 16  # 2 / 3 * 4!
             k3scaled = k3 * oqK
+            knll *= oqK
 
             seq.append(Drift(l=oqSpacing / 2, eid=f'oNL{i:02}l'))
             seq.append(NLLens(l=olen, knll=knll, cnll=cnll, eid=f'NL{i:02}'))
             seq.append(Drift(l=oqSpacing / 2, eid=f'oNL{i:02}r'))
             # value, i, bn, sn, k3, k3scaled, (betas ^ 3 / bn ^ 3);
-        seq.append(Drift(l=margin, eid='oNLmargin'))
+        seq.append(Drift(l=margin, eid='oNLmarginR'))
         l_list = [e.l for e in seq]
         assert np.isclose(sum(l_list), l0)
 
