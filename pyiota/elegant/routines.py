@@ -75,7 +75,9 @@ def template_task_track_single(box: LatticeContainer, t: Task, **kwargs):
 
 def template_task_track_watchpoint(box: LatticeContainer, t: Task, **kwargs):
     """ Task template for tracking over many turns """
-    assert len(kwargs) <= 6
+    if len(kwargs) >= 8:
+        print(kwargs)
+        raise Exception
     keys = set(kwargs.keys())
     critical_args = {'n_turns'}
     missing = critical_args.difference(keys)
@@ -88,15 +90,26 @@ def template_task_track_watchpoint(box: LatticeContainer, t: Task, **kwargs):
     bunch_dict = kwargs.get('bunch_dict', None)
     create_file = kwargs.get('create_file', False)
     rf_mode = kwargs.get('rf_mode', None)
+    chrom = kwargs.get('chrom', None)
 
     t.setup_global_settings()
     t.setup_run_setup(p=box.pc, beamline='iota', rootname='test')
     assert isinstance(box.sequence[0], Marker)
 
     t.setup_run_control(n_passes=n_turns)
+
+    # chrom
+    if chrom is not None:
+        bothnan = np.isnan(chrom[1]) and np.isnan(chrom[2])
+        notnan = not np.isnan(chrom[1]) and not np.isnan(chrom[1])
+        assert bothnan or notnan
+        if notnan:
+            t.setup_chromaticity(families=chrom[0], dnux_dp=chrom[1], dnuy_dp=chrom[2],
+                                 change_defined_values=1, n_iterations=10, exit_on_failure=1)
+
     t.action_twiss(create_file=True, full=True)
     t.action_twiss(create_file=True, full=True, ext='twi2', output_at_each_step=1)
-
+    t.action_moments(create_file=True, full=True, output_at_each_step=1)
     t.setup_closed_orbit(verbosity=1)
 
     # RF
@@ -122,13 +135,20 @@ def template_task_track_watchpoint(box: LatticeContainer, t: Task, **kwargs):
 
 def template_task_closed_orbit(box: LatticeContainer, t: Task, **kwargs):
     """ Task template for determining closed orbit - also computes twiss to check stability """
-    # Expect no extra parameters
-    assert len(kwargs) == 0
-    # t.setup_subprocess_mkdir()
+    #assert len(kwargs) <= 1
+
+    rf_mode = kwargs.get('rf_mode', None)
     t.setup_global_settings()
     t.setup_run_setup(p=box.pc, beamline='iota', rootname='test')
     t.setup_run_control()
-    t.action_twiss(create_file=True, output_at_each_step=1)
+    t.action_twiss(create_file=True, full=True, output_at_each_step=1)
+    t.action_moments(create_file=True, full=True, output_at_each_step=1)
+    if rf_mode == 'rf':
+        t.setup_rf(total_voltage=340.0, each_step=True)
+    elif isinstance(rf_mode, (float, int)):
+        t.setup_rf(total_voltage=rf_mode, each_step=True)
+    elif rf_mode is None:
+        pass
     t.setup_bunched_beam(mode='empty')
     t.setup_closed_orbit(verbosity=1, create_file=True)
     t.action_track(orbit='default')
