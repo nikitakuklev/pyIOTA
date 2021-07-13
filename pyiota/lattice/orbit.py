@@ -11,6 +11,8 @@ import scipy.optimize
 
 def get_closed_orbit(box: LatticeContainer,
                      backend: str = 'ocelot',
+                     lattice_options_extra: dict = None,
+                     task_options: dict = None,
                      **kwargs) -> (pd.DataFrame, Tuple):
     """
     Read out closed orbit
@@ -33,28 +35,35 @@ def get_closed_orbit(box: LatticeContainer,
     :return: class Particle
     """
     if backend == 'elegant':
-        import pyIOTA.sim as sim
-        import pyIOTA.elegant as elegant
-        import pyIOTA.util.config as cfg
+        import pyiota.sim as sim
+        import pyiota.elegant as elegant
+        import pyiota.util.config as cfg
 
         # Create elegant task
         dc = sim.DaskClient()
         lattice_options = {'sr': 0, 'isr': 0, 'dip_kicks': 64, 'quad_kicks': 32, 'sext_kicks': 16, 'oct_kicks': 16}
+        if lattice_options_extra:
+            lattice_options.update(lattice_options_extra)
+        task_options = task_options or {}
         params = {'label': 'auto_closed_orbit'}
         et = elegant.routines.standard_sim_job(work_folder=cfg.DASK_DEFAULT_WORK_FOLDER,
                                                lattice_options=lattice_options,
                                                add_random_id=True,
+                                               task_options=task_options,
                                                **params)
         t = elegant.Task(relative_mode=True, run_folder=et.run_subfolder, lattice_path=et.lattice_file_abs_path)
-        elegant.template_task_closed_orbit(box, t)
+        elegant.template_task_closed_orbit(box, t, **task_options)
         et.task_file_contents = t.compile()
-        et.lattice_file_contents = box.to_elegant(lattice_options=lattice_options)
+        et.lattice_file_contents = box.to_elegant(lattice_options=lattice_options, silent=True)
 
         futures = dc.submit_to_elegant([et], dry_run=False, pure=False)
         future = futures[0]
         (data, etaskresp) = future.result(30)
         assert etaskresp.state == sim.STATE.ENDED
-        assert data.returncode == 0
+        if data.returncode != 0:
+            print(etaskresp)
+            print(data)
+            raise Exception
 
         futures = dc.read_out([etaskresp], dry_run=False)
         future = futures[0]
@@ -67,13 +76,15 @@ def get_closed_orbit(box: LatticeContainer,
         df_elegant = clo.df()
         df_elegant = df_elegant.drop(0).reset_index(drop=True)
         df_ocelot = df_ocelot[df_ocelot.loc[:, 'class'] != 'Edge'].reset_index(drop=True)
-        assert len(df_elegant) == len(df_ocelot)
-        assert np.all(df_ocelot['id'].str.upper() == df_elegant['ElementName'].str.upper())
-        assert np.all(np.isclose(df_ocelot['s_end'], df_elegant['s']))
+        if not len(df_ocelot) <= len(df_elegant) <= len(df_ocelot) + 2:
+            raise Exception(f'Orbit missing elements: {len(df_ocelot)} vs {len(df_elegant)}') # apertures
+        #assert np.all(df_ocelot['id'].str.upper() == df_elegant['ElementName'].str.upper())
+        #assert np.all(np.isclose(df_ocelot['s_end'], df_elegant['s']))
+        assert np.isclose(df_ocelot['s_end'].iloc[-1], df_elegant['s'].iloc[-1])
         df_merged = df_ocelot.join(df_elegant)
 
         p = Particle(x=df_merged.x[0], px=df_merged.xp[0], y=df_merged.y[0], py=df_merged.yp[0])
-        return df_merged, (p, None)
+        return df_merged, (p, None, {'sim_data': data, 'read_data': data2, 'sim_task': etaskresp, 'read_task': etaskresp2, 'job': et}),
 
     elif backend == 'ocelot':
         options = {'algorithm': 'tracking'}
@@ -124,7 +135,7 @@ def get_closed_orbit(box: LatticeContainer,
                                         # method='BFGS',
                                         # bounds=bounds,
                                         options={'xatol': 1.e-7,
-                                                 'maxiter': 100,
+                                                 'maxiter': 1000,
                                                  'disp': True,
                                                  'initial_simplex': initial_simplex
                                                  },
@@ -150,7 +161,8 @@ def get_closed_orbit(box: LatticeContainer,
         elif options['algorithm'] == 'averaging_and_tracking':
             X_init = X_init.T[0]
             p = Particle(x=X_init[0], px=X_init[1], y=X_init[2], py=X_init[3])
-            x, px, y, py = track_and_average(p, 40)
+            n_turns = options.get('ocelot_tracking_turns', 40)
+            x, px, y, py = track_and_average(p, n_turns)
             res = iterate_tracking(np.array([x, px, y, py]))
             p = Particle(x=res.x[0], px=res.x[1], y=res.x[2], py=res.x[3])
         elif options['algorithm'] == 'iterate':
