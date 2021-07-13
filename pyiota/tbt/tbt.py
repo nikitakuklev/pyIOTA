@@ -16,8 +16,6 @@ from ocelot import Twiss, Monitor
 # from pyIOTA.tbt.naff import NAFF
 from .naff import NAFF
 
-
-
 logger = logging.getLogger(__name__)
 
 special_keys = acutils.special_keys.copy()
@@ -359,6 +357,7 @@ class Kick:
         INTERPX = '_ix'
         INTERPY = '_iy'
         AMP = '_a'
+        AMPSIG = '_asig'
 
     def __init__(self,
                  df: pd.DataFrame,
@@ -385,6 +384,7 @@ class Kick:
 
         self.v2 = False
 
+        assert len(df) == 1
         self.df = df
         self.idx = kick_id
         self.idx_offset = id_offset
@@ -444,27 +444,39 @@ class Kick:
         self.fft_pwr = self.fft_freq = self.peaks = None
 
         # v2
+        self.bpm_roll = None
         self.props: Dict[str, pd.DataFrame] = {}
         self.svd: Dict[str, Tuple] = {}
         self.tracks: Dict[str, Dict[str, pd.DataFrame]] = {}
         self.roll_bpm: Optional[str] = None
         self.box: Optional[LatticeContainer] = None
 
-    def upgrade(self, box: LatticeContainer):
+    def upgrade(self, box: LatticeContainer, silent:bool = False):
         """ Upgrade this kick to v2 """
         if self.v2:
             # pass
-            raise AttributeError('Already upgraded!')
+            self.bpm_roll = None
+            self.roll_bpm: Optional[str] = None
+            logger.warning(f'Kick {self.idx=} was already upgraded, resetting')
+            #raise AttributeError('Already upgraded!')
         self.box = box
         self.svd = {}  # Stores SVD data
         self.tracks = {'raw': {}, 'orig': {}}  # Stores matrix-format BPM data
-        self.props = {}
-        self.v2 = True
+        self.props = {} # Other properties
 
         # Make sure bpms match
         bpm_names = box.bpm_names
         if bpm_names != self.bpm_list_orig:
-            raise Exception(f'BPM mismatch - ({bpm_names}) vs ({self.bpm_list_orig})')
+            diff = set(bpm_names) - set(self.bpm_list_orig)
+            drop_missing = True
+            if drop_missing:
+                if len(diff) > 0:
+                    logger.warning(f'Dropping BPMs in box: {diff}')
+                    els = [box.get_one(b, Monitor, exact=True) for b in diff]
+                    assert all(el.l == 0.0 for el in els)
+                    box.remove_elements(els)
+            else:
+                raise Exception(f'BPM mismatch - ({diff})')
         for bpm_name in self.bpm_list_orig:
             bpm = box.get_first(el_name=bpm_name, el_type=Monitor, exact=True)
             bpm.active = True if bpm_name in self.bpm_list else False
@@ -476,14 +488,17 @@ class Kick:
                 active.append(b.id)
             else:
                 disabled.append(b.id)
-        logger.info(f'Lattice sync - ({len(active)})({active}) active')
-        logger.info(f'({len(disabled)})({disabled}) disabled')
+        if not silent:
+            logger.info(f'V2 upgrade:')
+            logger.info(f'({len(active)}) active ({active})')
+            logger.info(f'({len(disabled)}) disabled ({disabled}) ')
 
         for f in self.bpm_families_active:
             if len(self.bpm_families_active[f]) > 0:
                 df = pd.DataFrame(index=self.bpm_list)
                 self.props[f] = df
 
+        self.v2 = True
         self.sync()
 
         if np.any([np.any(v.isnull()) for v in self.tracks['raw'].values()]):
@@ -491,13 +506,14 @@ class Kick:
         if np.any([np.any(v.isnull()) for v in self.tracks['orig'].values()]):
             raise Exception(f'Null values found in data!')
 
-        logger.info(f'Upgraded to v2 - ({len(self.tracks["orig"])})/({len(self.tracks["raw"])}) orig/raw frames')
-        logger.info(f'Sizes o: ({ {k: v.shape for k, v in self.tracks["orig"].items()} })')
-        logger.info(f'Sizes r: ({ {k: v.shape for k, v in self.tracks["raw"].items()} })')
+        if not silent:
+            logger.info(f'Upgraded to v2 - ({len(self.tracks["orig"])})/({len(self.tracks["raw"])}) orig/raw frames')
+            logger.info(f'Sizes o: ({ {k: v.shape for k, v in self.tracks["orig"].items()} })')
+            logger.info(f'Sizes r: ({ {k: v.shape for k, v in self.tracks["raw"].items()} })')
 
     def sync(self, to_v2: bool = True):
         """ Syncs v1 and v2 data structures - used to keep matrices/dfs current """
-        assert hasattr(self, 'v2')
+        assert getattr(self, 'v2', False)
         if to_v2:
             families = self.bpm_default_families
             for f in families:
@@ -514,6 +530,7 @@ class Kick:
                 track_data = np.zeros((len(data), ld))
                 index = list([k[:-len(f)] for k in data.keys()])
                 assert set(index) == set(self.bpm_list_orig)
+                assert len(index) == len(self.bpm_list_orig)
                 for i, (k, v) in enumerate(data.items()):
                     track_data[i, :] = v
                 df = pd.DataFrame(index=index, data=track_data)
@@ -522,17 +539,20 @@ class Kick:
                 self.tracks['orig'][f] = df
 
                 self.v2_raw_from_orig(f)
+        else:
+            raise Exception
 
     def roll(self, bpm_name: str):
         """ Rotate dataset and lattice to a new BPM """
         assert bpm_name in self.bpm_list_orig and bpm_name in self.bpm_list
         bpm = self.box.get_first(bpm_name, el_type=Monitor, exact=True)
+        assert bpm.active
         idx_orig = self.bpm_list_orig.index(bpm_name)
         idx = self.bpm_list.index(bpm_name)
-        logger.info(f'Rolling data to BPM: ({bpm_name}), {idx=}, {idx_orig=}')
         if self.bpm_list[0] == bpm_name:
-            logger.warning(f'Kick already starts at ({bpm_name})')
-
+            logger.warning(f'Kick already starts at ({bpm_name}), {idx=}, {idx_orig=}')
+            return
+        logger.info(f'Rolling from ({self.bpm_list[0]}) to ({bpm_name})')
         # Rotate list
         self.bpm_list = self.bpm_list[idx:] + self.bpm_list[:idx]
         bpm_list_orig_rolled = self.bpm_list_orig[idx_orig:] + self.bpm_list_orig[:idx_orig]
@@ -541,7 +561,7 @@ class Kick:
         self.box.rotate_lattice(bpm)
         self.box.update()
 
-        self.roll = 'bpm_name'
+        self.bpm_roll = bpm_name
 
         inactive_bpms = [b for b in self.bpm_list_orig if b not in self.bpm_list]
 
@@ -585,7 +605,9 @@ class Kick:
         df_orig = self.tracks['orig'][f]
         assert np.all(df_orig.index == self.bpm_list_orig)
         inactive_bpms = [b for b in self.bpm_list_orig if b not in self.bpm_list]
-        df = pd.DataFrame(index=df_orig.index, data=df_orig.values[:, self.trim])
+        v = df_orig.values[:, self.trim]
+        v -= np.mean(v,axis=1,keepdims=True)
+        df = pd.DataFrame(index=df_orig.index, data=v)
         assert np.all(df.index == self.bpm_list_orig)
         df.drop(index=inactive_bpms, inplace=True)
         assert np.all(df.index == self.bpm_list)
@@ -597,11 +619,12 @@ class Kick:
         extras_to_save = extras_to_save or []
         to_save = set(['orig'] + extras_to_save)
         keys_track_other = set(self.tracks.keys()) - to_save
-        logger.info(f'Wiping tracks: ({keys_track_other})')
-        for k in keys_track_other:
-            del self.tracks[k]
-        if 'raw' not in to_save:
-            self.tracks['raw'] = {}
+        if len(keys_track_other) > 0:
+            logger.info(f'Wiping tracks: ({keys_track_other})')
+            for k in keys_track_other:
+                del self.tracks[k]
+            if 'raw' not in to_save:
+                self.tracks['raw'] = {}
 
     def v2_drop_bpms(self, bpms):
         if len(bpms) == 0:
@@ -984,6 +1007,7 @@ class Kick:
             bpm_sets = {}
             for sp in self.bpm_default_families:
                 bpm_sets[sp] = {b[:-len(sp)] for b in self.bpm_families_active[sp]}
+            #print(bpm_sets)
             nonzero_sets = [v for k, v in bpm_sets.items() if len(v) > 0]
             assert all(nonzero_sets[0] == nz for nz in nonzero_sets)
             assert len(self.bpm_list) >= len(nonzero_sets[0])  # only removals supported
@@ -1023,6 +1047,8 @@ class Kick:
                     if len(bpm_list) > 0:
                         if bpm + sp in bpm_list:
                             bpm_list.remove(bpm + sp)
+                            if len(bpm_list) == 0:
+                                logger.warning(f'Plane {sp} has no BPMs left!')
                         else:
                             planes_missing.append(sp)
                 if planes_missing:
@@ -1283,11 +1309,13 @@ class Kick:
 
     def get_turns(self) -> int:
         bpm = self.get_bpms()[0]
+        #print(self.col(bpm))
         return len(self.col(bpm))
 
     ### Physics starts here
 
-    def add_noise(self, families, noise_amp, output_key='raw_noised'):
+
+    def v2_add_noise(self, families, noise_amp, output_key='raw_noised'):
         """ For simulation studies, add fake gaussian noise """
         families = families or self.bpm_default_families
         if output_key not in self.tracks:
@@ -1300,12 +1328,27 @@ class Kick:
                 logger.warning(f'Key ({family}) in dict ({output_key}) already exists, overwriting')
             self.tracks[output_key][family] = pd.DataFrame(index=df.index, data=v)
             assert np.all(self.tracks[output_key][family].index == df.index)
+    add_noise = v2_add_noise
 
-    def clean_svd(self,
+    def v2_demean(self, families = None, key='raw'):
+        """ For simulation studies, add fake gaussian noise """
+        families = families or self.bpm_default_families
+        if key not in self.tracks:
+            raise Exception
+        for family in families:
+            if family in self.tracks['raw']:
+                df = self.tracks['raw'][family]
+                if key != 'raw':
+                    df = df.copy()
+                self.tracks[key][family] = df.sub(df.mean(axis=1), axis=0)
+
+    def v2_clean_svd(self,
                   n_comp: int = 5,
                   families: List[str] = None,
                   key: str = 'raw',
-                  key_out: str = 'clean'
+                  key_out: str = 'clean',
+                  swap_raw: bool = True,
+                  dominance: bool = False,
                   ):
         """
         Clean kick using SVD, reconstructing each BPM from specified number of components
@@ -1319,12 +1362,17 @@ class Kick:
             matrix = df.values
             matrix = matrix - np.mean(matrix, axis=1)[:, np.newaxis]
             U, S, vh = np.linalg.svd(matrix, full_matrices=False)
-            V = vh.T  # transpose it back to conventional U @ S @ V.T
+            #V = vh.T  # transpose it back to conventional U @ S @ V.T
             self.svd[family] = (U, S, vh, np.diag(S) @ vh)
 
             # Check dominance
             if not np.all(np.max(np.abs(U), axis=0) < 0.95):
-                raise ValueError(f'Dominance detected: {np.max(np.abs(U), axis=0)}')
+                #bpmmax = df.index[np.argmax(np.abs(U))]
+                cmax = np.argmax(np.max(np.abs(U), axis=0))
+                if dominance:
+                    raise ValueError(f'Dominance detected C{cmax}{family}: {np.max(np.abs(U), axis=0)}')
+                else:
+                    logger.warning(f'Dominance {family}: {np.max(np.abs(U), axis=0)}')
 
             # Reconstruct signal
             signal = U[:, :n_comp] @ np.diag(S[:n_comp]) @ vh[:n_comp, :]
@@ -1338,8 +1386,12 @@ class Kick:
                 self.tracks[key_out] = {}
             self.tracks[key_out][family] = pd.DataFrame(index=df.index, data=signal)
 
-            # for i, b in enumerate(df.index):
-            #    self.set(b + family + self.Datatype.RAW.value, signal[i, :].copy())
+            if swap_raw:
+                for i, b in enumerate(self.tracks[key_out][family].index):
+                    self.set(b + family + self.Datatype.RAW.value, signal[i, :].copy())
+
+
+    clean_svd = v2_clean_svd
 
     def calculate_tune(self,
                        naff: NAFF,
@@ -1438,19 +1490,27 @@ class Kick:
                     if isinstance(n_components, int):
                         n_components = (n_components, n_components)
                     results = []
-                    for bpm, nc in zip([bh, bv], n_components):
+                    for i, (bpm, nc) in enumerate(zip([bh, bv], n_components)):
+                        ft = None
+                        if freq_trim is not None:
+                            if len(freq_trim) == 2 and isinstance(freq_trim[0],tuple):
+                                ft = freq_trim[i]
+                            elif len(freq_trim) == 2:
+                                ft = freq_trim
+                            else:
+                                raise Exception
                         data = self.get_bpm_data(bpm, no_trim=True).copy()
                         if data_trim:
                             # Use provided trims
                             nfresult = naff.run_naff_v2(data[data_trim],
                                                         n_components=nc,
                                                         data_trim=np.s_[:],
-                                                        freq_trim=freq_trim)
+                                                        freq_trim=ft)
                         else:
                             # Use NAFF trims
                             nfresult = naff.run_naff_v2(data,
                                                         n_components=nc,
-                                                        freq_trim=freq_trim)
+                                                        freq_trim=ft)
                         peaks[bpm] = ([n['tune'] for n in nfresult], nfresult)
                         results.append(peaks[bpm])
                     if selector:
@@ -1545,8 +1605,9 @@ class Kick:
             data = self.get_bpm_data(bpm, data_trim=data_trim).copy()
             data -= np.mean(data)
             data = np.abs(data)
-            amp = np.percentile(data, 90) * 2
-            self.df[bpm + self.Datatype.AMP.value] = amp
+            data = np.sort(data)
+            self.df[bpm + self.Datatype.AMP.value] = np.mean(data[-2:])
+            self.df[bpm + self.Datatype.AMPSIG.value] = np.std(data[-2:])
 
     def calculate_stats(self) -> dict:
         """
@@ -1779,8 +1840,8 @@ class KickSequence:
                     for key in bad_word_keys:
                         value = k.state(key)
                         if word in value:
-                            logging.warning(f'Found bad word ({word}) in ({key}) for kick ({k.idx})')
-                            raise Exception(f'Found bad word ({word}) in ({key}) for kick ({k.idx})')
+                            logging.warning(f'Found bad word ({word}) in ({key}) for kick ({k.idx})({k.idxg})')
+                            raise Exception(f'Found bad word ({word}) in ({key}) for kick ({k.idx})({k.idxg})')
         return outlier_devs
 
     # Deprecated
@@ -1919,7 +1980,7 @@ class KickSequence:
         naff = naff or self.naff
         assert selector
         for r in self.df.itertuples():
-            r.kick.calculate_tune(naff, families, selector, search_kwargs=search_kwargs)
+            r.kick.calculate_tune(naff, families=families, selector=selector, search_kwargs=search_kwargs)
 
     def get_kick_magnitudes(self):
         return self.df.loc[:, 'kickV'].values
