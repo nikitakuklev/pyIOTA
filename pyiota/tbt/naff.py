@@ -84,6 +84,7 @@ class NAFF:
                  wp: int = None,
                  fft_pad_zeros_power: int = None,
                  pp: int = None,
+                 pc: int = None,
                  data_trim: slice = None,
                  output_trim: slice = None):
         """
@@ -94,6 +95,8 @@ class NAFF:
         near perfect data. For experimental sources, 1 is ok.
         :param fft_pad_zeros_power: Optional FFT zero-pad to length 2**pad_power - can be used to find tunes directly,
         and also improves initial tune guess and convergence speed for NAFF
+        :param pp: same as pad power
+        :param pc: point count
         :param data_trim: Slice object to apply to all data inputs - useful to remove data before/after kick
         :param output_trim: Slice object to apply to all output (freq, freq_power) - useful to remove 0 frequency
         """
@@ -102,6 +105,7 @@ class NAFF:
         self.window_opts = window_opts
         self.data_trim = data_trim
         self.fft_pad_zeros_power = pp or fft_pad_zeros_power
+        self.fft_pad_zeros = pc
         self.output_trim = output_trim
         self.coeffs_cache = [sci.newton_cotes(i, 1)[0].astype(np.complex128) for i in range(1, 10)]
         self.icache = {}
@@ -112,6 +116,7 @@ class NAFF:
             spacing: float = 1.0,
             window_power: int = None,
             pad_zeros_power: int = None,
+            pc: int = None,
             output_trim: slice = None,
             data_trim: slice = None,
             amplitude: bool = True) -> Tuple[np.ndarray, np.ndarray]:
@@ -127,6 +132,7 @@ class NAFF:
         :return:
         """
         pad_zeros_power = pad_zeros_power or self.fft_pad_zeros_power
+        pc = pc or self.fft_pad_zeros
         window_power = window_power or self.window_power
         output_trim = output_trim or self.output_trim
         data_trim = data_trim or self.data_trim
@@ -140,16 +146,19 @@ class NAFF:
         window = self.window(n_turns, window_power)
         data_centered = data_centered * window
 
-        if pad_zeros_power is not None:
-            len_padded = 2 ** pad_zeros_power
-            # if n_turns < len_padded:
-            #     # print(f'To pad: {len_padded - n_turns} (have {data_centered.shape} turns)')
-            #     data_centered = np.pad(data_centered, ((0, len_padded - n_turns),))
-            #     n_turns = len(data_centered)
-            #     assert n_turns == len_padded
-            #     # print(f'Padded to {n_turns} points')
+        if pc is not None:
+            len_padded = pc
         else:
-            len_padded = n_turns
+            if pad_zeros_power is not None:
+                len_padded = 2 ** pad_zeros_power
+                # if n_turns < len_padded:
+                #     # print(f'To pad: {len_padded - n_turns} (have {data_centered.shape} turns)')
+                #     data_centered = np.pad(data_centered, ((0, len_padded - n_turns),))
+                #     n_turns = len(data_centered)
+                #     assert n_turns == len_padded
+                #     # print(f'Padded to {n_turns} points')
+            else:
+                len_padded = n_turns
 
         if amplitude:
             #fft_power = np.abs(np.fft.fft(data_centered, n=len_padded)) ** 2 / (n_turns * n_turns)
@@ -334,7 +343,7 @@ class NAFF:
         :param perf_mode: Enables certain optimizations and shortcuts to maximize performance
         :return:
         """
-        assert data.dtype == np.float64
+        assert data.dtype == np.float64 or data.dtype == np.float32
         # Preprocessing
         sp = spacing
         data_trim = data_trim or self.data_trim
@@ -653,7 +662,7 @@ class NAFF:
         """
         if not no_trim:
             data_trim = data_trim or self.data_trim
-            if data_trim:
+            if data_trim is not None:
                 if data_trim.stop is not None and data_trim.stop > len(data):
                     raise Exception(f"Trim end ({data_trim.stop}) exceeds available data length ({len(data)})")
                 data = data[data_trim]
