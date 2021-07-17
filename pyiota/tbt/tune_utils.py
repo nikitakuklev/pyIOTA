@@ -1,9 +1,18 @@
 import itertools
 
 import numpy as np
-import pyIOTA.math as pmath
+import pyiota.math as pmath
+
 
 def get_distances2(combinations, a, n, offsets):
+    """
+
+    :param combinations:
+    :param a: origin of reference line
+    :param n: direction of line
+    :param offsets:
+    :return:
+    """
     distances = []
     distances_o = []
     is_b = []
@@ -11,19 +20,20 @@ def get_distances2(combinations, a, n, offsets):
         p = np.array([nux, nuy])
         d_line = pmath.point_line_distance(a, n, p)
         #dx = np.sqrt((p[0] - a[0])**2 + (p[0] - a[0])**2)
-        dx = (p[0] - a[0])/-n[1]
+        #dx = (p[0] - a[0])/-n[1]
         ofs = offsets[0]
         #abot = np.array([a[0] - n[1] * ofs, a[0] + n[0] * ofs])
         #ybot = (abot + n * (dx + n[1] * ofs))[1]
         abot = np.array([a[0] - n[1] * ofs, a[1] + n[0] * ofs])
         dx = (p[0]-abot[0])/n[0]
         ybot = (abot + n * dx)[1]
-        print(dx, n[1], ofs, dx, (abot + n * dx))
+        #print(f'Dbot: {dx=:.5f}, {n[0]=:.5f}, {n[1]=:.5f}, {ofs=}, {(abot + n * dx)=}')
         ofs = offsets[2]
         atop = np.array([a[0] - n[1] * ofs, a[1] + n[0] * ofs])
         dx = (p[0] - atop[0]) / n[0]
         ytop = (atop + n * dx)[1]
-        print(dx, n[1], ofs, dx, (abot + n * dx))
+        #print(dx, n[1], ofs, dx, (abot + n * dx))
+        #print(f'Dtop: {dx=:.5f}, {n[0]=:.5f}, {n[1]=:.5f}, {ofs=}, {(atop + n * dx)=}')
 
         if ytop < ybot:
             temp = ybot
@@ -71,7 +81,7 @@ def filter_tunes(tunes_l, bmin, bmax):
         t2 = t2[t2<bmax]
         if len(t2) == 0:
             t2 = np.array([np.nan])
-        tl2.append(t2.astype(np.float32))
+        tl2.append(t2.astype(np.float64))
         #print(t,t2)
     return tl2
 
@@ -98,7 +108,7 @@ def reject_outliers(data, m = 2.):
     d = np.abs(data - np.nanmedian(data))
     mdev = np.nanmedian(d)
     s = d/mdev if mdev else 0.
-    data[s>m] = np.nan
+    data[(s>m) & (d>5e-4)] = np.nan
     return data
 
 
@@ -110,8 +120,8 @@ def select_tunes_cluster_pairs(k, bounds, families, model=1, **kwargs):
     tunes_filtered = filter_tunes(tunes_l, bd[0], bd[1])
     if np.all([np.all(np.isnan(l)) for l in tunes_filtered]):
         print(tunes_l, tunes_filtered, bd)
-    print(f'{family}: {tunes_l}')
-    print(f'{family}F: {tunes_filtered}')
+    print(f'Fam {family}: {tunes_l}')
+    print(f'Fam {family}F: {tunes_filtered}')
     resultsH = find_closest_tunes(tunes_filtered)
 
     family = families[1]
@@ -126,7 +136,7 @@ def select_tunes_cluster_pairs(k, bounds, families, model=1, **kwargs):
     resultsV = find_closest_tunes(tunes_filtered)
 
     clustersH, clustersV = resultsH[:model], resultsV[:model]
-    print(f'Have {len(clustersH)}/{len(resultsH)} and {len(clustersV)}/{len(resultsV)} clusters')
+    print(f'Have {len(clustersH)}/{len(resultsH)} H and {len(clustersV)}/{len(resultsV)} V clusters')
 
     meansH, meansV = [np.nanmean(c[1]) for c in clustersH], [np.nanmean(c[1]) for c in clustersV]
     combinations = list(itertools.product(meansH, meansV))

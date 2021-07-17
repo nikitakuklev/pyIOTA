@@ -297,6 +297,22 @@ class Phase:
             phases_cum[i] = phases_cum[i - 1] + pmath.forward_distance(phases_rel[i - 1], phases_rel[i], -np.pi, np.pi)
         return phases_cum
 
+    @staticmethod
+    def relative_to_absolute_with_ref(phases: np.ndarray, phases_ref: np.ndarray) -> np.ndarray:
+        """
+        Converts relative phases to absolutes, assuming first phase is 0,
+        Corrects >2pi phase hops with reference set
+        """
+        assert len(phases) == len(phases_ref)
+        phases_rel = phases.copy()
+        phases_cum = np.zeros_like(phases)
+        phases_rel = pmath.addsubtract_wrap(phases_rel, -phases_rel[0], -np.pi, np.pi)
+        for i in range(1, len(phases)):
+            extra = 2 * np.pi * np.floor((phases_ref[i]-phases_ref[i-1])/(2*np.pi))
+            phases_cum[i] = phases_cum[i - 1] + pmath.forward_distance(phases_rel[i - 1], phases_rel[i], -np.pi, np.pi)
+            phases_cum[i] += extra
+        return phases_cum
+
 
 class Twiss:
     """
@@ -368,9 +384,19 @@ class Envelope:
         return F
 
     @staticmethod
-    def F4D_xx(n, j_x, sigma_x, k_xx):
+    @jit(nopython=True)
+    def F4D_xx(n: np.ndarray, j_x: float, sigma_x: float, k_xx: float):
         theta = 4 * np.pi * k_xx * sigma_x * sigma_x * n
         F = 1 / (1+theta*theta) * np.exp(-(j_x * theta * theta) / (2 * sigma_x * sigma_x * (1 + theta * theta)))
+        return F
+
+    @staticmethod
+    @jit(nopython=True)
+    def F4D_xx_Z(n: np.ndarray, Z: float, mu: float):
+        #Z = j_x * sigma_x * sigma_x    mu = k_xx / j_x
+        #new Z = k_xx * sigma_x * sigma_x     mu = j_x * k_xx
+        theta = 4 * np.pi * Z * n
+        F = 1 / (1+theta*theta) * np.exp(-(mu/Z * theta * theta) / (2 * (1 + theta * theta)))
         return F
 
     @staticmethod
@@ -378,6 +404,21 @@ class Envelope:
         theta = 4 * np.pi * k_xy * sigma_y * sigma_y * n
         F = 1 / (1+theta*theta) * np.exp(-(j_y * theta * theta) / (2 * sigma_y * sigma_y * (1 + theta * theta)))
         return F
+
+    @staticmethod
+    def F4D_tune_lowtheta(k_xx, k_xy, j_x, j_y, sigma_x, sigma_y,):
+        dnu_x = k_xx*(j_x + 4*sigma_x*sigma_x) + k_xy*(j_y + 4*sigma_y*sigma_y)
+        return dnu_x
+
+    @staticmethod
+    def F4D_tune(n, k_xx, k_xy, j_x, j_y, sigma_x, sigma_y):
+        ex = sigma_x * sigma_x
+        ey = sigma_y * sigma_y
+        thetaxy = 4 * np.pi * k_xy * sigma_y * sigma_y * n
+        thetaxx = 4 * np.pi * k_xx * sigma_x * sigma_x * n
+        dnu_x = k_xx*((4*ex+j_x*(1-thetaxx*thetaxx))/(1+thetaxx*thetaxx))
+        dnu_x += k_xy*((4*ey+j_y*(1-thetaxy*thetaxy))/(1+thetaxy*thetaxy))
+        return dnu_x
 
     @staticmethod
     def lee_4D(x, chrom_x, sigma_e, nu_s, j_x, sigma_x, k_xx, j_y, sigma_y, k_xy):
