@@ -7,6 +7,7 @@ import time
 from typing import Optional, Tuple
 
 import numpy as np
+import pandas as pd
 
 data_entry = collections.namedtuple('DataEntry', ['id', 'value', 'ts', 'src'])
 
@@ -32,6 +33,9 @@ class Device:
         self.value = None
         self.debug: bool = False
         self._device_set: Optional[DeviceSet] = None
+        self.log = pd.DataFrame({'time': pd.Series([], dtype=np.datetime64),
+                                 'value': pd.Series([], dtype=np.float64),
+                                 'unit': pd.Series([], dtype=str)})
 
     def get_history(self) -> list:
         return list(self.history)
@@ -62,8 +66,19 @@ class DoubleDevice(Device):
         try:
             self.value = float(data)
         except:
-            raise
+            raise ValueError(f'Device {self.name} - value {data} failed to parse as a float')
         super().update(data, timestamp, source)
+
+    def update_log(self, df_log):
+        try:
+            self.log = pd.concat([self.log, df_log], axis=0, ignore_index=True)
+            duplicates = self.log.duplicated('time',keep=False)
+            duplicates_all = self.log.duplicated(keep=False)
+            assert duplicates.sum() == duplicates_all.sum()
+            self.log.drop_duplicates(inplace=True)
+            assert self.log.loc[:, 'time'].is_unique
+        except Exception as e:
+            raise ValueError(f'Device {self.name} - log {df_log} add failed - {e}')
 
     def read(self, adapter=None, verbose: bool = False, setting: bool = False):
         if not self._device_set:
@@ -156,7 +171,7 @@ class StatusDevice(Device):
             if self.is_on():
                 return
             else:
-                if i > retries/2: self.set('ON')
+                if i > retries / 2: self.set('ON')
             time.sleep(delay)
         raise Exception(f'{self.name} - ON verification failure, value {self.value_string}')
 
@@ -171,7 +186,7 @@ class StatusDevice(Device):
             if self.is_off():
                 return
             else:
-                if i > retries/2: self.set('OFF')
+                if i > retries / 2: self.set('OFF')
             time.sleep(delay)
         raise Exception(f'{self.name} - OFF verification failure, value {self.value_string}')
 
@@ -566,7 +581,7 @@ class ACL(Adapter):
         except ImportError:
             raise Exception('HTTP functionality requires httpx library')
         tm = httpx.Timeout(timeout=20, connect=5)
-        #pool = httpx.PoolLimits(soft_limit=25, hard_limit=25)
+        # pool = httpx.PoolLimits(soft_limit=25, hard_limit=25)
         # self.aclient = httpx.AsyncClient()
         # self.client = httpx.Client()
         if fallback:
@@ -603,6 +618,36 @@ class ACL(Adapter):
         acl = f'http://www-ad.fnal.gov/cgi-bin/acl.pl?acl={cmd}'
         resp = self.client.get(acl)
         return resp.text
+
+    def read_history(self, ds: DeviceSet, start: datetime, end: datetime, node='Backup'):
+        assert ds.leaf
+        device_dict = ds.devices
+        assert len(device_dict) == 1
+        dev_names = [d.name for d in device_dict.values()]
+        s_start = start.strftime('%d-%b-%Y %H:%M:%S')
+        s_end = end.strftime('%d-%b-%Y %H:%M:%S')
+        cmd = f'logger_get/start="{s_start}"/end="{s_end}"/node={node}/double/units {dev_names[0]}'
+        # /verbose
+        acl = f'http://www-ad.fnal.gov/cgi-bin/acl.pl?acl={cmd}'
+        resp = self.client.get(acl)
+        text = resp.text
+        t1 = datetime.datetime.utcnow().timestamp()
+
+        text = text.strip()
+        split_text = text.split('\n')
+        rows = []
+        for line in filter(None, split_text):
+            spl = line.strip().split()
+            assert len(spl) == 3
+            stamp = datetime.datetime.strptime(spl[0], "%d-%b-%Y %H:%M:%S.%f")
+            val = float(spl[1])
+            units = spl[2]
+            row = {'time': stamp, 'value': val, 'unit': units}
+            rows.append(row)
+        df = pd.DataFrame(data=rows)
+        for k, v in device_dict.items():
+            v.update_log(df)
+        return len(df)
 
     def readonce(self, ds: DeviceSet, settings: bool = False, verbose: bool = False) -> list:
         assert ds.leaf
@@ -737,7 +782,7 @@ class ACNETRelay(Adapter):
         except ImportError:
             raise Exception('Relay functionality requires certain libraries')
         tm = httpx.Timeout(timeout=20, connect=2)
-        #pool = httpx.PoolLimits(soft_limit=5, hard_limit=5)
+        # pool = httpx.PoolLimits(soft_limit=5, hard_limit=5)
         # self.aclient = httpx.AsyncClient()
         self.aclient = httpx.AsyncClient(timeout=tm)
         # self.client = httpx.Client()
@@ -813,14 +858,14 @@ class ACNETRelay(Adapter):
                     if r.status_code == 200:
                         data.update(self._process(ds, r.json()))
                     else:
-                        #return -1
+                        # return -1
                         return []
                 assert len(data) == len(ds.devices)
                 values = []
                 for k, v in ds.devices.items():
                     v.update(data[k], t1, self.name)
                     values.append(v.value)
-                #return len(data)
+                # return len(data)
                 return values
             except Exception as e:
                 try_cnt += 1
