@@ -72,7 +72,7 @@ class Task:
         if relative_mode:
             assert not knobs_dir
             lpath = PurePosixPath(lattice_path)
-            assert not lpath.is_absolute() #and lpath.name == str(lpath)
+            assert not lpath.is_absolute()  # and lpath.name == str(lpath)
             self.lattice_path = lpath
             rpath = PurePath(run_folder)
             if rpath.is_absolute() or len(rpath.parts) > 1:
@@ -132,9 +132,9 @@ class Task:
             acceptance = final = output = parameters = sigma = False
         strings = [f'lattice = {self.lattice_path}',
                    f'use_beamline = {beamline}',
-                   #f'tracking_updates = 1',
+                   # f'tracking_updates = 1',
                    f'p_central_mev = {p}',  # iota.header["PC"] * 1000
-                   f'default_order = 3',
+                   #f'default_order = 3',
                    ]
         if rootname != '':
             strings.append(f'rootname = {rootname}')
@@ -168,8 +168,8 @@ class Task:
 
     @task(name='global_settings')
     def setup_global_settings(self, *args):
-        strings = ['mpi_io_read_buffer_size = 128000000',
-                   'mpi_io_write_buffer_size = 128000000',
+        strings = ['mpi_io_read_buffer_size = 12800000',
+                   'mpi_io_write_buffer_size = 12800000',
                    'inhibit_fsync = 1',
                    # ' mpi_randomization_mode = 3',
                    ]
@@ -187,7 +187,7 @@ class Task:
 
     @task(name='twiss_output')
     def action_twiss(self, *args, full=False, create_file=False, ext=None, **kwargs):
-        strings = [] #strings = ['matched = 1']
+        strings = []  # strings = ['matched = 1']
         if create_file:
             if ext:
                 strings.append(f'filename = {self.rf}/%s.{ext}')
@@ -224,6 +224,7 @@ class Task:
                            latspec: tuple = None,
                            bunchspec: tuple = None,
                            shift_off_zero: bool = True,
+                           bunch_dict: dict = None,
                            **kwargs):
         """
         Bunched beam generation in elegant.
@@ -237,7 +238,8 @@ class Task:
         :param kwargs:
         :return:
         """
-        if not mode:
+        if mode is None:
+            logger.warning('Bunch generation mode was not selected, returning empty')
             return []
         strings = []
         if create_file:
@@ -279,7 +281,8 @@ class Task:
             beta_x, beta_y = latspec
             x = x / 2
             y = y / 2
-            strings.append(f'centroid[0] = {x + 2 * x / nx:10e}, 0, {y + 2 * y / ny:10e}, 0, 0, 0, !shift to upper right quadrant and off zeroes')
+            strings.append(
+                f'centroid[0] = {x + 2 * x / nx:10e}, 0, {y + 2 * y / ny:10e}, 0, 0, 0, !shift to upper right quadrant and off zeroes')
             # xmax^2 = emittance*beta
             strings.extend([f'n_particles_per_bunch = {nx * ny}',
                             f'beta_x = 1.0',
@@ -317,14 +320,20 @@ class Task:
             cx, cy = bunchspec
             x /= 2
             y /= 2
-            #strings.append(f'centroid[0] = {cx}, 0, {cy}, 0, 0, 0')
+            # strings.append(f'centroid[0] = {cx}, 0, {cy}, 0, 0, 0')
             strings.extend([f'n_particles_per_bunch = {nx * ny}',
-                            #f'beta_x = 1.0',
-                            #f'emit_x = {x ** 2 / beta_x:10e}',
-                            #f'beta_y = 1.0',
-                            #f'emit_y = {y ** 2 / beta_y:10e}',
+                            # f'beta_x = 1.0',
+                            # f'emit_x = {x ** 2 / beta_x:10e}',
+                            # f'beta_y = 1.0',
+                            # f'emit_y = {y ** 2 / beta_y:10e}',
                             f'distribution_type[0] = "gaussian","gaussian","gaussian"',
-                            f'distribution_cutoff[0] = 4, 4, 4'])
+                            f'distribution_cutoff[0] = 3, 3, 3'])
+        elif mode in ['custom_bunch']:
+            assert bunch_dict is not None
+            slist = [f'{k} = {v}' for k, v in bunch_dict.items()]
+            strings.extend(slist)
+        elif mode in ['empty']:
+            pass
         else:
             raise Exception(f'Unrecognized bunch mode: {mode}')
 
@@ -386,8 +395,11 @@ class Task:
         return strings
 
     @task(name='chromaticity')
-    def setup_chromaticity(self, *args, families: list = [], dnux_dp: float = np.nan, dnuy_dp: float = np.nan,
+    def setup_chromaticity(self, *args, families: list = None, dnux_dp: float = None, dnuy_dp: float = None,
                            **kwargs):
+        # Cant correct just 1 chroma easily
+        assert families is not None
+        assert dnuy_dp is not None and dnux_dp is not None
         assert not (np.isnan(dnux_dp) or np.isnan(dnuy_dp))
         assert -20 < dnux_dp < 20 and -20 < dnuy_dp < 20
         strings = [f'sextupoles = "{families}"',
@@ -455,7 +467,7 @@ class Task:
     # Errors
 
     @task(name='error_control')
-    def setup_error_control(self, *args, clean_step=False,):
+    def setup_error_control(self, *args, clean_step=False, ):
         strings = [' clear_error_settings = 1',
                    ' no_errors_for_first_step = {}'.format(clean_step),
                    f' error_log = {self.rf}/%s.erl']
@@ -780,7 +792,7 @@ class IOTAOptimizer(Optimizer):
                                          bump_terms_weight: float = 10.0, verbose: bool = False):
         box = box or self.box
         assert len(region) == 2
-        assert not touch_markers # can't do closed orbit with elegant markers
+        assert not touch_markers  # can't do closed orbit with elegant markers
         if orbit is None:
             orbit = (0, 0)
         box.update_element_positions()
