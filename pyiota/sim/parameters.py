@@ -29,7 +29,7 @@ class Parser:
         values = []
         for v in values_temp:
             try:
-                if '.' in v and 'e' in v and ('+' in v or '-' in v):
+                if ('.' in v and 'e' in v and ('+' in v or '-' in v)) or v == '+nan' or v == '-nan' or v == 'nan':
                     values.append(float(v))
                 else:
                     values.append(int(v))
@@ -120,7 +120,10 @@ class Generator:
         assert all([l in self._flatten_parameters() for l in links])
         self.name_links[link_name] = links.copy()
 
-    def generate_sets(self, downsample_to: int = None, generate_labels: bool = True) -> pd.DataFrame:
+    def generate_sets(self,
+                      downsample_to: int = None,
+                      generate_labels: bool = True,
+                      ignore_path_limit: bool = False) -> pd.DataFrame:
         """
         Use all current parameters to generate permutations, and output resulting set as DataFrame.
         :param generate_labels:
@@ -165,14 +168,15 @@ class Generator:
                                 s.append(f'{k}_{v}_')
                             elif isinstance(v, int):
                                 assert v <= 1e7
-                                s.append(f'{k}_{v:+06d}_')
+                                s.append(f'{k}_{v:d}_')
                             elif isinstance(v, float):
-                                s.append(f'{k}_{v:+.6e}_')
+                                s.append(f'{k}_{v:.3e}_')
                             else:
                                 raise Exception(f'Unknown parameter type {type(v)}')
                     s = ''.join(s)
-                    if len(s) > 200:
-                        raise ValueError(f'Label too long: {s}')
+                    if len(s) > 248:
+                        if not ignore_path_limit:
+                            raise ValueError(f'Label too long ({len(s)}): {s}')
                     label_strings[label].append(s)
             for (k, v) in label_strings.items():
                 df[k] = v
