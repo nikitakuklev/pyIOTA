@@ -8,7 +8,8 @@ DASK_DEFAULT_WORK_FOLDER = pathlib.PurePosixPath('/home/nkuklev/scratch/dask_tas
 
 #ELEGANT_MPI_MODULE = 'openmpi/1.10+intel-16.0'
 ELEGANT_MPI_MODULE = 'mpich/3.2'
-ELEGANT_MPI_ARGS = '--map-by core:nooversubscribe'
+ELEGANT_MPI_ARGS = ''#'-bind-to core -map-by core'
+#--map-by core:nooversubscribe'
 
 
 CLIENT_CACHE = {}
