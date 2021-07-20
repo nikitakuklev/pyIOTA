@@ -1,5 +1,5 @@
 from typing import Callable, List
-
+import logging
 import ocelot
 from ocelot import MethodTM
 from ocelot.cpbd.elements import *
@@ -8,6 +8,7 @@ from .. import lattice as lat
 from .. import sixdsim
 import pyiota.iota
 
+logger = logging.getLogger(__name__)
 
 def load_iota(method = None, file_name: str = None, insert_monitors: bool = True):
     """
@@ -40,17 +41,35 @@ def insert_qi(nn: int, tn: int, empty_space: float, ref_detuning: float = None, 
     """ Generates QI insert with thick elements (octupoles) """
     if ref_detuning == 0.0:
         qi = lat.OctupoleInsert(nn=nn, tn=tn, olen=None, ospacing=empty_space / nn, run=None, oqK=0.0, **kwargs)
-        print(f'QI thick ({nn}/{tn}) - TURNED OFF')
+        logger.info(f'QI thick ({nn}/{tn}) - TURNED OFF')
     else:
         qi = lat.OctupoleInsert(nn=nn, tn=tn, olen=None, ospacing=empty_space/nn, run=None, **kwargs)
         dq = qi.compute_relative_detuning()
         if ref_detuning is not None:
             oqK = ref_detuning / dq if dq != 0.0 else 0.0
-            print(f'QI thick ({nn}/{tn}) - scaled by {ref_detuning:.3f}/{dq:.3f} = {oqK:.3f}')
+            logger.info(f'QI thick ({nn}/{tn}) - scaled by {ref_detuning:.3f}/{dq:.3f} = {oqK:.3f}')
             qi.configure(nn=nn, tn=tn, olen=None, ospacing=empty_space/nn, run=None, oqK=oqK, **kwargs)
         else:
-            print(f'QI thick ({nn}/{tn}) - no scaling, dq = {dq:.3f}')
+            logger.info(f'QI thick ({nn}/{tn}) - no scaling, dq = {dq:.3f}')
     return qi, [el for el in qi.seq if isinstance(el, Octupole)]
+
+
+def insert_dn(nn: int, tn: int, empty_space: float, ref_detuning: float = None, **kwargs):
+    """ Generates DN insert with thick elements (octupoles) """
+    if ref_detuning == 0.0:
+        qi = lat.OctupoleInsert(nn=nn, tn=tn, olen=None, ospacing=empty_space/nn, run=None, oqK=0.0, **kwargs)
+        print(f'QI thick ({nn}/{tn}) - TURNED OFF')
+    else:
+        qi = lat.NLInsert(tn=tn, olen=None, ospacing=empty_space/nn, run=None, **kwargs)
+        #qi = lat.OctupoleInsert(nn=nn, tn=tn, olen=None, ospacing=empty_space/nn, run=None, **kwargs)
+        #dq = qi.compute_relative_detuning()
+        #if ref_detuning is not None:
+        #    oqK = ref_detuning / dq if dq != 0.0 else 0.0
+        #    print(f'QI thick ({nn}/{tn}) - scaled by {ref_detuning:.3f}/{dq:.3f} = {oqK:.3f}')
+        #    qi.configure(nn=nn, tn=tn, olen=None, ospacing=empty_space/nn, run=None, oqK=oqK, **kwargs)
+        #else:
+        print(f'DN thick ({nn}/{tn}) - no scaling!')
+    return qi, [el for el in qi.seq if isinstance(el, lat.NLLens)]
 
 
 def insert_qi_thin(nn: int, tn: int, empty_space: float, ref_detuning):
@@ -84,38 +103,41 @@ def insert_noop(*args, **kwargs):
 
 
 def build_lattice(lattice_style: str, insert_style: str, nn: int, tn: int, empty_space: float,
-                  ref_detuning: float,
+                  ref_detuning: float = None,
                   method: MethodTM = None,
                   drift_cnt: int = None,
                   drop_empty_octupole_drifts: bool = False,
                   replace_disabled_elements: bool = False,
                   rotate_to_nio_center: bool = True,
-                  insert_monitors: bool = True):
+                  insert_monitors: bool = True,
+                  **kwargs):
     method = method or ocelot.MethodTM()
     if insert_style is None:
         qibox = ocps = None
     else:
-        insert_styles = {'flat': insert_flat, 'qi': insert_qi, 'qi_thin': insert_qi_thin}
+        insert_styles = {'flat': insert_flat, 'qi': insert_qi, 'qi_thin': insert_qi_thin, 'dn':insert_dn}
         assert insert_style in insert_styles
 
         kwargs = {'drop_empty_drifts': drop_empty_octupole_drifts,
-                  'replace_zero_strength_octupoles':replace_disabled_elements}
+                  'replace_zero_strength_octupoles':replace_disabled_elements, **kwargs}
         qi, ocps = insert_styles[insert_style](nn, tn, empty_space, ref_detuning=ref_detuning, **kwargs)
         f0, betae, alfae, betas = qi.calculate_optics_parameters()
         mat = Matrix(l=0.0, eid='TInsert', r11=1, r22=1, r33=1, r44=1, r55=1, r66=1, r21=-1 / f0, r43=-1 / f0)
         qibox = lat.LatticeContainer('ideal', qi.to_sequence() + [mat], reset_elements_to_defaults=False, method=method)
+        qibox.qi = qi
 
     if lattice_style == 'iota':
         # full lattice
-        box = load_iota(method)
+        box = load_iota(method, insert_monitors=insert_monitors)
         # insert qi
-        e1, e2 = box['NLMLDOWN_2'], box['NLMLUP_1']
-        i1, i2 = box.sequence.index(e1), box.sequence.index(e2)
-        l_orig = box.totallen
-        seq = box.sequence[:i1 + 1] + qi.to_sequence() + box.sequence[i2:]
-        box.sequence = seq
-        box.update_element_positions()
-        assert np.isclose(l_orig, box.totallen)
+        if insert_style is not None:
+            e1, e2 = box['NLMLDOWN_2'], box['NLMLUP_1']
+            i1, i2 = box.sequence.index(e1), box.sequence.index(e2)
+            l_orig = box.totallen
+            seq = box.sequence[:i1 + 1] + qi.to_sequence() + box.sequence[i2:]
+            box.sequence = seq
+            box.update_element_positions()
+            assert np.isclose(l_orig, box.totallen)
 
         # els_center = box.at(box['NLMLDOWN_2'].s_end + 0.9)
         # if isinstance(els_center[0], Octupole):
@@ -124,7 +146,44 @@ def build_lattice(lattice_style: str, insert_style: str, nn: int, tn: int, empty
         # elif isinstance(els_center[0], Drift):
         #     assert len(els_center) == 1
         #     box.rotate_lattice(els_center[0])
-
+        #assert np.isclose(l_orig, box.totallen)
+        box.update()
+    elif lattice_style == 'iota_nio_ior':
+        box = load_iota(method, insert_monitors=insert_monitors)
+        l_orig = box.totallen
+        if insert_style is not None:
+            e1, e2 = box['NLMRUP_2'], box['NLMRDOWN_1']
+            i1, i2 = box.sequence.index(e1), box.sequence.index(e2)
+            qiseq = qi.to_sequence()
+            assert nn % 2 == 0
+            assert len(qiseq) % 2 == 0
+            m = Marker(eid='IOR')
+            qiseq = qiseq[:len(qiseq) // 2] + [m] + qiseq[len(qiseq) // 2:]
+            seq = box.sequence[:i1 + 1] + qiseq + box.sequence[i2:]
+            box.sequence = seq
+            box.update_element_positions()
+            assert np.isclose(l_orig, box.totallen)
+        box.sequence = [ocelot.Marker(eid='START')] + box.sequence + [ocelot.Marker(eid='END')]
+        box.update()
+        assert np.isclose(l_orig, box.totallen)
+    elif lattice_style == 'iota_ior_nio_ior':
+        box = load_iota(method, insert_monitors=insert_monitors)
+        l_orig = box.totallen
+        if insert_style is not None:
+            e1, e2 = box['NLMRUP_2'], box['NLMRDOWN_1']
+            i1, i2 = box.sequence.index(e1), box.sequence.index(e2)
+            qiseq = qi.to_sequence()
+            assert nn % 2 == 0
+            assert len(qiseq) % 2 == 0
+            m = Marker(eid='IOR')
+            qiseq = qiseq[:len(qiseq) // 2] + [m] + qiseq[len(qiseq) // 2:]
+            seq = box.sequence[:i1 + 1] + qiseq + box.sequence[i2:]
+            box.sequence = seq
+            box.update_element_positions()
+            box.rotate_lattice(m)
+            box.update_element_positions()
+            assert np.isclose(l_orig, box.totallen)
+        box.sequence = [ocelot.Marker(eid='START')] + box.sequence + [ocelot.Marker(eid='END')]
         box.update()
         assert np.isclose(l_orig, box.totallen)
     elif lattice_style == 'iota_ior':
