@@ -98,15 +98,24 @@ class DaskSLURMSim(Sim):
         return futures or None
 
 
+
+
 class DaskClient:
     """ Wrapper for dask client used to submit and read out tasks """
 
     def __init__(self, address: str = None, autorestart: bool = False):
+        import dask
+        dask.config.set({"distributed.comm.timeouts.tcp": 180})
+        dask.config.set({"distributed.comm.retry.count": 5})
+        dask.config.set({"distributed.comm.timeouts.connect": 180})
         from distributed import Client
         from ..util import config as cfg
         address = address or cfg.DASK_SCHEDULER_ADDRESS
         if address in cfg.CLIENT_CACHE:
             client = cfg.CLIENT_CACHE[address]
+            if client.status == 'closed':
+                client = Client(address, timeout=2)
+                cfg.CLIENT_CACHE[address] = client
         else:
             client = Client(address, timeout=2)
             cfg.CLIENT_CACHE[address] = client
@@ -129,7 +138,10 @@ class DaskClient:
         fun = run_elegant_job
         futures = []
         for t in tasks:
-            future = self.client.submit(fun, t, dry_run, mpi, pure=pure)
+            if dry_run:
+                future = self.client.submit(fun, t, dry_run, mpi, pure=pure, priority=10)
+            else:
+                future = self.client.submit(fun, t, dry_run, mpi, pure=pure)
             if fnf:
                 dask.distributed.fire_and_forget(future)
             else:
@@ -140,11 +152,13 @@ class DaskClient:
 
     def read_out(self, tasks: List, dry_run: bool = True, pure: bool = True):
         assert all(isinstance(t, ElegantSimJob) for t in tasks)
-
         fun = run_elegant_sdds_import
         futures = []
         for t in tasks:
-            future = self.client.submit(fun, t, dry_run, pure=pure)
+            if dry_run:
+                future = self.client.submit(fun, t, dry_run, pure=pure, priority=10, retries=2)
+            else:
+                future = self.client.submit(fun, t, dry_run, pure=pure, priority=1, retries=2)
             futures.append(future)
         return futures or None
 
@@ -211,6 +225,7 @@ class ElegantSimJob:
         self.task_file_abs_path = self.run_subfolder / task_file_name
         self.lattice_file_abs_path = self.run_subfolder / lattice_file_name
         self.state = STATE.NOT_STARTED
+        self.params = {}
 
     def __str__(self):
         return (f'ElegantSimJob - status ({self.state.name})\n' +
@@ -235,16 +250,17 @@ def run_dummy_task(*args, **kwargs):
 def run_elegant_job(task: ElegantSimJob, dry_run: bool = True, mpi: int = 0, mpi_lib: str = None):
     """ Dask elegant worker function """
     from time import perf_counter
+    import subprocess, os, logging, datetime
+    from pathlib import Path
     start = perf_counter()
 
     def delta():
         return perf_counter() - start
 
-    import subprocess, os, logging
     l = logging.getLogger("distributed.worker")
-    from pathlib import Path
     l.info('--------------------------')
     l.info(f'{delta():.3f} Elegant sim task starting')
+    l.info(f'{delta():.3f} Local time: {datetime.datetime.now()}')
 
     task.state = STATE.PREP
     # raise ValueError('bla')
@@ -267,8 +283,15 @@ def run_elegant_job(task: ElegantSimJob, dry_run: bool = True, mpi: int = 0, mpi
     assert work_folder.is_dir()
     assert work_folder.exists()
     if run_folder.exists():
-        raise Exception(f'Run folder {run_folder} exists!')
-    assert not task_file_abs_path.exists()
+        if not getattr(task, 'file_exists_override', False):
+            raise Exception(f'Run folder ({run_folder}) exists')
+        else:
+            l.warning(f'>Run folder ({run_folder})exists but overriden')
+    if task_file_abs_path.exists():
+        if not getattr(task, 'file_exists_override', False):
+            raise Exception(f'Task file ({task_file_abs_path}) exists')
+        else:
+            l.warning(f'>Task file ({task_file_abs_path}) exists but overriden')
     if task.parameter_file_map is not None:
         for (k, v) in task.parameter_file_map.items():
             if not isinstance(k, PurePath):
@@ -281,7 +304,7 @@ def run_elegant_job(task: ElegantSimJob, dry_run: bool = True, mpi: int = 0, mpi
     l.info(f'>{delta():.3f} Writing elegant files')
     os.chdir(work_folder)
     if not dry_run:
-        run_folder.mkdir()
+        run_folder.mkdir(exist_ok=getattr(task, 'file_exists_override', False))
         task_file_abs_path.write_text(task.task_file_contents)
         lattice_file_abs_path.write_text(task.lattice_file_contents)
         if task.parameter_file_map is not None:
@@ -301,21 +324,24 @@ def run_elegant_job(task: ElegantSimJob, dry_run: bool = True, mpi: int = 0, mpi
                 sdds = SDDS(k, blank=True)
                 sdds.set(v)
 
-    l.info(f'>{delta():.3f} Calling elegant')
     task.state = STATE.STARTED
     if dry_run:
+        l.info(f'>{delta():.3f} Calling elegant (dry run)')
         result = subprocess.run(['echo', str(42)], capture_output=True, text=True)
     else:
-        if mpi > 0:
+        if mpi is not None and mpi > 0:
             from ..util.config import ELEGANT_MPI_MODULE, ELEGANT_MPI_ARGS
             mpi_lib = ELEGANT_MPI_MODULE
             mpi_extra = ELEGANT_MPI_ARGS
             assert mpi_lib is not None
-            result = subprocess.run(f'module load {mpi_lib}; mpiexec -n {mpi} {mpi_extra} Pelegant {str(task_file_abs_path)}',
-                                    shell=True, capture_output=True, text=True)
+            cmd = f'module load {mpi_lib}; mpiexec -n {mpi} {mpi_extra} Pelegant {str(task_file_abs_path)}'
+            l.info(f'>{delta():.3f} Calling: {cmd}')
+            result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
         else:
+            l.info(f'>{delta():.3f} Calling: elegant ({str(task_file_abs_path)})')
             result = subprocess.run(['elegant', str(task_file_abs_path)], capture_output=True, text=True)
     task.state = STATE.ENDED
+    #task.sim_result = result
     l.info(f'{delta():.3f} Finished')
     l.info('--------------------------')
     return result, task
