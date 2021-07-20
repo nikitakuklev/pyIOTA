@@ -4,11 +4,14 @@ __all__ = ['LatticeContainer', 'NLLens', 'HKPoly', 'IBScatter', 'HKPoly', 'ILMat
            'Recirculator']
 
 import logging
+
+import numpy as np
+
 import math
 import time
 from enum import Enum
 from pathlib import Path
-
+from itertools import accumulate
 from typing import Union, List, Dict, Type, Iterable, Callable, Optional
 
 from ..util import *
@@ -404,12 +407,14 @@ class LatticeContainer:
         if not isinstance(elements, list):
             elements = [elements]
         assert all(el in seq for el in elements)
-        i = 0
-        for el in elements:
-            while el in seq:
-                # Remove duplicates if any
-                seq.remove(el)
-                i += 1
+        #i = 0
+        seq = [el for el in seq if el not in elements]
+        i = len(self.lattice.sequence) - len(seq)
+        self.lattice.sequence = seq
+            # while el in seq:
+            #     # Remove duplicates if any
+            #     seq.remove(el)
+            #     i += 1
         logger.info(f'Removed ({i}) elements')
         return self
 
@@ -742,11 +747,10 @@ class LatticeContainer:
             monitors = self.monitors
             logger.warning(f'No monitors specified - inserting default set')
         logger.warning('Only monitors between elements can be inserted for thick lattices')
-
-        lengths = [0.0] + [el.l for el in self.lattice.sequence]
-        s = np.cumsum(lengths)
+        tl = self.totallen
+        s = list(accumulate([0.0] + [el.l for el in self.lattice.sequence])) #np.cumsum(lengths)
         s_dict = {k: v for k, v in zip(self.lattice.sequence, s)}
-        s_inverse_dict = {v: k for k, v in zip(self.lattice.sequence, s)}
+        #s_inverse_dict = {v: k for k, v in zip(self.lattice.sequence, s)}
         for m in monitors:
             m.s_mid = s_dict[m.ref_el] + m.shift
             if m.s_mid > self.lattice.totalLen:
@@ -757,25 +761,29 @@ class LatticeContainer:
         a, b, c = 0, 0, 0
         rejected = []
         for m in monitors:
-            lengths = [0.0] + [el.l for el in self.lattice.sequence]
+            lengths = np.zeros(len(self.lattice.sequence)+1)
+            lengths[1:] = [el.l for el in self.lattice.sequence]
             s = np.cumsum(lengths)
-            s_dict = {k: v for k, v in zip(self.lattice.sequence, s)}
-            s_inverse_dict = {v: k for k, v in zip(self.lattice.sequence, s)}
-            # print('S:', {k.id: v for k, v in zip(self.lattice.sequence, s)})
+            #s_dict = {k: v for k, v in zip(self.lattice.sequence, s)}
 
-            if m.s_mid in s or np.any(np.isclose(m.s_mid, s)):
-                i = np.where(np.isclose(m.s_mid, s))[0][-1]
+            # print('S:', {k.id: v for k, v in zip(self.lattice.sequence, s)})
+            sclose = np.isclose(m.s_mid, s)
+            if m.s_mid in s or np.any(sclose):
+                i = np.where(sclose)[0][-1]
                 # print(i,m.s)
                 if verbose: print(
                     f'{m.id} - inserted at {m.s_mid}(idx {i}) between {self.lattice.sequence[i - 1].id}'
                     f' and {self.lattice.sequence[i].id}')
                 self.lattice.sequence.insert(i, m)
-                self.lattice.update_transfer_maps()
+                #self.update_element_positions()
+                m.s_end = m.s_start = m.s_mid
                 a += 1
             else:
-                occupant_s_idx = np.where(s < m.s_mid)[0][-1]
+                s_inverse_dict = {v: k for k, v in zip(self.lattice.sequence, s)}
+                occupant_s_idx = np.argmin(s < m.s_mid)-1 #np.where(s < m.s_mid)[0][-1]
                 occupant_s = s[occupant_s_idx]
                 occupant = s_inverse_dict[occupant_s]
+                #occupant = self.lattice.sequence[occupant_s_idx]
                 if verbose: print(
                     f'{m.id} - location {m.s_mid} in collision with ({occupant.__class__.__name__} {occupant.id})'
                     f'(sidx:{occupant_s_idx}) - length {occupant.l}m, between {s[max(occupant_s_idx - 1, 0):min(occupant_s_idx + 3, len(s) - 1)]}')
@@ -789,7 +797,8 @@ class LatticeContainer:
                     self.lattice.sequence.remove(occupant)
                     if verbose: print(
                         f'{m.id} - inserted at {m.s_mid}, two new drifts {d_before.l} and {d_after.l} created')
-                    self.lattice.update_transfer_maps()
+                    m.s_end = m.s_start = m.s_mid
+                    #self.update_element_positions()
                     if self.lattice.totalLen != len_before:
                         raise Exception(f"Lattice length changed from {len_before} to {self.lattice.totalLen}!!!")
                     b += 1
@@ -799,6 +808,9 @@ class LatticeContainer:
                         f'{occupant.id} - length {occupant.l}m, closest edges ({np.max(s[s < m.s_mid])}|{np.min(s[s > m.s_mid])})')
                     rejected.append(m.id)
                     c += 1
+        #self.lattice.update_transfer_maps()
+        self.update_element_positions()
+        assert np.isclose(self.totallen, tl, atol=1e-10, rtol=0.0)
         # print(f'Inserted ({a}) cleanly, ({b}) with drift splitting, ({c}) rejected: {rejected}')
         logger.info(f'Inserted ({a}) cleanly, ({b}) with drift splitting, ({c}) rejected: {rejected}')
 
@@ -1248,6 +1260,7 @@ class NLLens(Element):
             raise Exception('Dimensional parameter of NLLens must be non-zero!')
         self.cnll = cnll
         self.tilt = tilt
+        self.thin = l > 0.0
         self.k1 = 2.0 * knll / (cnll * cnll) / l if l > 0.0 else 0.0
         # DN potential has no sextupolar component
         self.k2 = 0.0
@@ -1333,10 +1346,10 @@ class OctupoleInsert:
         olen_eff = olen_eff or olen or l0 / nn
 
         if current:
-            print(
+            logger.info(
                 f'QI - l0:{l0}|nn:{nn}|c:{current}|run:{run}|olen:{olen:.3f}|space:{oqSpacing:.3f}|drop:{drop_empty_drifts}')
         else:
-            print(
+            logger.info(
                 f'QI - l0:{l0}|nn:{nn}|tn:{tn}|cn:{cn}|run:{run}|olen:{olen:.3f}|space:{oqSpacing:.3f}|drop:{drop_empty_drifts}')
         if positions is None:
             perturbed_mode = False
@@ -1596,12 +1609,13 @@ class NLInsert:
     """
 
     def __init__(self, **kwargs):
-        self.l0 = self.mu0 = None
+        self.l0 = self.mu0 = self.tn = self.cn = None
         self.seq = []
         self.configure(**kwargs)
 
-    def configure(self, oqK=1.0, tn=0.4, cn=0.01, run=2, l0=1.8, mu0=0.3, olen=0.06, nn=18,
-                  ospacing=None, olen_eff=None):
+    def configure(self, oqK=1.0, tn=0.3, cn=0.01, run=None, l0=1.8, mu0=0.3, olen=0.06, nn=18,
+                  ospacing=None, olen_eff=None, drop_empty_drifts:bool = False,
+                  replace_zero_strength_octupoles:bool = False):
         """
         Initializes QI configuration
         :param l0: #l0     = 1.8;        # length of the straight section
@@ -1612,6 +1626,8 @@ class NLInsert:
         """
         self.l0 = l0
         self.mu0 = mu0
+        self.tn = tn
+        self.cn = cn
         # tn = 0.4  # strength of nonlinear lens
         # cn = 0.01  # dimentional parameter of nonlinear lens
 
@@ -1645,7 +1661,7 @@ class NLInsert:
         # musect = mu0 + 0.5
         f0, betae, alfae, betas = self.calculate_optics_parameters()
 
-        print(f'ML - l0:{l0}|nn:{nn}|tn:{tn}|cn:{cn}|run:{run}|olen:{olen:.3f}|space:{oqSpacing:.3f}|bs:{betas:.3f}')
+        print(f'DN - l0:{l0}|nn:{nn}|tn:{tn}|cn:{cn}|run:{run}|olen:{olen:.3f}|space:{oqSpacing:.3f}|bs:{betas:.3f}')
         # print(f"Insert optics: mu0:{mu0:.3f}|f0:{f0:.3f}|1/f0:{1 / f0:.3f}|"
         #       f"betaedge:{betae:.3f}|alphaedge:{alfae:.3f}|betastar:{betas:.3f}")
         # value, , oqK, nltype, otype;
@@ -1662,10 +1678,14 @@ class NLInsert:
             k3 = knn / cn ** 2 / bn * 16  # 2 / 3 * 4!
             k3scaled = k3 * oqK
             knll *= oqK
-
-            seq.append(Drift(l=oqSpacing / 2, eid=f'oNL{i:02}l'))
-            seq.append(NLLens(l=olen, knll=knll, cnll=cnll, eid=f'NL{i:02}'))
-            seq.append(Drift(l=oqSpacing / 2, eid=f'oNL{i:02}r'))
+            if not (drop_empty_drifts and oqSpacing == 0.0):
+                seq.append(Drift(l=oqSpacing / 2, eid=f'oNL{i:02}l'))
+            if replace_zero_strength_octupoles and knll == 0.0:
+                seq.append(Drift(l=olen, eid=f'QI{i:02}'))
+            else:
+                seq.append(NLLens(l=olen, knll=knll, cnll=cnll, eid=f'NL{i:02}'))
+            if not (drop_empty_drifts and oqSpacing == 0.0):
+                seq.append(Drift(l=oqSpacing / 2, eid=f'oNL{i:02}r'))
             # value, i, bn, sn, k3, k3scaled, (betas ^ 3 / bn ^ 3);
         seq.append(Drift(l=margin, eid='oNLmarginR'))
         l_list = [e.l for e in seq]
@@ -1693,6 +1713,55 @@ class NLInsert:
         alfae = l0 / 2.0 / f0 / np.sqrt(1.0 - (1.0 - l0 / 2.0 / f0) ** 2)
         betas = l0 * (1 - l0 / 4.0 / f0) / np.sqrt(1.0 - (1.0 - l0 / 2.0 / f0) ** 2)
         return f0, betae, alfae, betas
+
+    def integral_betaxbetay(self, s0, s1):
+        """ Computes cross term beta_x beta_y integral"""
+        assert s0 < s1
+        assert 0 <= s0 < self.l0
+        assert 0 < s1 <= self.l0 or np.isclose(s1, self.l0, atol=1e-10, rtol=0.0)
+        s0 -= self.l0 / 2
+        s1 -= self.l0 / 2
+        l2 = self.l0 / 2
+        mu = self.mu0
+        bs = l2 / np.tan(mu * np.pi)
+        bs_x = bs / np.sqrt(1 + 2 * self.tn)
+        bs_y = bs / np.sqrt(1 - 2 * self.tn)
+        num = -3 * s0**5 + 3 * s1**5 + 5 * bs_y**2 * (-s0**3 + s1**3) + 5 * bs_x**2 * (-s0**3 + s1**3) + 15 * bs_x**2 * bs_y**2 * (-s0+s1)
+        res = num / (15 * bs_x * bs_y)
+        return res
+
+    def integral_beta2(self, s0, s1):
+        """ Computes integral of beta^2 (i.e. detuning) based on Mathematica derivation """
+        assert s0 < s1
+        assert 0 <= s0 < self.l0
+        assert 0 < s1 <= self.l0 or np.isclose(s1, self.l0, atol=1e-10, rtol=0.0)
+        s0 -= self.l0 / 2
+        s1 -= self.l0 / 2
+        l2 = self.l0 / 2
+        mu = self.mu0
+        bs = l2 / np.tan(mu * np.pi)
+        bs_x = bs / np.sqrt(1 + 2 * self.tn)
+        bs_y = bs / np.sqrt(1 - 2 * self.tn)
+        res_x = bs_x ** 2 * (-s0 + s1) - (2.0 * (s0 ** 3 - s1 ** 3)) / 3.0 + (-s0 ** 5 + s1 ** 5) / (5.0 * bs_x ** 2)
+        res_y = bs_y ** 2 * (-s0 + s1) - (2.0 * (s0 ** 3 - s1 ** 3)) / 3.0 + (-s0 ** 5 + s1 ** 5) / (5.0 * bs_y ** 2)
+        return res_x, res_y
+
+    def compute_relative_detuning(self):
+        """ Computes relative dQ = (integral of beta^2 in magnet) * k3l (constant field approximation) """
+        box = LatticeContainer('test', self.seq, reset_elements_to_defaults=False)
+        box.update_element_positions()
+        els = [el for el in box.lattice.sequence if isinstance(el, NLLens)]
+        detuning_str = [self.integral_beta2(el.s_start, el.s_end) for el in els]
+        detuning_str_x = np.array([dt[0] for dt in detuning_str])
+        detuning_str_y = np.array([dt[1] for dt in detuning_str])
+        detuning_str_xy = np.array([self.integral_betaxbetay(el.s_start, el.s_end) for el in els])
+        central_k3_str = np.array([el.k3 for el in els])
+        PI16 = np.pi * 16
+        dnuxdjx = np.sum(detuning_str_x * central_k3_str) / PI16
+        dnuydjx = np.sum(-2*detuning_str_xy * central_k3_str) / PI16
+        dnuxdjy = np.sum(-2*detuning_str_xy * central_k3_str) / PI16
+        dnuydjy = np.sum(detuning_str_y * central_k3_str) / PI16
+        return dnuxdjx, dnuydjx, dnuxdjy, dnuydjy
 
     def to_sequence(self):
         return self.seq
