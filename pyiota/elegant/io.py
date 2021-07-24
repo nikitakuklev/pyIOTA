@@ -16,9 +16,14 @@ from typing import Optional, List
 import numpy as np
 import pandas as pd
 from time import perf_counter
+from itertools import cycle
+
+sdds_nums = [5,6,7,8,9,10,11,12,13,14,15,16,17,18,19]
+sdds_cycle = cycle(sdds_nums)
 
 
-def load_sdds(num: int = 15):
+def load_sdds(num: int = None):
+    num = num or next(sdds_cycle)
     try:
         import sdds
     except ImportError as e:
@@ -36,8 +41,9 @@ def load_sdds(num: int = 15):
             raise e
         import sdds
 
-    SDDS.sd = sdds.SDDS(num)
-    return SDDS.sd
+    sd = sdds.SDDS(num)
+    #SDDS.sd = sdds.SDDS(num)
+    return sd#SDDS.sd
 
 
 class SDDS:
@@ -45,12 +51,10 @@ class SDDS:
     SDDSPython wrapper for elegant files that provides nice dictionary-like interface, or a DataFrame view
     """
 
-    sd = None
-
     def __init__(self, path: Path, fast: bool = False, blank: bool = False):
-        sd = SDDS.sd
-        if sd is None:
-            sd = load_sdds()
+        #sd = last_sdds_num #SDDS.sd
+        #if sd is None:
+        sd = load_sdds()
         if isinstance(path, Path):
             path = str(path)  # legacy code :(
         if blank:
@@ -72,6 +76,7 @@ class SDDS:
             self.pagecnt = self.cdata[0].shape[0]
         else:
             self.pagecnt = self.pdata[0].shape[0]
+        del sd
 
     def summary(self):
         """
@@ -83,7 +88,8 @@ class SDDS:
         return s
 
     def prepare_for_serialization(self):
-        SDDS.sd = None
+        pass
+        #SDDS.sd = None
 
     def __getitem__(self, name: str):
         """
@@ -141,7 +147,7 @@ class SDDS:
 
     def set(self, df: pd.DataFrame):
         """ Set SDDS file to dataframe contents (single page) """
-        sd = self.sd = load_sdds(10)
+        sd = self.sd = load_sdds(4)
         type_dict = {np.dtype(np.object_): sd.SDDS_STRING,
                      np.dtype(np.float64): sd.SDDS_DOUBLE,
                      np.dtype(np.int64): sd.SDDS_LONG}
