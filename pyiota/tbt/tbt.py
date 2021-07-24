@@ -451,18 +451,18 @@ class Kick:
         self.roll_bpm: Optional[str] = None
         self.box: Optional[LatticeContainer] = None
 
-    def upgrade(self, box: LatticeContainer, silent:bool = False):
+    def upgrade(self, box: LatticeContainer, silent: bool = False):
         """ Upgrade this kick to v2 """
         if self.v2:
             # pass
             self.bpm_roll = None
             self.roll_bpm: Optional[str] = None
             logger.warning(f'Kick {self.idx=} was already upgraded, resetting')
-            #raise AttributeError('Already upgraded!')
+            # raise AttributeError('Already upgraded!')
         self.box = box
         self.svd = {}  # Stores SVD data
         self.tracks = {'raw': {}, 'orig': {}}  # Stores matrix-format BPM data
-        self.props = {} # Other properties
+        self.props = {}  # Other properties
 
         # Make sure bpms match
         bpm_names = box.bpm_names
@@ -605,8 +605,8 @@ class Kick:
         df_orig = self.tracks['orig'][f]
         assert np.all(df_orig.index == self.bpm_list_orig)
         inactive_bpms = [b for b in self.bpm_list_orig if b not in self.bpm_list]
-        v = df_orig.values[:, self.trim]
-        v -= np.mean(v,axis=1,keepdims=True)
+        v = df_orig.values[:, self.trim].copy()
+        v -= np.mean(v, axis=1, keepdims=True)
         df = pd.DataFrame(index=df_orig.index, data=v)
         assert np.all(df.index == self.bpm_list_orig)
         df.drop(index=inactive_bpms, inplace=True)
@@ -1007,7 +1007,7 @@ class Kick:
             bpm_sets = {}
             for sp in self.bpm_default_families:
                 bpm_sets[sp] = {b[:-len(sp)] for b in self.bpm_families_active[sp]}
-            #print(bpm_sets)
+            # print(bpm_sets)
             nonzero_sets = [v for k, v in bpm_sets.items() if len(v) > 0]
             assert all(nonzero_sets[0] == nz for nz in nonzero_sets)
             assert len(self.bpm_list) >= len(nonzero_sets[0])  # only removals supported
@@ -1309,11 +1309,10 @@ class Kick:
 
     def get_turns(self) -> int:
         bpm = self.get_bpms()[0]
-        #print(self.col(bpm))
+        # print(self.col(bpm))
         return len(self.col(bpm))
 
     ### Physics starts here
-
 
     def v2_add_noise(self, families, noise_amp, output_key='raw_noised'):
         """ For simulation studies, add fake gaussian noise """
@@ -1328,10 +1327,10 @@ class Kick:
                 logger.warning(f'Key ({family}) in dict ({output_key}) already exists, overwriting')
             self.tracks[output_key][family] = pd.DataFrame(index=df.index, data=v)
             assert np.all(self.tracks[output_key][family].index == df.index)
+
     add_noise = v2_add_noise
 
-    def v2_demean(self, families = None, key='raw'):
-        """ For simulation studies, add fake gaussian noise """
+    def v2_demean(self, families=None, key='raw'):
         families = families or self.bpm_default_families
         if key not in self.tracks:
             raise Exception
@@ -1342,14 +1341,34 @@ class Kick:
                     df = df.copy()
                 self.tracks[key][family] = df.sub(df.mean(axis=1), axis=0)
 
+    def v2_envelope(self,
+                    key: str = 'raw',
+                    key_out: str = 'env',
+                    families: List[str] = None,
+                    ):
+        from scipy.signal import hilbert
+        from scipy.signal import savgol_filter
+        families = families or self.bpm_default_families
+        for family in families:
+            if len(self.bpm_families_active[family]) == 0:
+                continue
+            df = self.tracks[key][family]
+            matrix = df.values
+            transform = np.abs(hilbert(matrix))
+
+            if key_out not in self.tracks:
+                self.tracks[key_out] = {}
+            self.tracks[key_out][family] = pd.DataFrame(index=df.index, data=transform)
+
+
     def v2_clean_svd(self,
-                  n_comp: int = 5,
-                  families: List[str] = None,
-                  key: str = 'raw',
-                  key_out: str = 'clean',
-                  swap_raw: bool = True,
-                  dominance: bool = False,
-                  ):
+                     n_comp: int = 5,
+                     families: List[str] = None,
+                     key: str = 'raw',
+                     key_out: str = 'clean',
+                     swap_raw: bool = True,
+                     dominance: bool = False,
+                     ):
         """
         Clean kick using SVD, reconstructing each BPM from specified number of components
         """
@@ -1362,12 +1381,12 @@ class Kick:
             matrix = df.values
             matrix = matrix - np.mean(matrix, axis=1)[:, np.newaxis]
             U, S, vh = np.linalg.svd(matrix, full_matrices=False)
-            #V = vh.T  # transpose it back to conventional U @ S @ V.T
+            # V = vh.T  # transpose it back to conventional U @ S @ V.T
             self.svd[family] = (U, S, vh, np.diag(S) @ vh)
 
             # Check dominance
             if not np.all(np.max(np.abs(U), axis=0) < 0.95):
-                #bpmmax = df.index[np.argmax(np.abs(U))]
+                # bpmmax = df.index[np.argmax(np.abs(U))]
                 cmax = np.argmax(np.max(np.abs(U), axis=0))
                 if dominance:
                     raise ValueError(f'Dominance detected C{cmax}{family}: {np.max(np.abs(U), axis=0)}')
@@ -1389,7 +1408,6 @@ class Kick:
             if swap_raw:
                 for i, b in enumerate(self.tracks[key_out][family].index):
                     self.set(b + family + self.Datatype.RAW.value, signal[i, :].copy())
-
 
     clean_svd = v2_clean_svd
 
@@ -1419,6 +1437,7 @@ class Kick:
         :return:
         """
         families = families or ['H', 'V']
+        search_kwargs = search_kwargs or {}
         freq = {}
         pwr = {}
         if append_results:
@@ -1493,7 +1512,7 @@ class Kick:
                     for i, (bpm, nc) in enumerate(zip([bh, bv], n_components)):
                         ft = None
                         if freq_trim is not None:
-                            if len(freq_trim) == 2 and isinstance(freq_trim[0],tuple):
+                            if len(freq_trim) == 2 and isinstance(freq_trim[0], tuple):
                                 ft = freq_trim[i]
                             elif len(freq_trim) == 2:
                                 ft = freq_trim
