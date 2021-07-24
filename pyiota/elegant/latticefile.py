@@ -410,7 +410,8 @@ class Writer:
                 sl.append(
                     f" h1={el.h_pole1:+.10f}, h2={el.h_pole1:+.10f}, hgap={el.gap / 2:+.10f}, fint={el.fint}, &\n")
                 ef = getattr(el, 'elegant_edge_effects', 3)
-                edge_order = getattr(el, 'elegant_edge_order', 1)
+                # ELEGANT MANUAL LIES - EDGE ORDER NOT IGNORED FOR EFFECTS=3
+                edge_order = getattr(el, 'elegant_edge_order', 2)
                 if ef == 2 or ef == 4:
                     fcorr = getattr(el, 'elegant_fse_correction', 1)
                     sl.append(f" FSE_CORRECTION = {fcorr}, &\n")
