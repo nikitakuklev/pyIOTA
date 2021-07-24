@@ -3,7 +3,7 @@ __all__ = ['MADXOptics', 'TFS', 'parse_lattice']
 from pathlib import Path
 import numpy as np
 import pandas as pd
-from pyIOTA.lattice import NLLens
+from pyiota.lattice import NLLens
 from ocelot.cpbd.elements import *
 
 element_mapping = {

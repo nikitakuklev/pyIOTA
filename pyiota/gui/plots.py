@@ -65,6 +65,8 @@ def plot_simple(*args,
             elif isinstance(data_dict, dict):
                 for k, v in data_dict.items():
                     arrs.append((k, v))
+            elif isinstance(data_dict, pd.Series):
+                arrs.append((str(i), data_dict.values))
             else:
                 raise Exception(f'Supplied argument is not supported: {data_dict.__class__.__name__}')
 
@@ -130,6 +132,7 @@ def plot_simple_grid(*args,
                      no_title=False,
                      sharey=True,
                      sharex=True,
+                     return_all=False,
                      **kwargs):
     """
     Plot a grid of data sharing x/y axes. Each top level argument creates a new plot grid.
@@ -147,6 +150,8 @@ def plot_simple_grid(*args,
     """
     fig_l = []
     ax_l = []
+    ret_l = []
+    # 1 entry per figure
     for entry in args:
         if isinstance(entry, list):
             if all(isinstance(v, (np.ndarray, pd.Series)) for v in entry):
@@ -170,10 +175,8 @@ def plot_simple_grid(*args,
         fig, ax = plt.subplots(n_rows, width, figsize=(sizes[0] * width, sizes[1] * n_rows),
                                sharex=sharex, sharey=sharey, squeeze=False)
         fig_l.append(fig)
-        # ax_l.append(ax.flatten())
-        if n_rows == width == 1:
-            ax = np.array([[ax]])
         ax_l.append(ax)
+        shape = ax.shape
         # print([ax])
         if paired_bpm_mode:
             keys = [k for k in entry.keys()]
@@ -237,7 +240,9 @@ def plot_simple_grid(*args,
                     assert all(v[2] is not None for v in tuples_list)
 
             # global_max = np.max([np.max(v[1]) for v in tuples_list])
+            all_artists = []
             for i, (xl, yl, zl, k) in enumerate(tuples_list):
+                artist_list = []
                 for x, y, z in zip(xl, yl, zl):
                     if demean:
                         y = y - np.nanmean(y)
@@ -249,8 +254,15 @@ def plot_simple_grid(*args,
                             s = ax[i].scatter(x, y, c=z, **kwargs)
                         else:
                             s = ax[i].scatter(x, y, **kwargs)
+
                         if colorbar:
-                            fig.colorbar(s, ax=ax[i])
+                            cb = fig.colorbar(s, ax=ax[i], fraction=0.046, pad=0.04)
+
+                        if return_all:
+                            if colorbar:
+                                artist_list.append(s)
+                            else:
+                                artist_list.append(s)
                     else:
                         ax[i].plot(x, y, **kwargs)
                 if not no_title:
@@ -258,13 +270,30 @@ def plot_simple_grid(*args,
                         ax[i].set_title(f"{k}", fontsize=fontsize)
                     else:
                         ax[i].set_title(f"{i}|{k}", fontsize=fontsize)
+
+                all_artists.append(artist_list)
+            all_artists_arr = np.empty(shape, dtype=object)
+            #print(all_artists_arr)
+            #print(all_artists)
+            #for i in
+            all_artists_arr = np.array(all_artists) #[arr for arr in all_artists]
+            #print([arr for arr in all_artists])
+            #all_artists = np.array([np.array(arr) for arr in all_artists]).reshape(shape)
+            ret_l.append(all_artists_arr)
     if len(args) == 1:
         fig = fig_l[0]
         ax = ax_l[0]
+        axf = ax.flatten()
+        ret = ret_l[0]
     else:
         fig = fig_l
         ax = ax_l
-    return fig, ax
+        axf = [a.flatten() for a in ax_l]
+        ret = ret_l
+    if return_all:
+        return fig, ax, axf, ret
+    else:
+        return fig, ax
 
 
 plot_grid = plot_simple_grid
@@ -410,6 +439,7 @@ def plot_optics(box: LatticeContainer,
                 grid: bool = True,
                 font_size: int = 12,
                 excld_legend: bool = None,
+                update_maps: bool = True,
                 ):
     """
     Gen 2 plots
@@ -435,7 +465,7 @@ def plot_optics(box: LatticeContainer,
     """
     if fig is None:
         if fig_name is None:
-            fig = plt.figure()
+            fig = plt.figure(figsize=(10,5))
         else:
             fig = plt.figure(fig_name)
     else:
@@ -443,7 +473,7 @@ def plot_optics(box: LatticeContainer,
             ax.remove()
 
     if tws is None:
-        tws = box.update_twiss()
+        tws = box.update_twiss(update_maps=update_maps)
 
     if top_plot is None:
         top_plot = ["Dx"]
@@ -451,8 +481,8 @@ def plot_optics(box: LatticeContainer,
     left, width = 0.09, 0.87
     if top_separate:
         # left, bottom, width, height
-        rect1 = [left, 0.67, width, 0.25]#[left, 0.65, width, 0.3]
-        rect2 = [left, 0.19, width, 0.48]#[left, 0.19, width, 0.46]
+        rect1 = [left, 0.67, width, 0.25]  # [left, 0.65, width, 0.3]
+        rect2 = [left, 0.19, width, 0.48]  # [left, 0.19, width, 0.46]
         rect3 = [left, 0.07, width, 0.12]
 
         ax_top = fig.add_axes(rect1)
@@ -489,7 +519,8 @@ def plot_optics(box: LatticeContainer,
             _plot_extra_parameters(ax_bot2, s, tws, top_plot, font_props, twinx=True)
 
     # new_plot_elems(ax_el, lat, s_point = S[0], legend = legend, y_scale=0.8)  # plot elements
-    plot_elems(fig, ax_el, box.lattice, s_point=s[0], legend=legend, y_scale=0.8, font_size=font_size,
+    plot_elems(fig, ax_el, box.lattice, s_point=0,#s[0],
+               legend=legend, y_scale=0.8, font_size=font_size,
                excld_legend=excld_legend)
 
     ax_el.set_yticks([])
@@ -497,7 +528,7 @@ def plot_optics(box: LatticeContainer,
     for ax in axes:
         if ax != ax_el:
             ax.xaxis.set_tick_params(labelbottom=False)
-            #ax.set_xticklabels([]) doesn't work for shared x
+            # ax.set_xticklabels([]) doesn't work for shared x
 
     return fig, *axes
 
@@ -724,6 +755,9 @@ def plot_API(lat, fig=None, legend=False, fig_name=1, grid=True, font_size=12, n
     """
     if not fig:
         fig = plt.figure(fig_name)
+    else:
+        for ax in fig.axes:
+            ax.remove()
     plt.rc('axes', grid=grid)
     plt.rc('grid', color='0.75', linestyle='-', linewidth=0.5)
     left, width = 0.1, 0.85
@@ -780,7 +814,7 @@ def combinations_recursive(n):
     return pd.DataFrame(accum).values
 
 
-def plot_resonance_lines(ax, order=4):
+def plot_resonance_lines(ax, order=4, **kwargs):
     prop_cycle = plt.rcParams['axes.prop_cycle']
     colors = prop_cycle.by_key()['color']
     xybuffer = []
@@ -817,7 +851,7 @@ def plot_resonance_lines(ax, order=4):
         # xyfinal = xylist
         for (x, y) in xyfinal:
             if (tuple(x), tuple(y)) not in xybuffer:
-                ax.plot(x, y, color=colors[r - 1], lw=1)
+                ax.plot(x, y, color=colors[r - 1], lw=1, **kwargs)
                 xybuffer.append((tuple(x), tuple(y)))
                 # print()
             else:
@@ -999,8 +1033,9 @@ dict_plot.update({ILMatrix:     {"scale": 0.7, "color": "pink",         "edgecol
 #         L += elem.l
 #         points_with_annotation.append([point, annotation])
 
-def plot_elems(fig, ax, lat, s_point=0, nturns=1, y_lim=None, y_scale=1, legend=True, font_size=18, excld_legend=None,
-               n_start=0, n_end=-1):
+def plot_elems(fig, ax, lat, s_point=0, nturns=1, y_lim=None, y_scale=1,
+               legend=True, font_size=18, excld_legend=None,
+               n_start=0, n_end=None):
     legend_font_size = font_size
 
     if excld_legend is None:
@@ -1064,7 +1099,7 @@ def plot_elems(fig, ax, lat, s_point=0, nturns=1, y_lim=None, y_scale=1, legend=
             continue
         l = elem.l
         if l == 0:
-            l = 0.03
+            l = 0.02
         # type = elem.type
         if elem.__class__ in dict_copy:
             scale = dict_copy[elem.__class__]["scale"]
@@ -1141,31 +1176,31 @@ def plot_elems(fig, ax, lat, s_point=0, nturns=1, y_lim=None, y_scale=1, legend=
             point, = ax.fill(s_coord, rect * ampl * scale * y_scale, color, edgecolor=ecolor,
                              alpha=alpha)
 
-        annotation = ax.annotate(elem.__class__.__name__ + ": " + elem.id,
-                                 xy=(L + l / 2., 0),  # xycoords='data',
-                                 # xytext=(i + 1, i), textcoords='data',
-                                 horizontalalignment="left",
-                                 arrowprops=dict(arrowstyle="simple", connectionstyle="arc3,rad=+0.2"),
-                                 bbox=dict(boxstyle="round", facecolor="w", edgecolor="0.5", alpha=0.9),
-                                 fontsize=legend_font_size
-                                 )
-        # by default, disable the annotation visibility
-        annotation.set_visible(False)
+        # annotation = ax.annotate(elem.__class__.__name__ + ": " + elem.id,
+        #                          xy=(L + l / 2., 0),  # xycoords='data',
+        #                          # xytext=(i + 1, i), textcoords='data',
+        #                          horizontalalignment="left",
+        #                          arrowprops=dict(arrowstyle="simple", connectionstyle="arc3,rad=+0.2"),
+        #                          bbox=dict(boxstyle="round", facecolor="w", edgecolor="0.5", alpha=0.9),
+        #                          fontsize=legend_font_size
+        #                          )
+        # # by default, disable the annotation visibility
+        # annotation.set_visible(False)
         L += elem.l
-        points_with_annotation.append([point, annotation])
+        #points_with_annotation.append([point, annotation])
         ax.set_xlabel("s [m]", fontsize=font_size)
 
-    def on_move(event):
-        visibility_changed = False
-        for point, annotation in points_with_annotation:
-            should_be_visible = (point.contains(event)[0] == True)
-            if should_be_visible != annotation.get_visible():
-                visibility_changed = True
-                annotation.set_visible(should_be_visible)
+    # def on_move(event):
+    #     visibility_changed = False
+    #     for point, annotation in points_with_annotation:
+    #         should_be_visible = (point.contains(event)[0] == True)
+    #         if should_be_visible != annotation.get_visible():
+    #             visibility_changed = True
+    #             annotation.set_visible(should_be_visible)
+    #
+    #     if visibility_changed:
+    #         plt.draw()
 
-        if visibility_changed:
-            plt.draw()
-
-    on_move_id = fig.canvas.mpl_connect('motion_notify_event', on_move)
+    #on_move_id = fig.canvas.mpl_connect('motion_notify_event', on_move)
     if legend:
         ax.legend(loc='upper center', ncol=ncols, shadow=False, prop=font_manager.FontProperties(size=legend_font_size))

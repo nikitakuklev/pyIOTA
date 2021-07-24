@@ -334,10 +334,13 @@ class NAFF:
         Numeric analysis of fundamental frequencies
         Iterative method that maximizes inner product of data and oscillatory signal, finding best frequencies
 
-        :param data: Signal
-        :param data_trim: Uses object default if not specified
+        :param data: signal
+        :param data_trim: a slice to trim data with, uses object default if not specified
+        :param freq_trim: tuple of (low_limit, high_limit) used as frequency search window
+
+
         :param legacy: Use old return format
-        :param xatol: Final optimization absolute tolerance
+        :param xatol: final optimization absolute tolerance
         :param n_components: Number of frequencies to look for
         :param full_data: Return debug and other information in addition to tunes
         :param perf_mode: Enables certain optimizations and shortcuts to maximize performance
@@ -379,6 +382,7 @@ class NAFF:
                 return fft_freq[np.argmax(fft_power)]
 
         def get_amplitude(freq: np.ndarray, signal: np.ndarray):
+            """ Correlation integral """
             last_eval = self.compute_correlations_v2(signal, freq, no_trim=True, no_window=True)
             return last_eval[0]
 
