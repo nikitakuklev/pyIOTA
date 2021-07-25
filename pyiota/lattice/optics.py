@@ -4,6 +4,118 @@ from ocelot import transform_vec_ent, transform_vec_ext
 from copy import copy
 
 
+class MultipoleKickTM(TransferMap):
+    """ See NLKickTM for comments """
+
+    def __init__(self, angle=0., k1=0., k2=0., k3=0., nkick=1, drift_type=1):
+        TransferMap.__init__(self)
+        assert angle == 0.0
+        self.angle = angle
+        self.k1 = k1
+        self.k2 = k2
+        self.k3 = k3
+        self.nkick = nkick
+        self.drift_type = drift_type
+
+    def kick(self, X, l, angle, k1, k2, k3, energy, nkick=1):
+        kick_fraction = 1. / nkick
+        l = l / nkick
+        dl = l / 2
+
+        gamma = energy / m_e_GeV
+        if gamma != 0:
+            gamma2 = gamma * gamma
+            beta = np.sqrt(1.0 - 1.0 / gamma2)
+            ibeta = 1. / beta
+            gammabeta = np.sqrt(gamma2 - 1.0)
+            igammabeta = 1. / gammabeta
+            if self.drift_type == 1:
+                map_drift = self.map_drift_6D_exact
+            elif self.drift_type == 2:
+                map_drift = self.map_drift_6D_paraxial
+            else:
+                map_drift = self.map_drift_6D_linear
+        else:
+            # 4D - no energy
+            ibeta = igammabeta = 0.
+            map_drift = self.map_drift_4D
+
+        # Integrated strength
+        k1 = k1 * l
+        k2 = k2 * l / 2.
+        k3 = k3 * l / 6.
+
+        X[:, np.abs(X[0, :]) > 0.5] = np.nan
+        X[:, np.abs(X[1, :]) > 0.5] = np.nan
+        X[:, np.abs(X[2, :]) > 0.5] = np.nan
+        X[:, np.abs(X[3, :]) > 0.5] = np.nan
+
+        map_kick = self.map_mult_thin
+
+        for i in range(nkick):
+            # Half-drift with applied offset
+            map_drift(X, ibeta, igammabeta, dl)
+            #X[0] -= self.dx
+            #X[2] -= self.dy
+
+            # Kick
+            map_kick(X, k1 * kick_fraction, k2 * kick_fraction, k3 * kick_fraction)
+
+            # Second half-drift and revert offset
+            map_drift(X, ibeta, igammabeta, dl)
+            #X[0] += self.dx
+            #X[2] += self.dy
+
+    def map_mult_thin(self, X: np.ndarray, k1, k2, k3):
+        xy1 = X[0, :] + 1j * X[2, :]
+        xy2 = xy1 * xy1
+        xy3 = xy2 * xy1
+        kick = k1 * xy1 + k2 * xy2 + k3 * xy3
+        X[1, :] += -np.real(kick)
+        X[3, :] += np.imag(kick)
+
+    def map_drift_6D_exact(self, X: np.ndarray, ibeta: float, igammabeta: float, l: float):
+        ibeta_plus_deop = ibeta + X[5]
+        inv_npz = 1.0 / np.sqrt(ibeta_plus_deop * ibeta_plus_deop - X[1] * X[1] - X[3] * X[3] - igammabeta * igammabeta)
+        X[0] += X[1] * l * inv_npz
+        X[2] += X[3] * l * inv_npz
+        X[4] -= (ibeta - ibeta_plus_deop * inv_npz) * l
+
+    def map_drift_6D_paraxial(self, X: np.ndarray, ibeta: float, igammabeta: float, l: float):
+        ibeta_plus_deop = ibeta + X[5]
+        inv_npz = 1.0 / np.sqrt(ibeta_plus_deop * ibeta_plus_deop - igammabeta * igammabeta)
+        X[0] += X[1] * l * inv_npz
+        X[2] += X[3] * l * inv_npz
+        X[4] -= l * (
+                ibeta - (1.0 + 0.5 * (X[1] * X[1] + X[3] * X[3]) * inv_npz * inv_npz) * (inv_npz * ibeta_plus_deop))
+
+    def map_drift_6D_linear(self, X: np.ndarray, ibeta: float, igammabeta: float, l: float):
+        X[0] += X[1] * l
+        X[2] += X[3] * l
+        X[4] -= X[5] * l * igammabeta * igammabeta
+
+    def map_drift_4D(self, X: np.ndarray, ibeta: float, igammabeta: float, l: float):
+        X[0] += X[1] * l
+        X[2] += X[3] * l
+
+    def kick_apply(self, X, l, angle, k1, k2, k3, energy, nkick, dx, dy, tilt):
+        if dx != 0 or dy != 0 or tilt != 0:
+            X = transform_vec_ent(X, dx, dy, tilt)
+        self.kick(X, l, angle, k1, k2, k3, energy, nkick=nkick)
+        if dx != 0 or dy != 0 or tilt != 0:
+            X = transform_vec_ext(X, dx, dy, tilt)
+        return X
+
+    def __call__(self, s):
+        m = copy(self)
+        m.length = s
+        m.R = lambda energy: m.R_z(s, energy)
+        m.B = lambda energy: m.B_z(s, energy)
+        m.delta_e = m.delta_e_z(s)
+        m.map = lambda X, energy: m.kick_apply(X, s, m.angle, m.k1, m.k2, m.k3, energy, m.nkick, m.dx, m.dy, m.tilt)
+        return m
+
+
 class NLKickTM(TransferMap):
     """
     Symplectic 2nd order integrator (aka drift-kick) through Danilov-Nagaitsev nonlinear potential.
@@ -32,7 +144,7 @@ class NLKickTM(TransferMap):
         self.drift_type = drift_type
 
     def kick(self, X: np.ndarray, l: float, knll: float, cnll: float, energy: float, nkick: int):
-        #print(f'NLKickMap with knll ({knll}) and cnll ({cnll}), X vector size ({X.shape})')
+        # print(f'NLKickMap with knll ({knll}) and cnll ({cnll}), X vector size ({X.shape})')
         kick_fraction = 1. / nkick
         l = l / nkick
         dl = l / 2
@@ -142,7 +254,7 @@ class NLKickTM(TransferMap):
         x = X[0, :] * icnll
         y = X[2, :] * icnll
         kick = -knll * icnll
-        #print(x, y)
+        # print(x, y)
         if np.any(y == 0.0) and np.any(np.abs(x) >= 1):
             # TODO: recheck what actual domain is
             raise Exception('Encountered branch cut in NLLENS transport')
@@ -184,4 +296,3 @@ class NLKickTM(TransferMap):
         m.delta_e = m.delta_e_z(s)
         m.map = lambda X, energy: m.kick_apply(X, s, m.knll, m.cnll, energy, m.nkick, m.dx, m.dy, m.tilt)
         return m
-
