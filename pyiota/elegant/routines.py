@@ -91,9 +91,10 @@ def template_task_track_watchpoint(box: LatticeContainer, t: Task, **kwargs):
     create_file = kwargs.get('create_file', False)
     rf_mode = kwargs.get('rf_mode', None)
     chrom = kwargs.get('chrom', None)
+    lb = kwargs.get('load_balance', False)
 
     t.setup_global_settings()
-    t.setup_run_setup(p=box.pc, beamline='iota', rootname='test')
+    t.setup_run_setup(p=box.pc, beamline='iota', rootname='test', load_balance=lb)
     assert isinstance(box.sequence[0], Marker)
 
     t.setup_run_control(n_passes=n_turns)
