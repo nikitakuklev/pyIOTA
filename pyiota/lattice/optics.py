@@ -18,7 +18,6 @@ class MultipoleKickTM(TransferMap):
         self.drift_type = drift_type
 
     def kick(self, X, l, angle, k1, k2, k3, energy, nkick=1):
-        kick_fraction = 1. / nkick
         l = l / nkick
         dl = l / 2
 
@@ -59,7 +58,7 @@ class MultipoleKickTM(TransferMap):
             #X[2] -= self.dy
 
             # Kick
-            map_kick(X, k1 * kick_fraction, k2 * kick_fraction, k3 * kick_fraction)
+            map_kick(X, k1, k2, k3)
 
             # Second half-drift and revert offset
             map_drift(X, ibeta, igammabeta, dl)
