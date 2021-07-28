@@ -1537,7 +1537,7 @@ class OctupoleInsert:
         res = -np.arctan(s0 / bs) + np.arctan(s1 / bs)
         return res
 
-    def integral_beta2(self, s0, s1):
+    def integral_beta2(self, s0, s1, mu0=None):
         """ Computes integral of beta^2 (i.e. detuning) based on Mathematica derivation """
         assert s0 < s1
         assert 0 <= s0 < self.l0
@@ -1545,12 +1545,12 @@ class OctupoleInsert:
         s0 -= self.l0 / 2
         s1 -= self.l0 / 2
         l2 = self.l0 / 2
-        mu = self.mu0
+        mu = mu0 or self.mu0
         bs = l2 / np.tan(mu * np.pi)
         res = bs ** 2 * (-s0 + s1) - (2.0 * (s0 ** 3 - s1 ** 3)) / 3.0 + (-s0 ** 5 + s1 ** 5) / (5.0 * bs ** 2)
         return res
 
-    def compute_relative_detuning(self):
+    def compute_relative_detuning(self, mu0=None):
         """ Computes relative dQ = (integral of beta^2 in magnet) * k3l (constant field approximation) """
         box = LatticeContainer('test', self.seq, reset_elements_to_defaults=False)
         box.update_element_positions()
@@ -1562,7 +1562,7 @@ class OctupoleInsert:
             return np.sum(detuning_str * central_k3_str)
         elif self.otype == 1:
             els = [el for el in box.lattice.sequence if isinstance(el, Octupole)]
-            detuning_str = np.array([self.integral_beta2(el.s_start, el.s_end) / el.l for el in els])
+            detuning_str = np.array([self.integral_beta2(el.s_start, el.s_end, mu0=mu0) / el.l for el in els])
             # central_k3_str = np.array([1 / (self.beta(el.s_mid) ** 3) * el.l for el in els])
             central_k3_str = np.array([el.k3 * el.l for el in els])  # k3l
             return np.sum(detuning_str * central_k3_str)
@@ -1574,6 +1574,11 @@ class OctupoleInsert:
             return np.sum(detuning_str * central_k3_str)
         else:
             raise Exception("Unsuitable otype!")
+
+    def compute_relative_detuning_all(self, mu0=None):
+        PI16 = np.pi * 16
+        dt = self.compute_relative_detuning(mu0=mu0)
+        return dt/PI16, -2*dt/PI16, -2*dt/PI16, dt/PI16
 
     def compute_theoretical_detuning(self):
         """ Computes continuous integral dQ = Int[1/beta^3 * beta^2]"""
@@ -1713,6 +1718,19 @@ class NLInsert:
         alfae = l0 / 2.0 / f0 / np.sqrt(1.0 - (1.0 - l0 / 2.0 / f0) ** 2)
         betas = l0 * (1 - l0 / 4.0 / f0) / np.sqrt(1.0 - (1.0 - l0 / 2.0 / f0) ** 2)
         return f0, betae, alfae, betas
+
+    def calculate_theoretical_optics(self):
+        l2 = self.l0 / 2
+        mu = self.mu0
+        bs = l2 / np.tan(mu * np.pi)
+        bs_x = bs / np.sqrt(1 + 2 * self.tn)
+        bs_y = bs / np.sqrt(1 - 2 * self.tn)
+        return bs_x, bs_y
+
+    def calculate_theoretical_tunes(self, mu0=None, tn=None):
+        mu = mu0 or self.mu0
+        t = tn or self.tn
+        return mu * np.sqrt(1 + 2 * t), mu * np.sqrt(1 - 2 * t)
 
     def integral_betaxbetay(self, s0, s1):
         """ Computes cross term beta_x beta_y integral"""
