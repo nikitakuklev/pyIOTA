@@ -1,5 +1,6 @@
 import copy
 import enum
+import itertools
 import json
 import logging
 from json import JSONDecodeError
@@ -7,6 +8,7 @@ from typing import Union, Callable, Dict, List, Iterable, Tuple, Optional, Any, 
 
 import numpy as np
 import pandas as pd
+
 from ..iota import run2 as iota
 from ..acnet import utils as acutils
 
@@ -391,6 +393,7 @@ class Kick:
         self.idxg = kick_id + id_offset
         self.set('idx', self.idx)
         self.set('idxg', self.idxg)
+        self.set('kick', self)
         self.ks = parent_sequence
         self.file_name = file_name
         self.matrix_cache = {}  # old way of caching BPM matrices
@@ -477,6 +480,14 @@ class Kick:
                     box.remove_elements(els)
             else:
                 raise Exception(f'BPM mismatch - ({diff})')
+        bpm_names = box.bpm_names
+        if bpm_names != self.bpm_list_orig:
+            logger.warning(f'BPM list order does not match box, adjusting')
+            logger.warning(f'Box: {bpm_names}')
+            logger.warning(f'List: {self.bpm_list_orig}')
+            assert len(self.bpm_list_orig) == len(bpm_names)
+            self.bpm_list_orig = bpm_names
+            self.bpm_list = [b for b in bpm_names if b in self.bpm_list]
         for bpm_name in self.bpm_list_orig:
             bpm = box.get_first(el_name=bpm_name, el_type=Monitor, exact=True)
             bpm.active = True if bpm_name in self.bpm_list else False
@@ -1342,12 +1353,12 @@ class Kick:
                 self.tracks[key][family] = df.sub(df.mean(axis=1), axis=0)
 
     def v2_envelope(self,
-                    key: str = 'raw',
+                    key: str = 'clean',
                     key_out: str = 'env',
                     families: List[str] = None,
                     ):
         from scipy.signal import hilbert
-        from scipy.signal import savgol_filter
+        # from scipy.signal import savgol_filter
         families = families or self.bpm_default_families
         for family in families:
             if len(self.bpm_families_active[family]) == 0:
@@ -1360,6 +1371,87 @@ class Kick:
                 self.tracks[key_out] = {}
             self.tracks[key_out][family] = pd.DataFrame(index=df.index, data=transform)
 
+    def v2_fit_decoherence(self,
+                           fun=None,
+                           amp=None,
+                           bounds=None,
+                           key_data: str = 'clean',
+                           key_env: str = 'env',
+                           out: str = 'dec',
+                           out_fit: str = 'envfit',
+                           families: List[str] = None,
+                           fit_trim: slice = None,
+                           individual_fit: bool = True,
+                           dry_run: bool = False
+                           # output_trim: slice = None
+                           ):
+        """ Fit supplied function to data - typically used to envelope decoherence fits """
+        import scipy.optimize as scopt
+        families = families or self.bpm_default_families
+        for family in families:
+            if len(self.bpm_families_active[family]) == 0:
+                continue
+            df = self.tracks[key_env][family]
+            matrix = df.values
+            matrix_data = self.tracks[key_data][family].values
+
+            # if output_trim is not None:
+            #    data_dec = data_dec[:, output_trim]
+            if fit_trim is not None:
+                matrix = matrix[:, fit_trim]
+                matrix_data = matrix_data[:, fit_trim]
+            data_dec = np.zeros_like(matrix)
+            data_env = np.zeros_like(matrix)
+
+            reslist = []
+            reslist_x = []
+            data_x = np.arange(matrix.shape[1])
+            if individual_fit:
+                for row in range(matrix.shape[0]):
+                    env = matrix[row, :]
+                    data_y = matrix_data[row, :]
+
+
+                    res = scopt.differential_evolution(fun, bounds=bounds, args=(data_x, env), popsize=10)
+                    reslist.append(res)
+                    reslist_x.append(res.x)
+                    data_env[row, :] = amp(data_x, res.x)
+                    data_dec[row, :] = data_y * data_env[row, :].max() / data_env[row, :]
+                    # if output_trim is None:
+                    #    data_dec[row, :] = data_y * data_env[row, :].max() / data_env[row, :]
+                    # else:
+                    #    data_dec[row, :] = (data_y * data_env[row, :].max() / data_env[row, :])[output_trim]
+            else:
+                # Fit for single envelope up to constant
+                env = matrix
+                if dry_run:
+                    res = [0]
+                    reslist = [res for i in range(matrix.shape[0])]
+                    for row in range(matrix.shape[0]):
+                        data_y = matrix_data[row, :]
+                        data_env[row, :] = np.ones_like(data_y)
+                        data_dec[row, :] = data_y.copy()
+                        reslist_x.append([0])
+                else:
+                    res = scopt.differential_evolution(fun, bounds=bounds, args=(data_x, env), popsize=100)
+                    reslist = [res for i in range(matrix.shape[0])]
+                    for row in range(matrix.shape[0]):
+                        data_y = matrix_data[row, :]
+                        data_env[row, :] = amp(data_x, res.x, row)
+                        data_dec[row, :] = data_y * data_env[row, :].max() / data_env[row, :]
+                        reslist_x.append(res.x)
+
+            if out not in self.tracks:
+                self.tracks[out] = {}
+            self.tracks[out][family] = pd.DataFrame(index=df.index, data=data_dec)
+
+            if out_fit not in self.tracks:
+                self.tracks[out_fit] = {}
+            self.tracks[out_fit][family] = pd.DataFrame(index=df.index, data=data_env)
+
+            self.props[family]['env_res'] = pd.DataFrame(index=df.index, data={'res': reslist})
+
+            self.props[family]['env_x'] = pd.Series(index=df.index, data=reslist_x)
 
     def v2_clean_svd(self,
                      n_comp: int = 5,
@@ -1410,6 +1502,111 @@ class Kick:
                     self.set(b + family + self.Datatype.RAW.value, signal[i, :].copy())
 
     clean_svd = v2_clean_svd
+
+    def v2_normalize_coordinates(self,
+                                 families: List[str] = None,
+                                 families_mom: List[str] = None,
+                                 key: str = 'clean',
+                                 out: str = 'norm',
+                                 optics_map: Dict[str, str] = None,
+                                 momentum: bool = False,
+                                 ):
+        from . import Coordinates
+        assert families is not None
+        # If converting momentum, momentum families should be given as well
+        if momentum:
+            assert families_mom is not None and len(families) == len(families_mom)
+        else:
+            families_mom = [None] * len(families)
+        optics_map = optics_map or {'H': 'X', 'V': 'Y'}
+        df_optics = self.box.compute_bpm_tables(self.bpm_list, active_only=True)
+        for family, family_mom in zip(families, families_mom):
+            if len(self.bpm_families_active[family]) == 0:
+                continue
+            assert family in optics_map
+            df = self.tracks[key][family]
+            matrix = df.values
+            data_xnorm = np.zeros_like(matrix)
+            if momentum:
+                matrix_p = self.tracks[key][family_mom].values
+                data_pxnorm = np.zeros_like(matrix)
+                for row in range(matrix.shape[0]):
+                    bx = df_optics.loc[df.index[row], 'B' + optics_map[family]]
+                    ax = df_optics.loc[df.index[row], 'A' + optics_map[family]]
+                    data_xnorm[row, :], data_pxnorm[row, :] = Coordinates.normalize(matrix[row, :], matrix_p[row, :],
+                                                                                    beta=bx, alpha=ax)
+            else:
+                for row in range(matrix.shape[0]):
+                    bx = df_optics.loc[df.index[row], 'B' + optics_map[family]]
+                    data_xnorm[row, :] = Coordinates.normalize_x(matrix[row, :], bx)
+
+            if out not in self.tracks:
+                self.tracks[out] = {}
+            self.tracks[out][family] = pd.DataFrame(index=df.index, data=data_xnorm)
+            if momentum:
+                self.tracks[out][family_mom] = pd.DataFrame(index=df.index, data=data_pxnorm)
+
+    def v2_momentum(self,
+                    families: List[str] = None,
+                    key: str = 'norm',
+                    out: Union[str,None] = 'normmom',
+                    bpm: str = None,
+                    pairs: list = None,
+                    optics_map=None,
+                    normalized=True,
+                    ):
+        """ Compute momentum pairwise for either all pairs or only those starting at particular BPM """
+        from . import Coordinates
+        assert families is not None
+        optics_map = optics_map or {'H': 'X', 'V': 'Y'}
+        df_optics = self.box.compute_bpm_tables(self.bpm_list, active_only=True)
+        if bpm is not None:
+            assert bpm in self.bpm_list
+            others = self.bpm_list.copy()
+            others.remove(bpm)
+            combinations = [(bpm, b2) for b2 in others]
+        elif pairs is not None:
+            assert all(len(b) == 2 for b in pairs)
+            assert all(b[0] in self.bpm_list for b in pairs)
+            assert all(b[1] in self.bpm_list for b in pairs)
+            combinations = pairs
+        else:
+            combinations = list(itertools.permutations(self.bpm_list, 2))
+
+        output = {}
+        for family in families:
+            if len(self.bpm_families_active[family]) == 0:
+                continue
+            df = self.tracks[key][family]
+            index_list = []
+            data = np.zeros((len(combinations), df.shape[1]))
+            print('Kick norm', family, normalized, combinations)
+            if normalized:
+                for row, (bpm1, bpm2) in enumerate(combinations):
+                    index_list.append((bpm1, bpm2))
+                    x1 = df.loc[bpm1, :]
+                    x2 = df.loc[bpm2, :]
+                    dp = df_optics.loc[bpm2, 'MU' + optics_map[family]] - df_optics.loc[bpm1, 'MU' + optics_map[family]]
+                    px1n = Coordinates.calc_pxn_from_normalized_bpms(x1, x2, dp)
+                    data[row, :] = px1n
+            else:
+                for row, (bpm1, bpm2) in enumerate(combinations):
+                    index_list.append((bpm1, bpm2))
+                    x1 = df.loc[bpm1, :]
+                    x2 = df.loc[bpm2, :]
+                    b1 = df_optics.loc[bpm1, 'B' + optics_map[family]]
+                    b2 = df_optics.loc[bpm2, 'B' + optics_map[family]]
+                    a1 = df_optics.loc[bpm1, 'A' + optics_map[family]]
+                    a2 = df_optics.loc[bpm2, 'A' + optics_map[family]]
+                    dp = df_optics.loc[bpm2, 'MU' + optics_map[family]] - df_optics.loc[bpm1, 'MU' + optics_map[family]]
+                    px1n = Coordinates.calc_px_from_bpms(x1, x2, b1, b2, a1, a2, dp)
+                    data[row, :] = px1n
+            if out is None:
+                output[family] = pd.DataFrame(index=index_list, data=data)
+            if out not in self.tracks:
+                self.tracks[out] = {}
+            self.tracks[out][family] = pd.DataFrame(index=index_list, data=data)
+        return output
 
     def calculate_tune(self,
                        naff: NAFF,
@@ -1626,7 +1823,7 @@ class Kick:
             data = np.abs(data)
             data = np.sort(data)
             self.df[bpm + self.Datatype.AMP.value] = np.mean(data[-2:])
-            self.df[bpm + self.Datatype.AMPSIG.value] = np.std(data[-2:])
+            self.df[bpm + self.Datatype.AMPSIG.value] = np.std(data[-3:])
 
     def calculate_stats(self) -> dict:
         """

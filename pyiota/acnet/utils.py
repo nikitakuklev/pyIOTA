@@ -53,7 +53,7 @@ def load_data_tbt(fpath: Path,
                 kick_arrays = {}
                 for (k, v) in h5f.items():
                     if isinstance(v, h5py.Dataset):
-                        kick_arrays[k] = v[:]
+                        kick_arrays[k] = v[:].astype(np.float64)
                 vlist = [v[0] for (k, v) in h5f.items() if isinstance(v, h5py.Dataset)]
                 if len(set(vlist)) != 1:
                     if soft_fail:

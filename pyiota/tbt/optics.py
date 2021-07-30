@@ -268,9 +268,13 @@ class Coordinates:
 
 class NBPM:
     def __init__(self, box, pairs, params):
+        """
+        Computation of momenta using N BPMs
+
+        """
         params_default = {'sig_x': 100e-6, 'sig_phi': 0.1, 'verbose': True}
         params_default.update(params)
-        assert all(p[0] == pairs[0][0] for p in pairs) # looking at one bpm
+        assert all(p[0] == pairs[0][0] for p in pairs)  # looking at one bpm
         self.pairs = pairs
         self.params = params_default
         self.box = box
@@ -278,29 +282,45 @@ class NBPM:
         self.plane = 'H'
         self.verbose = False
 
-    def import_kick(self, k: Kick, key, families=None):
+        self.single_default_pair = None
+
+    def import_kick(self, k: Kick, key, families=None, normalized=True):
         assert families is not None
         assert all(b in k.bpm_list for b in self.bpms)
-        df_pxn = k.v2_momentum(families=families, key=key, out=None, pairs=self.pairs)
+        k.v2_momentum(families=families, key=key, out='normmom', pairs=self.pairs, normalized=normalized)
+        df_pxn = k.v2_momentum(families=families, key=key, out=None, pairs=self.pairs, normalized=normalized)
         self.pxn = df_pxn
 
     def compute(self, mean=False, variance=False, covariance_stat=False,
-                   covariance_full=False, covariance_stat_tbtav=False, plane=None):
+                covariance_full=False, covariance_stat_tbtav=False, plane=None,
+                method=None, kwargs=None):
+        kwargs = kwargs or {}
         if plane is not None:
             self.plane = plane
-        if mean:
+        if method is None:
+            if mean:
+                method = 'mean'
+            elif variance:
+                method = 'variance'
+            elif covariance_stat:
+                method = 'covariance_stat'
+
+        if method == 'single':
+            px1n_comboS, error_finalS, weightsS = self.compute_momentum_single(**kwargs)
+            return px1n_comboS
+        if method == 'mean':
             px1n_comboM, error_finalM, weightsM = self.compute_momentum_mean()
             return px1n_comboM
         xna = self.params.get('var_xn_average', None)
-        if variance:
-            px1n_comboN, error_finalN, weightsN = self.compute_momentum_combo_variance(xn_avg = xna)
+        if method == 'variance':
+            px1n_comboN, error_finalN, weightsN = self.compute_momentum_combo_variance(xn_avg=xna)
             return px1n_comboN
-        if covariance_stat:
+        if method == 'covariance_stat':
             px1n_comboCV, error_finalCV, weightsCV = self.compute_momentum_combo_v2()
             return px1n_comboCV
-        xna = self.params.get('tbtav_xn_average',None)
-        if covariance_stat_tbtav:
-            px1n_comboT, error_finalT, weightsT = self.compute_momentum_combo_tbtav(xn_avg = xna)
+        xna = self.params.get('tbtav_xn_average', None)
+        if method == 'covariance_stat_tbtav':
+            px1n_comboT, error_finalT, weightsT = self.compute_momentum_combo_tbtav(xn_avg=xna)
             return px1n_comboT
         raise Exception
 
@@ -324,17 +344,18 @@ class NBPM:
             px1n_comboM, error_finalM, weightsM = self.compute_momentum_mean()
         xna = self.params.get('var_xn_average', None)
         if variance:
-            px1n_comboN, error_finalN, weightsN = self.compute_momentum_combo_variance(xn_avg = xna)
+            px1n_comboN, error_finalN, weightsN = self.compute_momentum_combo_variance(xn_avg=xna)
         if covariance_stat:
             px1n_comboCV, error_finalCV, weightsCV = self.compute_momentum_combo_v2()
-        xna = self.params.get('tbtav_xn_average',None)
+        xna = self.params.get('tbtav_xn_average', None)
         if covariance_stat_tbtav:
-            px1n_comboT, error_finalT, weightsT = self.compute_momentum_combo_tbtav(xn_avg = xna)
+            px1n_comboT, error_finalT, weightsT = self.compute_momentum_combo_tbtav(xn_avg=xna)
 
         dlist = []
         for i, pair in enumerate(bpm_pairs):
             b1, b2, a1, a2, dp, drel = self.get_opt(pair)
-            row = {'BPM1': pair[0], 'BPM2': pair[1], 'beta1': b1, 'beta2': b2, 'delta(deg)': (dp % PI) * (180 / PI) - 90,
+            row = {'BPM1': pair[0], 'BPM2': pair[1], 'beta1': b1, 'beta2': b2,
+                   'delta(deg)': (dp % PI) * (180 / PI) - 90,
                    'dist180': dist180(dp), 'distcut': np.abs(dist180(dp)) - (0.05 * PI2) * 180 / PI}
             if mean:
                 row['w_mean'] = weightsM.iloc[i, 0]
@@ -352,7 +373,7 @@ class NBPM:
             dlist.append(row)
         return pd.DataFrame(data=dlist)
 
-    def compute_momentum_combo_tbtav(self, plane=None, xn_avg = None):
+    def compute_momentum_combo_tbtav(self, plane=None, xn_avg=None):
         plane = plane or self.plane
         pws = self.pairs
         px1n_arr = self.pxn[plane].values
@@ -405,7 +426,7 @@ class NBPM:
         df = pd.DataFrame(np.repeat(weights[:, np.newaxis], px1n_arr.shape[1], axis=1), index=pws)
         return px1n_combo, error_final, df
 
-    def compute_momentum_combo_variance(self, plane=None, xn_avg = None):
+    def compute_momentum_combo_variance(self, plane=None, xn_avg=None):
         plane = plane or self.plane
         pws = self.pairs
         pars = self.params
@@ -430,6 +451,8 @@ class NBPM:
         px1n_arr = self.pxn[plane].values
         if pair is not None:
             pair_idx = pws.index(pair)
+        elif self.single_default_pair is not None:
+            pair_idx = pws.index(self.single_default_pair)
         if pair_idx:
             px1n_mean = px1n_arr[pair_idx, :]
             weights = np.zeros(px1n_arr.shape[0])
@@ -442,7 +465,8 @@ class NBPM:
         df = pd.DataFrame(np.repeat(weights[:, np.newaxis], px1n_arr.shape[1], axis=1), index=pws)
         return px1n_mean, error_final, df
 
-    def compute_momentum_mean(self, plane='H'):
+    def compute_momentum_mean(self, plane=None):
+        plane = plane or self.plane
         pws = self.pairs
         px1n_arr = self.pxn[plane].values
         px1n_mean = np.mean(px1n_arr, axis=0)
@@ -529,13 +553,18 @@ class NBPM:
             f'{i},{j} - partial {pair}({idx3})({idx1}-{idx2}) wrt {params["variables"][j]} = {val}')
         return val
 
-    def get_opt(self, pair, plane='x'):
+    def get_opt(self, pair, plane=None):
+        plane = plane or self.plane
         odf = self.box.bpm_optics['model']
         bpm1, bpm2 = pair
-        if plane == 'x':
+        if plane == 'H':
             a1, a2 = odf.loc[bpm1, 'AX'], odf.loc[bpm2, 'AX']
             b1, b2 = odf.loc[bpm1, 'BX'], odf.loc[bpm2, 'BX']
             dp = odf.loc[bpm2, 'MUX'] - odf.loc[bpm1, 'MUX']  # if bpm1 < bpm2 else -phi_ex_abs[bpm2]+phi_ex_abs[bpm1]
+        elif plane =='V':
+            a1, a2 = odf.loc[bpm1, 'AY'], odf.loc[bpm2, 'AY']
+            b1, b2 = odf.loc[bpm1, 'BY'], odf.loc[bpm2, 'BY']
+            dp = odf.loc[bpm2, 'MUY'] - odf.loc[bpm1, 'MUY']
         else:
             raise Exception
         drel = np.abs(dp) / (2 * np.pi) % 0.5
