@@ -585,9 +585,8 @@ def track_bunch_nturns_store_centroid(box: LatticeContainer, n_turns: int = 1, b
                 (data, etaskresp) = future.result(timeout)
             except Exception as e:
                 import traceback
+                logger.error(f'Sim FAIL: {future} {e}')
                 logger.error(traceback.format_tb(future.traceback()))
-                print(data.stdout)
-                print(data.stderr)
                 raise e
             assert etaskresp.state == STATE.ENDED
             if data.returncode != 0:
@@ -601,10 +600,8 @@ def track_bunch_nturns_store_centroid(box: LatticeContainer, n_turns: int = 1, b
             except Exception as e:
                 import traceback
                 print(traceback.format_tb(future.traceback()))
-                print(data2.stdout)
-                print(data2.stderr)
-                print(etaskresp)
-                raise e
+                print(future)
+                print(e)
             assert etaskresp2.state == STATE.ENDED_READ
 
             df_ocelot = box.df()

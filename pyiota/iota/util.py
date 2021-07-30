@@ -102,7 +102,8 @@ def insert_noop(*args, **kwargs):
     return None, None
 
 
-def build_lattice(lattice_style: str, insert_style: str, nn: int, tn: int, empty_space: float,
+def build_lattice(lattice_style: str, insert_style: str,
+                  nn: int = None, tn: int = None, empty_space: float = None,
                   ref_detuning: float = None,
                   method: MethodTM = None,
                   drift_cnt: int = None,
@@ -115,6 +116,8 @@ def build_lattice(lattice_style: str, insert_style: str, nn: int, tn: int, empty
     if insert_style is None:
         qibox = ocps = None
     else:
+        if nn is None or tn is None or empty_space is None:
+            raise Exception
         insert_styles = {'flat': insert_flat, 'qi': insert_qi, 'qi_thin': insert_qi_thin, 'dn':insert_dn}
         assert insert_style in insert_styles
 

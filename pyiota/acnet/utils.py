@@ -17,7 +17,8 @@ def load_data_tbt(fpath: Path,
                   version: int = 2,
                   soft_fail: bool = None,
                   force_load: bool = None,
-                  idx: int = None):
+                  idx: int = None,
+                  use_meters: bool = False):
     """
     Loads data from experimental HDF5 TBT format
     :param fpath: Full directory or file path
@@ -80,7 +81,10 @@ def load_data_tbt(fpath: Path,
                 vlist = []
                 for (k, v) in h5f.items():
                     if isinstance(v, h5py.Dataset):
-                        kick_arrays[k] = v.astype(np.float64)[:]
+                        if use_meters:
+                            kick_arrays[k] = v.astype(np.float64)[:]/1e3
+                        else:
+                            kick_arrays[k] = v.astype(np.float64)[:]
                         vlist.append(v[0])
                 if len(set(vlist)) != 1:
                     if soft_fail:
