@@ -1,9 +1,11 @@
 __all__ = ['Routines', 'NIO', 'Invariants', 'Coordinates', 'Phase', 'Twiss', 'SVD', 'ICA', 'Interpolator']
 
+import itertools
 import logging
 from typing import Tuple, List
 
 import numpy as np
+import pandas as pd
 from .tbt import Kick
 from numba import jit
 from scipy.optimize import curve_fit
@@ -37,7 +39,7 @@ class Physics:
     @staticmethod
     def beta_gamma(p_central_mev: float):
         import scipy.constants
-        return np.sqrt(p_central_mev**2 / (scipy.constants.value('electron mass energy equivalent in MeV')**2) - 1)
+        return np.sqrt(p_central_mev ** 2 / (scipy.constants.value('electron mass energy equivalent in MeV') ** 2) - 1)
 
 
 class NIO:
@@ -171,7 +173,7 @@ class Coordinates:
     @staticmethod
     def matrix_Binv(beta: float, alpha: float) -> np.ndarray:
         """ Courant-Snyder normalization matrix B^-1 """
-        return np.array([[1/np.sqrt(beta), 0.0], [alpha/np.sqrt(beta), np.sqrt(beta)]])
+        return np.array([[1 / np.sqrt(beta), 0.0], [alpha / np.sqrt(beta), np.sqrt(beta)]])
 
     @staticmethod
     def normalize_x(x: np.ndarray, beta: float) -> np.ndarray:
@@ -190,7 +192,7 @@ class Coordinates:
     @staticmethod
     def calc_px_from_bpms(x1, x2, beta1, beta2, a1, a2, dphase) -> np.ndarray:
         """ Compute momentum at location 1 from position readings at locations 1 and 2 and local optics funcs """
-        #px1 = x2 * (1 / np.sin(dphase)) * (1 / np.sqrt(beta1 * beta2)) - \
+        # px1 = x2 * (1 / np.sin(dphase)) * (1 / np.sqrt(beta1 * beta2)) - \
         #      x1 * (1 / np.tan(dphase)) * (1 / beta1) - x1 * a1 / beta1
         csc, cot = 1 / np.sin(dphase), 1 / np.tan(dphase)
         px1 = - x1 * cot / beta1 + - x1 * a1 / beta1 + x2 * csc / np.sqrt(beta1 * beta2)
@@ -214,18 +216,19 @@ class Coordinates:
         See https://journals.aps.org/prab/pdf/10.1103/PhysRevSTAB.8.024001 and 'phasespace.nb' notebook
         """
         csc, cot = 1 / np.sin(dphase), 1 / np.tan(dphase)
-        px1n = -x1n*cot + x2n*csc
+        px1n = -x1n * cot + x2n * csc
         return px1n
 
     @staticmethod
-    def calc_pxn_from_normalized_bpms_v2(x1n: np.ndarray, x2n: np.ndarray, dphase: float) -> Tuple[np.ndarray, np.ndarray]:
+    def calc_pxn_from_normalized_bpms_v2(x1n: np.ndarray, x2n: np.ndarray, dphase: float) -> Tuple[
+        np.ndarray, np.ndarray]:
         """
         Compute normalized momentum at location 1 and 2 from normalized positions 1 and 2
         Same refs as above
         """
         csc, cot = 1 / np.sin(dphase), 1 / np.tan(dphase)
-        px1n = -x1n*cot + x2n*csc
-        px2n = -x1n*csc + x2n*cot
+        px1n = -x1n * cot + x2n * csc
+        px2n = -x1n * csc + x2n * cot
         return px1n, px2n
 
     @staticmethod
@@ -248,19 +251,305 @@ class Coordinates:
     @staticmethod
     def slopes_to_canonical(x, xp, y, yp, cdt, delta):
         """ Same as above """
-        factor = (1+delta)/np.sqrt(1+xp**2+yp**2)
-        px=xp*factor
-        py=yp*factor
+        factor = (1 + delta) / np.sqrt(1 + xp ** 2 + yp ** 2)
+        px = xp * factor
+        py = yp * factor
         return x, px, y, py, cdt, delta
 
     @staticmethod
     def canonical_to_slopes(x, px, y, py, cdt, delta):
         """ Convert canonical momenta to slopes """
         # LS-356
-        factor = 1/np.sqrt((1+delta**2) - px**2 - py**2)
-        xp = px*factor
-        yp = py*factor
+        factor = 1 / np.sqrt((1 + delta ** 2) - px ** 2 - py ** 2)
+        xp = px * factor
+        yp = py * factor
         return x, xp, y, yp, cdt, delta
+
+
+class NBPM:
+    def __init__(self, box, pairs, params):
+        params_default = {'sig_x': 100e-6, 'sig_phi': 0.1, 'verbose': True}
+        params_default.update(params)
+        assert all(p[0] == pairs[0][0] for p in pairs) # looking at one bpm
+        self.pairs = pairs
+        self.params = params_default
+        self.box = box
+        self.bpms = list(set([b[0] for b in pairs] + [b[1] for b in pairs]))
+        self.plane = 'H'
+        self.verbose = False
+
+    def import_kick(self, k: Kick, key, families=None):
+        assert families is not None
+        assert all(b in k.bpm_list for b in self.bpms)
+        df_pxn = k.v2_momentum(families=families, key=key, out=None, pairs=self.pairs)
+        self.pxn = df_pxn
+
+    def compute(self, mean=False, variance=False, covariance_stat=False,
+                   covariance_full=False, covariance_stat_tbtav=False, plane=None):
+        if plane is not None:
+            self.plane = plane
+        if mean:
+            px1n_comboM, error_finalM, weightsM = self.compute_momentum_mean()
+            return px1n_comboM
+        xna = self.params.get('var_xn_average', None)
+        if variance:
+            px1n_comboN, error_finalN, weightsN = self.compute_momentum_combo_variance(xn_avg = xna)
+            return px1n_comboN
+        if covariance_stat:
+            px1n_comboCV, error_finalCV, weightsCV = self.compute_momentum_combo_v2()
+            return px1n_comboCV
+        xna = self.params.get('tbtav_xn_average',None)
+        if covariance_stat_tbtav:
+            px1n_comboT, error_finalT, weightsT = self.compute_momentum_combo_tbtav(xn_avg = xna)
+            return px1n_comboT
+        raise Exception
+
+    def weights_df(self, mean=False, variance=False, covariance_stat=False,
+                   covariance_full=False, covariance_stat_tbtav=False):
+        """ Make a pretty dataframe with optics and weights """
+        bpm_pairs = self.pairs
+
+        def dist180(dp):
+            dg = dp * 180 / np.pi % 180
+            if dg > 0:
+                dg = -dg if dg < 90 else 180 - dg
+            else:
+                dg = -dg if np.abs(dg) < 90 else -180 - dg
+            return dg
+
+        PI = np.pi
+        PI2 = np.pi * 2
+
+        if mean:
+            px1n_comboM, error_finalM, weightsM = self.compute_momentum_mean()
+        xna = self.params.get('var_xn_average', None)
+        if variance:
+            px1n_comboN, error_finalN, weightsN = self.compute_momentum_combo_variance(xn_avg = xna)
+        if covariance_stat:
+            px1n_comboCV, error_finalCV, weightsCV = self.compute_momentum_combo_v2()
+        xna = self.params.get('tbtav_xn_average',None)
+        if covariance_stat_tbtav:
+            px1n_comboT, error_finalT, weightsT = self.compute_momentum_combo_tbtav(xn_avg = xna)
+
+        dlist = []
+        for i, pair in enumerate(bpm_pairs):
+            b1, b2, a1, a2, dp, drel = self.get_opt(pair)
+            row = {'BPM1': pair[0], 'BPM2': pair[1], 'beta1': b1, 'beta2': b2, 'delta(deg)': (dp % PI) * (180 / PI) - 90,
+                   'dist180': dist180(dp), 'distcut': np.abs(dist180(dp)) - (0.05 * PI2) * 180 / PI}
+            if mean:
+                row['w_mean'] = weightsM.iloc[i, 0]
+                row['e_mean'] = error_finalM
+            if variance:
+                row['w_var'] = weightsN.iloc[i, 0]
+                row['e_var'] = error_finalN
+            if covariance_stat:
+                row['w_cvnaive'] = weightsCV.iloc[i, 0]
+                row['e_cvnaive'] = error_finalCV
+            if covariance_stat_tbtav:
+                row['w_cvtbtav'] = weightsT.iloc[i, 0]
+                row['e_cvtbtav'] = error_finalT
+            #  'wt':weightsT.iloc[i,0]})
+            dlist.append(row)
+        return pd.DataFrame(data=dlist)
+
+    def compute_momentum_combo_tbtav(self, plane=None, xn_avg = None):
+        plane = plane or self.plane
+        pws = self.pairs
+        px1n_arr = self.pxn[plane].values
+        pars = self.params.copy()
+        pars['xn_average'] = xn_avg
+        # print('TBT average calc')
+        x = {b: np.nan for b in np.unique(list(itertools.chain.from_iterable(pws)))}
+        V, VI, params = self.covar_final(pws, x, pars)
+        weights = np.sum(VI, axis=1) / np.sum(VI)
+        variances = np.diag(V)
+        error_final = np.dot(weights, (np.dot(V, weights.T)))
+        px1n_combo = np.sum(px1n_arr * weights[:, np.newaxis], axis=0)
+        weights = pd.DataFrame(np.repeat(weights[:, np.newaxis], px1n_arr.shape[1], axis=1), index=pws)
+        return px1n_combo, error_final, weights
+
+    def compute_momentum_combo_tbt(self, plane=None):
+        plane = plane or self.plane
+        pws = self.pairs
+        # print('TBT per-turn calc')
+        raise Exception
+        weights_list = []
+        px1n_combo = np.zeros(px1n_arr.shape[1])
+        for turn in range(px1n_arr.shape[1]):
+            x = self.params['data_ideal'].loc[:, turn].to_dict()
+            # x = data.loc[:,turn].to_dict()
+            # print(x)
+            V, VI, params = self.covar_final(pws, x, params)
+            weights = np.sum(VI, axis=1) / np.sum(VI)
+            variances = np.diag(V)
+            error_final = np.dot(weights, (np.dot(V, weights.T)))
+            px1n_combo[turn] = np.sum(px1n_arr[:, turn] * weights)
+            weights_list.append(weights[:, np.newaxis])
+            if self.verbose:
+                print(f'Turn {turn} - {weights} | {variances}')
+        weights = pd.DataFrame(np.hstack(weights_list), index=pws)
+        return px1n_combo, error_final, weights
+
+    def compute_momentum_combo_v2(self, plane=None):
+        plane = plane or self.plane
+        pws = self.pairs
+        x = {b: 0.0 for b in np.unique(list(itertools.chain.from_iterable(pws)))}
+        V, VI, params = self.covar_final(pws, x, self.params)
+        weights = np.sum(VI, axis=1) / np.sum(VI)
+        variances = np.diag(V)
+        error_final = np.dot(weights, (np.dot(V, weights.T)))
+
+        # if params['verbose']: bpm_summary(pws, weights, variances)
+        px1n_arr = self.pxn[plane].values
+        px1n_combo = np.sum(px1n_arr * weights[:, np.newaxis], axis=0)
+        df = pd.DataFrame(np.repeat(weights[:, np.newaxis], px1n_arr.shape[1], axis=1), index=pws)
+        return px1n_combo, error_final, df
+
+    def compute_momentum_combo_variance(self, plane=None, xn_avg = None):
+        plane = plane or self.plane
+        pws = self.pairs
+        pars = self.params
+        if xn_avg is not None:
+            pars = self.params.copy()
+            pars['xn_average'] = xn_avg
+        x = {b: 0.0 for b in self.bpms}
+        V, VI, params = self.var_final(pws, x, pars)
+        weights = np.sum(VI, axis=1) / np.sum(VI)
+        variances = np.diag(V)
+        error_final = np.dot(weights, (np.dot(V, weights.T)))
+
+        # if params['verbose']: bpm_summary(pws, weights, variances)
+        px1n_arr = self.pxn[plane].values
+        px1n_combo = np.sum(px1n_arr * weights[:, np.newaxis], axis=0)
+        df = pd.DataFrame(np.repeat(weights[:, np.newaxis], px1n_arr.shape[1], axis=1), index=pws)
+        return px1n_combo, error_final, df
+
+    def compute_momentum_single(self, pair=None, pair_idx=None, plane=None):
+        plane = plane or self.plane
+        pws = self.pairs
+        px1n_arr = self.pxn[plane].values
+        if pair is not None:
+            pair_idx = pws.index(pair)
+        if pair_idx:
+            px1n_mean = px1n_arr[pair_idx, :]
+            weights = np.zeros(px1n_arr.shape[0])
+            weights[pair_idx] = 1.0
+        else:
+            px1n_mean = px1n_arr[0, :]
+            weights = np.zeros(px1n_arr.shape[0])
+            weights[0] = 1.0
+        error_final = 0.0
+        df = pd.DataFrame(np.repeat(weights[:, np.newaxis], px1n_arr.shape[1], axis=1), index=pws)
+        return px1n_mean, error_final, df
+
+    def compute_momentum_mean(self, plane='H'):
+        pws = self.pairs
+        px1n_arr = self.pxn[plane].values
+        px1n_mean = np.mean(px1n_arr, axis=0)
+        error_final = np.mean(np.std(px1n_arr, axis=0))
+        weights = np.ones(px1n_arr.shape[0]) / px1n_arr.shape[0]
+        df = pd.DataFrame(np.repeat(weights[:, np.newaxis], px1n_arr.shape[1], axis=1), index=pws)
+        return px1n_mean, error_final, df
+
+    def var_final(self, bpm_pairs, x, params):
+        """ Compute variance only matrix """
+        V, VI, params = self.covar_final(bpm_pairs, x, params)
+        V2 = np.zeros_like(V)
+        np.fill_diagonal(V2, np.diagonal(V))
+        V = V2
+        return V, np.linalg.pinv(V), params  # np.linalg.pinv(V, rcond=1.0e-14)
+
+    def covar_final(self, bpm_pairs, x, params):
+        """ Compute statistical covariance matrix """
+        bpm_names = np.unique(list(itertools.chain.from_iterable(bpm_pairs)))
+        bpm_pairs_map = {t: i for i, t in enumerate(bpm_pairs)}
+        bpm_numbers_map = {bpm_name: i for i, bpm_name in enumerate(bpm_names)}
+        bpm_pairs_numbers = [(bpm_numbers_map[b1], bpm_numbers_map[b2]) for b1, b2 in bpm_pairs]
+
+        n_pairs = len(bpm_pairs)
+        n_coordinates = 2 + (len(bpm_pairs) - 1)
+        coordinates = [f'x_{bpm}' for bpm in bpm_names]
+        n_phases = len(bpm_pairs)
+        phases = [f'phi_{bpm1}_{bpm2}' for bpm1, bpm2 in bpm_pairs]
+        n_variables = n_coordinates + n_phases
+        variables = coordinates + phases
+
+        params2 = {'bpm_pairs': bpm_pairs, 'bpm_pairs_map': bpm_pairs_map, 'bpm_numbers_map': bpm_numbers_map,
+                   'variables': variables,
+                   'n_pairs': n_pairs, 'n_coordinates': n_coordinates, 'n_phases': n_phases, 'n_variables': n_variables,
+                   'x': x}
+        params.update(params2)
+
+        if self.verbose:
+            print(bpm_pairs)
+            print(bpm_pairs_numbers)
+            print(f'Coords:{n_coordinates} | Phases:{n_phases} | Total:{n_variables}')
+
+        J = self.pxn_jacobian(params)
+        M = self.covar_variables(params['sig_x'], params['sig_phi'], params)
+        V = J @ M @ J.T
+        # V = J@M@np.linalg.pinv(J)
+        params['J'] = J
+        params['M'] = M
+        return V, np.linalg.pinv(V), params  # np.linalg.pinv(V, rcond=1.0e-14)
+
+    def pxn_partial_derivative(self, i, j, params):
+        # Jacobian is D[pxn[i], var[j]] for i=[n_pairs] for j=[n_variables]
+        assert 0 <= i < params['n_pairs'] and 0 <= j < params['n_variables']
+
+        pair = params['bpm_pairs'][i]
+        b1, b2, a1, a2, dp, drel = self.get_opt(pair)
+        idx1, idx2 = params['bpm_numbers_map'][pair[0]], params['bpm_numbers_map'][pair[1]]
+        idx3 = params['bpm_pairs_map'][pair]
+        cotdp = 1.0 / np.tan(dp)
+        cscdp = 1.0 / np.sin(dp)
+        if j < params['n_coordinates']:
+            # position derivative
+            # Dpxn/dx1 = -(Cot[\[Phi]12]/Sqrt[b1])
+            # Dpxn/dx2 = Csc[\[Phi]12]/Sqrt[b2]
+            if j == idx1:
+                val = -cotdp / np.sqrt(b1)
+            elif j == idx2:
+                val = cscdp / np.sqrt(b2)
+            else:
+                val = 0.0
+        else:
+            # phase derivative
+            # Csc[\[Phi]12] (-((x2 Cot[\[Phi]12])/Sqrt[b2]) + (x1 Csc[\[Phi]12])/Sqrt[b1])
+            x = params['x']
+            x1, x2 = x[pair[0]], x[pair[1]]
+            if j - params['n_coordinates'] == idx3:
+                if 'xn_average' in params:
+                    val = cscdp * params['xn_average'] * (-cotdp + cscdp)
+                else:
+                    val = cscdp * (- x2 * cotdp / np.sqrt(b2) + x1 * cscdp / np.sqrt(b1))
+            else:
+                val = 0.0
+        if self.verbose: print(
+            f'{i},{j} - partial {pair}({idx3})({idx1}-{idx2}) wrt {params["variables"][j]} = {val}')
+        return val
+
+    def get_opt(self, pair, plane='x'):
+        odf = self.box.bpm_optics['model']
+        bpm1, bpm2 = pair
+        if plane == 'x':
+            a1, a2 = odf.loc[bpm1, 'AX'], odf.loc[bpm2, 'AX']
+            b1, b2 = odf.loc[bpm1, 'BX'], odf.loc[bpm2, 'BX']
+            dp = odf.loc[bpm2, 'MUX'] - odf.loc[bpm1, 'MUX']  # if bpm1 < bpm2 else -phi_ex_abs[bpm2]+phi_ex_abs[bpm1]
+        else:
+            raise Exception
+        drel = np.abs(dp) / (2 * np.pi) % 0.5
+        return b1, b2, a1, a2, dp, drel
+
+    def covar_variables(self, sig_x, sig_phi, params):
+        return np.diag(np.array([sig_x ** 2] * params['n_coordinates'] + [sig_phi ** 2] * params['n_phases']))
+
+    def pxn_jacobian(self, params):
+        J = np.zeros((params['n_pairs'], params['n_variables']))
+        for i in range(params['n_pairs']):
+            for j in range(params['n_variables']):
+                J[i, j] = self.pxn_partial_derivative(i, j, params)
+        return J
 
 
 class Phase:
@@ -308,7 +597,7 @@ class Phase:
         phases_cum = np.zeros_like(phases)
         phases_rel = pmath.addsubtract_wrap(phases_rel, -phases_rel[0], -np.pi, np.pi)
         for i in range(1, len(phases)):
-            extra = 2 * np.pi * np.floor((phases_ref[i]-phases_ref[i-1])/(2*np.pi))
+            extra = 2 * np.pi * np.floor((phases_ref[i] - phases_ref[i - 1]) / (2 * np.pi))
             phases_cum[i] = phases_cum[i - 1] + pmath.forward_distance(phases_rel[i - 1], phases_rel[i], -np.pi, np.pi)
             phases_cum[i] += extra
         return phases_cum
@@ -379,35 +668,35 @@ class Envelope:
     # The following F4 terms are from lee/nadolski 4D treatment
     @staticmethod
     def F4D_chroma(n, chrom_x, sigma_e, nu_s):
-        theta = 2*np.pi*chrom_x*sigma_e*np.sin(np.pi*n*nu_s)/nu_s
-        F = np.exp(-theta*theta/2)
+        theta = 2 * np.pi * chrom_x * sigma_e * np.sin(np.pi * n * nu_s) / nu_s
+        F = np.exp(-theta * theta / 2)
         return F
 
     @staticmethod
     @jit(nopython=True)
     def F4D_xx(n: np.ndarray, j_x: float, sigma_x: float, k_xx: float):
         theta = 4 * np.pi * k_xx * sigma_x * sigma_x * n
-        F = 1 / (1+theta*theta) * np.exp(-(j_x * theta * theta) / (2 * sigma_x * sigma_x * (1 + theta * theta)))
+        F = 1 / (1 + theta * theta) * np.exp(-(j_x * theta * theta) / (2 * sigma_x * sigma_x * (1 + theta * theta)))
         return F
 
     @staticmethod
     @jit(nopython=True)
     def F4D_xx_Z(n: np.ndarray, Z: float, mu: float):
-        #Z = j_x * sigma_x * sigma_x    mu = k_xx / j_x
-        #new Z = k_xx * sigma_x * sigma_x     mu = j_x * k_xx
+        # Z = j_x * sigma_x * sigma_x    mu = k_xx / j_x
+        # new Z = k_xx * sigma_x * sigma_x     mu = j_x * k_xx
         theta = 4 * np.pi * Z * n
-        F = 1 / (1+theta*theta) * np.exp(-(mu/Z * theta * theta) / (2 * (1 + theta * theta)))
+        F = 1 / (1 + theta * theta) * np.exp(-(mu / Z * theta * theta) / (2 * (1 + theta * theta)))
         return F
 
     @staticmethod
     def F4D_xy(n, j_y, sigma_y, k_xy):
         theta = 4 * np.pi * k_xy * sigma_y * sigma_y * n
-        F = 1 / (1+theta*theta) * np.exp(-(j_y * theta * theta) / (2 * sigma_y * sigma_y * (1 + theta * theta)))
+        F = 1 / (1 + theta * theta) * np.exp(-(j_y * theta * theta) / (2 * sigma_y * sigma_y * (1 + theta * theta)))
         return F
 
     @staticmethod
-    def F4D_tune_lowtheta(k_xx, k_xy, j_x, j_y, sigma_x, sigma_y,):
-        dnu_x = k_xx*(j_x + 4*sigma_x*sigma_x) + k_xy*(j_y + 4*sigma_y*sigma_y)
+    def F4D_tune_lowtheta(k_xx, k_xy, j_x, j_y, sigma_x, sigma_y, ):
+        dnu_x = k_xx * (j_x + 4 * sigma_x * sigma_x) + k_xy * (j_y + 4 * sigma_y * sigma_y)
         return dnu_x
 
     @staticmethod
@@ -416,18 +705,78 @@ class Envelope:
         ey = sigma_y * sigma_y
         thetaxy = 4 * np.pi * k_xy * sigma_y * sigma_y * n
         thetaxx = 4 * np.pi * k_xx * sigma_x * sigma_x * n
-        dnu_x = k_xx*((4*ex+j_x*(1-thetaxx*thetaxx))/(1+thetaxx*thetaxx))
-        dnu_x += k_xy*((4*ey+j_y*(1-thetaxy*thetaxy))/(1+thetaxy*thetaxy))
+        dnu_x = k_xx * ((4 * ex + j_x * (1 - thetaxx * thetaxx)) / (1 + thetaxx * thetaxx))
+        dnu_x += k_xy * ((4 * ey + j_y * (1 - thetaxy * thetaxy)) / (1 + thetaxy * thetaxy))
         return dnu_x
 
     @staticmethod
     def lee_4D(x, chrom_x, sigma_e, nu_s, j_x, sigma_x, k_xx, j_y, sigma_y, k_xy):
-        chroma = Envelope.F4D_chroma(x, chrom_x, sigma_e, nu_s,)
+        chroma = Envelope.F4D_chroma(x, chrom_x, sigma_e, nu_s, )
         xx = Envelope.F4D_xx(x, j_x, sigma_x, k_xx)
         xy = Envelope.F4D_xy(x, j_y, sigma_y, k_xy)
         return chroma, xx, xy
 
+    # Fitting functions based on above 4D formulas
+    @staticmethod
+    def amp_fxx(x, pars):
+        """ Lee Fxx only """
+        A, offset, j_x, sigma_x, k_xx = pars
+        Fxx = Envelope.F4D_xx(x, j_x=j_x, sigma_x=sigma_x, k_xx=k_xx)
+        return A * Fxx * np.sqrt(j_x) + offset
 
+    @staticmethod
+    def fxx(x, data_x, data_y):
+        envelope = Envelope.amp_fxx(data_x, x)
+        lsq = np.sqrt(np.sum((data_y - envelope) ** 2))
+        return lsq / len(data_x)
+
+    @staticmethod
+    def amp_fxx_nooffset(x, pars):
+        """ Lee Fxx only with no y offset """
+        A, j_x, sigma_x, k_xx = pars
+        Fxx = Envelope.F4D_xx(x, j_x=j_x, sigma_x=sigma_x, k_xx=k_xx)
+        return A * Fxx * np.sqrt(j_x)
+
+    @staticmethod
+    def fxx_nooffset(x, data_x, data_y):
+        envelope = Envelope.amp_fxx_nooffset(data_x, x)
+        lsq = np.sqrt(np.sum((data_y - envelope) ** 2))
+        return lsq / len(data_x)
+
+    @staticmethod
+    def amp_fxx_nooffset_group(x, pars, i=None):
+        """ Group fit version of fxx """
+        j_x, sigma_x, k_xx = pars[-3:]
+        amplitudes = pars[:-3]
+
+        Fxx = Envelope.F4D_xx(x, j_x=j_x, sigma_x=sigma_x, k_xx=k_xx)
+        if i is not None:
+            return amplitudes[i] * Fxx * np.sqrt(j_x)
+        else:
+            return Fxx * np.sqrt(j_x)
+
+    @staticmethod
+    def fxx_nooffset_group(x, data_x, data_y):
+        assert len(x) == data_y.shape[0] + 3
+        envelope = Envelope.amp_fxx_nooffset_group(data_x, x, None)
+        amplitudes = x[:data_y.shape[0]]
+        envelope2D = amplitudes[:, np.newaxis] @ envelope[np.newaxis, :]
+        assert envelope2D.shape == data_y.shape
+        lsq = np.sqrt(np.sum((data_y - envelope2D) ** 2))
+        return lsq
+
+    @staticmethod
+    def amp_fxxZ(x, pars):
+        """ Lee Fxx reformulated in terms of new parameters Z and mu """
+        A, offset, Z, mu = pars
+        Fxx = Envelope.F4D_xx_Z(x, Z=Z, mu=mu)
+        return A * Fxx + offset
+
+    @staticmethod
+    def fxxZ(x, data_x, data_y):
+        envelope = Envelope.amp_fxxZ(data_x, x)
+        lsq = np.sqrt(np.sum((data_y - envelope) ** 2))
+        return lsq / len(data_x)
 
     # def budkerfit(xdata, amplitude, tau, c2, freq, ofsx, ofsy):
     #     return amplitude*np.exp(-tau*(xdata-ofsx)**2)*np.exp(-c2*(1-np.cos(freq*(xdata-ofsx)))) + ofsy
