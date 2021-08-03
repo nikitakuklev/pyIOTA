@@ -1371,6 +1371,30 @@ class Kick:
                 self.tracks[key_out] = {}
             self.tracks[key_out][family] = pd.DataFrame(index=df.index, data=transform)
 
+    def v2_apply(self,
+                 fun: Callable,
+                 key: str = 'clean',
+                 out: str = None,
+                 families: List[str] = None,
+                 method: str = 'matrix',
+                 ):
+        families = families or self.bpm_default_families
+        for family in families:
+            if len(self.bpm_families_active[family]) == 0:
+                continue
+            df = self.tracks[key][family]
+            if method == 'matrix':
+                matrix = df.values
+                result = fun(matrix)
+                if out is not None:
+                    if out not in self.tracks:
+                        self.tracks[out] = {}
+                    self.tracks[out][family] = pd.DataFrame(index=df.index, data=result)
+                else:
+                    return result
+            else:
+                raise Exception(f' Method {method} unrecognized')
+
     def v2_fit_decoherence(self,
                            fun=None,
                            amp=None,
@@ -1410,7 +1434,6 @@ class Kick:
                 for row in range(matrix.shape[0]):
                     env = matrix[row, :]
                     data_y = matrix_data[row, :]
-
 
                     res = scopt.differential_evolution(fun, bounds=bounds, args=(data_x, env), popsize=10)
                     reslist.append(res)
@@ -1538,7 +1561,7 @@ class Kick:
             else:
                 for row in range(matrix.shape[0]):
                     bx = df_optics.loc[df.index[row], 'B' + optics_map[family]]
-                    data_xnorm[row, :] = Coordinates.normalize_x(matrix[row, :], bx)
+                    data_xnorm[row, :] = Coordinates.normalize_x(matrix[row, :], beta=bx)
 
             if out not in self.tracks:
                 self.tracks[out] = {}
@@ -1547,31 +1570,37 @@ class Kick:
                 self.tracks[out][family_mom] = pd.DataFrame(index=df.index, data=data_pxnorm)
 
     def v2_momentum(self,
-                    families: List[str] = None,
+                    families: List[str],
                     key: str = 'norm',
-                    out: Union[str,None] = 'normmom',
+                    out: Union[str, None] = 'normmom',
                     bpm: str = None,
                     pairs: list = None,
-                    optics_map=None,
-                    normalized=True,
-                    ):
+                    optics_map: dict = None,
+                    normalized: bool = True,
+                    debug: bool = False):
         """ Compute momentum pairwise for either all pairs or only those starting at particular BPM """
         from . import Coordinates
         assert families is not None
         optics_map = optics_map or {'H': 'X', 'V': 'Y'}
         df_optics = self.box.compute_bpm_tables(self.bpm_list, active_only=True)
         if bpm is not None:
-            assert bpm in self.bpm_list
+            assert bpm in self.bpm_list and bpm in df_optics.index
             others = self.bpm_list.copy()
             others.remove(bpm)
             combinations = [(bpm, b2) for b2 in others]
+            if debug:
+                logger.info(f'Computing for BPM {bpm} - pairs {combinations}')
         elif pairs is not None:
             assert all(len(b) == 2 for b in pairs)
-            assert all(b[0] in self.bpm_list for b in pairs)
+            assert all(b[0] in self.bpm_list and b[0] in df_optics.index for b in pairs)
             assert all(b[1] in self.bpm_list for b in pairs)
             combinations = pairs
+            if debug:
+                logger.info(f'Computing pairs {combinations}')
         else:
             combinations = list(itertools.permutations(self.bpm_list, 2))
+            if debug:
+                logger.info(f'Computing all permutations: {combinations}')
 
         output = {}
         for family in families:
@@ -1580,15 +1609,18 @@ class Kick:
             df = self.tracks[key][family]
             index_list = []
             data = np.zeros((len(combinations), df.shape[1]))
-            print('Kick norm', family, normalized, combinations)
+            if debug:
+                logger.info(f'Kick momentum - {key=} | {family=} | {normalized=}')
             if normalized:
                 for row, (bpm1, bpm2) in enumerate(combinations):
                     index_list.append((bpm1, bpm2))
                     x1 = df.loc[bpm1, :]
                     x2 = df.loc[bpm2, :]
                     dp = df_optics.loc[bpm2, 'MU' + optics_map[family]] - df_optics.loc[bpm1, 'MU' + optics_map[family]]
-                    px1n = Coordinates.calc_pxn_from_normalized_bpms(x1, x2, dp)
+                    px1n = Coordinates.calc_pxn_from_normalized_bpms(x1n=x1, x2n=x2, dphase=dp)
                     data[row, :] = px1n
+                    if debug:
+                        logger.info(f'Pair ({(bpm1, bpm2)}) - {dp=:.3f}')
             else:
                 for row, (bpm1, bpm2) in enumerate(combinations):
                     index_list.append((bpm1, bpm2))
@@ -1599,14 +1631,18 @@ class Kick:
                     a1 = df_optics.loc[bpm1, 'A' + optics_map[family]]
                     a2 = df_optics.loc[bpm2, 'A' + optics_map[family]]
                     dp = df_optics.loc[bpm2, 'MU' + optics_map[family]] - df_optics.loc[bpm1, 'MU' + optics_map[family]]
-                    px1n = Coordinates.calc_px_from_bpms(x1, x2, b1, b2, a1, a2, dp)
+                    px1n = Coordinates.calc_px_from_bpms(x1, x2, beta1=b1, beta2=b2, a1=a1, a2=a2, dphase=-dp)
                     data[row, :] = px1n
-            if out is None:
-                output[family] = pd.DataFrame(index=index_list, data=data)
-            if out not in self.tracks:
-                self.tracks[out] = {}
-            self.tracks[out][family] = pd.DataFrame(index=index_list, data=data)
-        return output
+                    if debug:
+                        logger.info(f'Pair ({(bpm1, bpm2)}) - {b1=:.3f}, {b2=:.3f}, {a1=:.3f}, {a2=:.3f}, {dp=:.3f}')
+            # if out is None:
+            output[family] = pd.DataFrame(index=index_list, data=data)
+            if out is not None:
+                if out not in self.tracks:
+                    self.tracks[out] = {}
+                self.tracks[out][family] = output[family]
+        if out is None:
+            return output
 
     def calculate_tune(self,
                        naff: NAFF,
