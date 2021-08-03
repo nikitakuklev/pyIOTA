@@ -133,6 +133,7 @@ def plot_simple_grid(*args,
                      sharey=True,
                      sharex=True,
                      return_all=False,
+                     equal:bool = False,
                      **kwargs):
     """
     Plot a grid of data sharing x/y axes. Each top level argument creates a new plot grid.
@@ -265,6 +266,8 @@ def plot_simple_grid(*args,
                                 artist_list.append(s)
                     else:
                         ax[i].plot(x, y, **kwargs)
+                    if equal:
+                        ax[i].set_aspect('equal','box')
                 if not no_title:
                     if no_title_idx:
                         ax[i].set_title(f"{k}", fontsize=fontsize)

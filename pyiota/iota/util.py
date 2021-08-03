@@ -57,10 +57,10 @@ def insert_qi(nn: int, tn: int, empty_space: float, ref_detuning: float = None, 
 def insert_dn(nn: int, tn: int, empty_space: float, ref_detuning: float = None, **kwargs):
     """ Generates DN insert with thick elements (octupoles) """
     if ref_detuning == 0.0:
-        qi = lat.OctupoleInsert(nn=nn, tn=tn, olen=None, ospacing=empty_space/nn, run=None, oqK=0.0, **kwargs)
-        print(f'QI thick ({nn}/{tn}) - TURNED OFF')
+        qi = lat.NLInsert(nn=nn, tn=tn, olen=None, ospacing=empty_space/nn, run=None, oqK=0.0, **kwargs)
+        print(f'DN thick ({nn}/{tn}) - TURNED OFF')
     else:
-        qi = lat.NLInsert(tn=tn, olen=None, ospacing=empty_space/nn, run=None, **kwargs)
+        qi = lat.NLInsert(nn=nn, tn=tn, olen=None, ospacing=empty_space/nn, run=None, **kwargs)
         #qi = lat.OctupoleInsert(nn=nn, tn=tn, olen=None, ospacing=empty_space/nn, run=None, **kwargs)
         #dq = qi.compute_relative_detuning()
         #if ref_detuning is not None:

@@ -281,13 +281,13 @@ class NBPM:
         self.bpms = list(set([b[0] for b in pairs] + [b[1] for b in pairs]))
         self.plane = 'H'
         self.verbose = False
-
+        self.pxn = None
         self.single_default_pair = None
 
     def import_kick(self, k: Kick, key, families=None, normalized=True):
         assert families is not None
         assert all(b in k.bpm_list for b in self.bpms)
-        k.v2_momentum(families=families, key=key, out='normmom', pairs=self.pairs, normalized=normalized)
+        #k.v2_momentum(families=families, key=key, out='normmom', pairs=self.pairs, normalized=normalized)
         df_pxn = k.v2_momentum(families=families, key=key, out=None, pairs=self.pairs, normalized=normalized)
         self.pxn = df_pxn
 
@@ -325,8 +325,10 @@ class NBPM:
         raise Exception
 
     def weights_df(self, mean=False, variance=False, covariance_stat=False,
-                   covariance_full=False, covariance_stat_tbtav=False):
+                   covariance_full=False, covariance_stat_tbtav=False, plane=None, offsets=None):
         """ Make a pretty dataframe with optics and weights """
+        if plane is not None:
+            self.plane = plane
         bpm_pairs = self.pairs
 
         def dist180(dp):
@@ -354,7 +356,9 @@ class NBPM:
         dlist = []
         for i, pair in enumerate(bpm_pairs):
             b1, b2, a1, a2, dp, drel = self.get_opt(pair)
-            row = {'BPM1': pair[0], 'BPM2': pair[1], 'beta1': b1, 'beta2': b2,
+            row = {'BPM1': pair[0], 'BPM2': pair[1],
+                   'pair': pair,
+                   'beta1': b1, 'beta2': b2,
                    'delta(deg)': (dp % PI) * (180 / PI) - 90,
                    'dist180': dist180(dp), 'distcut': np.abs(dist180(dp)) - (0.05 * PI2) * 180 / PI}
             if mean:
@@ -371,7 +375,10 @@ class NBPM:
                 row['e_cvtbtav'] = error_finalT
             #  'wt':weightsT.iloc[i,0]})
             dlist.append(row)
-        return pd.DataFrame(data=dlist)
+        if offsets:
+            return pd.DataFrame(data=dlist, index=offsets)
+        else:
+            return pd.DataFrame(data=dlist)
 
     def compute_momentum_combo_tbtav(self, plane=None, xn_avg=None):
         plane = plane or self.plane
@@ -449,10 +456,13 @@ class NBPM:
         plane = plane or self.plane
         pws = self.pairs
         px1n_arr = self.pxn[plane].values
+        assert np.all(self.pxn[plane].index == pws)
+
         if pair is not None:
             pair_idx = pws.index(pair)
         elif self.single_default_pair is not None:
             pair_idx = pws.index(self.single_default_pair)
+        #print(pair_idx)
         if pair_idx:
             px1n_mean = px1n_arr[pair_idx, :]
             weights = np.zeros(px1n_arr.shape[0])
