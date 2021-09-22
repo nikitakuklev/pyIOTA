@@ -1,4 +1,4 @@
-__all__ = ['MADXOptics', 'TFS', 'parse_lattice']
+__all__ = ['MADXOptics', 'TFS', 'parse_lattice', 'parse_sector_maps']
 
 from pathlib import Path
 import numpy as np
@@ -27,15 +27,15 @@ unit = lambda x, el: x
 nz = lambda x, el: x if x != 0.0 else None
 nz2 = lambda x, el: 2.0 * x if x != 0.0 else None
 nzdivl = lambda x, el: (x / el.l if el.l > 0.0 else x) if x != 0.0 else None
-nz360 = lambda x, el: x*360.0 if x != 0.0 else None
-nzdiv1e3 = lambda x, el: x*1.0e-3 if x != 0.0 else None
-nz1e6 = lambda x, el: x*1.0e6 if x != 0.0 else None
+nz360 = lambda x, el: x * 360.0 if x != 0.0 else None
+nzdiv1e3 = lambda x, el: x * 1.0e-3 if x != 0.0 else None
+nz1e6 = lambda x, el: x * 1.0e6 if x != 0.0 else None
 
 attribute_mapping = {'L': ('l', unit),
                      'ANGLE': ('angle', nz),
                      'TILT': ('tilt', nz),
                      'VOLT': ('v', nzdiv1e3),  # MV->GV
-                     'FREQ': ('freq', nz1e6), # MHz -> Hz
+                     'FREQ': ('freq', nz1e6),  # MHz -> Hz
                      'LAG': ('phi', nz360),
                      'HGAP': ('gap', nz2),
                      'FINT': ('fint', nz)}
@@ -120,29 +120,87 @@ def parse_lattice(fpath: Path, verbose: bool = False):
                 el.fint = el.fintx = el.gap = 0.0
     assert edge_count == 0
 
-    return seq, None, None, None, None, df.headers['PC']*1e3
+    return seq, None, None, None, None, df.headers['PC'] * 1e3
 
 
 class TFS:
     """
     MADX TFS file wrapper for reading and writing
     """
+
     def __init__(self, fpath: Path):
-        from tfs import read, write
         self.path = fpath
-        self.df = read(fpath)
+        self.read(fpath)
         self.ro = True
 
+    def read(self, fpath: Path):
+        """
+        Reads MAD-X TFS file into a combination of header dictionary and a dataframe
+        :param fpath: File path
+        :return:
+        """
+        num_header_rows = 0
+        header_dict = {}
+        stage = 0  # stage of parsing
+        columns = column_types = None
+        with fpath.open() as f:
+            while True:
+                l = f.readline()
+                l = l.strip()
+                num_header_rows += 1
+                if l.startswith('@'):
+                    assert stage == 0
+                    spl = l[1:].split(maxsplit=2)
+                    assert len(spl) == 3
+                    if spl[1] == '%le':
+                        header_dict[spl[0]] = float(spl[2])
+                    else:
+                        header_dict[spl[0]] = spl[2]
+                elif l.startswith('*'):
+                    # Column names
+                    assert stage == 0
+                    stage = 1
+                    columns = l[1:].strip().split()
+                elif l.startswith('$'):
+                    # Column data types
+                    assert stage == 1
+                    stage = 2
+                    column_types = l[1:].strip().split()
+                    assert len(column_types) == len(columns)
+
+                if stage == 2:
+                    break
+        df = pd.read_csv(fpath, sep='\s+', header=0, names=columns, skiprows=num_header_rows-1, index_col=False)
+        self.df = df
+        self.headers = header_dict
+
     def reload(self):
-        from tfs import read, write
-        self.df = read(self.path)
+        self.read(self.path)
 
     def commit(self):
-        if not self.ro:
-            from tfs import read, write
-            write(self.path, self.df)
-        else:
-            raise Exception("File is read-only")
+        raise Exception
+        # if not self.ro:
+        #     from tfs import read, write
+        #     write(self.path, self.df)
+        # else:
+        #     raise Exception("File is read-only")
+
+
+def parse_sector_maps(tfs: TFS):
+    """
+    Parses MADX sector map file to extract linear R matrices
+    """
+    df = tfs.df
+    matrix_entries = ['R{}{}'.format(i, j) for i in range(1, 7) for j in range(1, 7)]
+    data_matrix = df.loc[:, matrix_entries].values.reshape((-1, 6, 6))
+    split_matrices = [np.asfortranarray(data_matrix[i, ...]) for i in range(len(df))]
+
+    elements = df.index
+    assert len(np.unique(elements)) == len(elements)
+    #assert len([el for el in elements if 'START' in el]) == 1
+
+    df.loc[:, 'M'] = split_matrices
+    return df
 
 
 class MADXOptics:
