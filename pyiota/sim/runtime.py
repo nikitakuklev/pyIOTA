@@ -1,7 +1,7 @@
 import subprocess
 from enum import Enum
 from shutil import which
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Union
 from pathlib import PurePath
 import pandas as pd
 
@@ -114,14 +114,17 @@ class DaskClient:
         if address in cfg.CLIENT_CACHE:
             client = cfg.CLIENT_CACHE[address]
             if client.status == 'closed':
-                client = Client(address, timeout=2)
+                client = Client(address, timeout=5)
                 cfg.CLIENT_CACHE[address] = client
         else:
-            client = Client(address, timeout=2)
+            client = Client(address, timeout=5)
             cfg.CLIENT_CACHE[address] = client
         self.client = client
         self.address = address
         self.restart = autorestart
+
+    def restart(self, timeout=30):
+        self.client.restart(timeout=timeout)
 
     def self_test(self):
         if self.restart:
@@ -174,13 +177,22 @@ class DaskClient:
         return stream
 
 
-class STATE(Enum):
-    NOT_STARTED = 0
-    PREP = 1
-    STARTED = 2
-    ENDED = 10
-    ENDED_READ = 20
-    ERROR = 99
+# class STATE(Enum):
+#     # Currently not used due to serialization issues
+#     NOT_STARTED = 0
+#     PREP = 1
+#     STARTED = 2
+#     ENDED = 10
+#     ENDED_READ = 20
+#     ERROR = 99
+
+class STATE:
+    NOT_STARTED = "NOT_STARTED"
+    PREP = "PREP"
+    STARTED = "STARTED"
+    ENDED = "ENDED"
+    ENDED_READ = "ENDED_READ"
+    ERROR = "ERROR"
 
 
 class ElegantSimJob:
@@ -212,32 +224,31 @@ class ElegantSimJob:
         self.lattice_file_name = lattice_file_name
         self.lattice_file_contents = lattice_file_contents
         # This is a map of relative file path to dataframe
+        self.parameter_file_map: Optional[Dict] = None
         if parameter_file_map:
             self.parameter_file_map = {}
             for (k, v) in parameter_file_map.items():
                 assert isinstance(k, PurePath)
                 assert isinstance(v, pd.DataFrame)
                 self.parameter_file_map[self.run_subfolder / k] = v
-        else:
-            self.parameter_file_map = None
         self.lattice_options = lattice_options
         self.task_options = task_options
         self.task_file_abs_path = self.run_subfolder / task_file_name
         self.lattice_file_abs_path = self.run_subfolder / lattice_file_name
-        self.state = STATE.NOT_STARTED
-        self.params = {}
+        self.state: str = STATE.NOT_STARTED
+        self.params: Dict = {}
 
     def __str__(self):
-        return (f'ElegantSimJob - status ({self.state.name})\n' +
-                f'Label: {self.label}\n' +
-                f'Work folder: {self.work_folder}\n' +
-                f'Run folder: {self.run_folder}\n' +
-                f'Lattice file name: {self.lattice_file_name}\n' +
-                f'Lattice file path: {self.lattice_file_abs_path}\n' +
-                f'Task file name: {self.task_file_name}\n' +
-                f'Task file path: {self.task_file_abs_path}\n' +
-                f'Task contents OK: {self.task_file_contents is not None}\n' +
-                f'Lattice contents OK: {self.lattice_file_contents is not None}')
+        return (f'ElegantSimJob - status ({self.state})\n' +
+                f'Label:                {self.label}\n' +
+                f'Work folder:          {self.work_folder}\n' +
+                f'Run folder:           {self.run_folder}\n' +
+                f'Lattice file name:    {self.lattice_file_name}\n' +
+                f'Lattice file path:    {self.lattice_file_abs_path}\n' +
+                f'Task file name:       {self.task_file_name}\n' +
+                f'Task file path:       {self.task_file_abs_path}\n' +
+                f'Task contents OK:     {self.task_file_contents is not None}\n' +
+                f'Lattice contents OK:  {self.lattice_file_contents is not None}')
 
 
 def run_dummy_task(*args, **kwargs):
@@ -286,7 +297,7 @@ def run_elegant_job(task: ElegantSimJob, dry_run: bool = True, mpi: int = 0, mpi
         if not getattr(task, 'file_exists_override', False):
             raise Exception(f'Run folder ({run_folder}) exists')
         else:
-            l.warning(f'>Run folder ({run_folder})exists but overriden')
+            l.warning(f'>Run folder ({run_folder}) exists but overriden')
     if task_file_abs_path.exists():
         if not getattr(task, 'file_exists_override', False):
             raise Exception(f'Task file ({task_file_abs_path}) exists')
