@@ -98,8 +98,6 @@ class DaskSLURMSim(Sim):
         return futures or None
 
 
-
-
 class DaskClient:
     """ Wrapper for dask client used to submit and read out tasks """
 
@@ -121,13 +119,13 @@ class DaskClient:
             cfg.CLIENT_CACHE[address] = client
         self.client = client
         self.address = address
-        self.restart = autorestart
+        self.autorestart = autorestart
 
-    def restart(self, timeout=30):
+    def restart(self, timeout=90):
         self.client.restart(timeout=timeout)
 
     def self_test(self):
-        if self.restart:
+        if self.autorestart:
             self.client.restart()
         args = (42, 2)
         future = self.client.submit(run_dummy_task, *args)
@@ -326,6 +324,7 @@ def run_elegant_job(task: ElegantSimJob, dry_run: bool = True, mpi: int = 0, mpi
                 l.info(f'>{delta():.3f} Writing ({k2})')
                 sdds = SDDS(k2, blank=True)
                 sdds.set(v)
+                sdds.sd.mode = sdds.sd.SDDS_BINARY
                 sdds.write(k2)
     else:
         if task.parameter_file_map is not None:
@@ -366,6 +365,7 @@ def run_elegant_sdds_import(task, dry_run: bool = True):
     # importlib.reload(pyIOTA.sim.runtime.)
 
     from time import perf_counter
+    import datetime
     start = perf_counter()
 
     def delta():
@@ -375,6 +375,7 @@ def run_elegant_sdds_import(task, dry_run: bool = True):
     l = logging.getLogger("distributed.worker")
     l.info('--------------------------')
     l.info(f'{delta():.3f} Elegant SDDS read starting')
+    l.info(f'{delta():.3f} Local time: {datetime.datetime.now()}')
 
     from pathlib import Path
     from ..elegant.io import SDDS, SDDSTrack
@@ -405,8 +406,8 @@ def run_elegant_sdds_import(task, dry_run: bool = True):
                         except Exception as e:
                             l.error(f'>{delta():.3f} Error parsing ({f}), dumping as SDDS:')
                             sdds = SDDS(f, fast=True)
-                            l.error(sdds.summary())
-                            raise e
+                            l.error(f'>'+sdds.summary())
+                            #raise e
                         tracks.append(sdds)
                     data[ext] = tracks
             else:
