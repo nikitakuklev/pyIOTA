@@ -8,6 +8,7 @@ from ocelot import Element, Quadrupole, Sextupole, Octupole, SBend
 
 logger = logging.getLogger(__name__)
 
+
 class ErrorGenerator:
     """
     Utility class to generate perturbations (errors) of selected elements

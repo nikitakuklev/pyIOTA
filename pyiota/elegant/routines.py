@@ -74,7 +74,7 @@ def template_task_track_single(box: LatticeContainer, t: Task, **kwargs):
 
 
 def template_task_track_watchpoint(box: LatticeContainer, t: Task, **kwargs):
-    """ Task template for tracking over many turns """
+    """ Task template for tracking over many turns with watchpoints """
     if len(kwargs) >= 8:
         print(kwargs)
         raise Exception
@@ -99,7 +99,7 @@ def template_task_track_watchpoint(box: LatticeContainer, t: Task, **kwargs):
 
     t.setup_run_control(n_passes=n_turns)
 
-    # chrom
+    # Chromaticity
     if chrom is not None:
         bothnan = np.isnan(chrom[1]) and np.isnan(chrom[2])
         notnan = not np.isnan(chrom[1]) and not np.isnan(chrom[1])
