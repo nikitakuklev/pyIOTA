@@ -20,6 +20,12 @@ class Sim:
         self.id = eid
 
 
+class Utilities:
+    def get_env(*args, **kwargs):
+        import os
+        return os.environ
+
+
 class DaskSLURMSim(Sim):
     def __init__(self, eid: str = None, fallback: bool = True, **kwargs):
         """
@@ -27,26 +33,25 @@ class DaskSLURMSim(Sim):
         :param eid: Name for reference
         :param fallback: Whether to create a local cluster if SLURM is not found
         """
-        import dask
         import dask.distributed
 
         super().__init__(eid)
         if slurm_available():
-            import dask_jobqueue
+            from .dask import SLURMCluster
             cluster_opts = {'name': 'dask-worker',
                             'cores': 1,
-                            'memory': '2GB',
+                            # 'memory': '2GB',
                             'processes': 1,
-                            # 'interface': 'ib0',
+                            #'interface': 'ib0',
                             'shebang': '#!/usr/bin/env bash',
-                            'queue': 'broadwl',
+                            # 'queue': 'broadwl',
                             'walltime': '36:00:00',
                             # 'job-cpu': 1,
                             # 'job-mem': '2GB',
-                            # 'log-directory': "~/scratch/slurm_logs/",
+                            #'log_directory': "~/scratch/slurm_logs",
                             }
             cluster_opts.update(kwargs)
-            cluster = dask_jobqueue.SLURMCluster(**cluster_opts)
+            cluster = SLURMCluster(**cluster_opts)
         else:
             if fallback:
                 cluster = dask.distributed.LocalCluster()
@@ -64,6 +69,15 @@ class DaskSLURMSim(Sim):
 
     def get_endpoints(self):
         return self.client, self.cluster
+
+    def get_scheduler_environment(self):
+        fut = self.client.run_on_scheduler(Utilities.get_env)
+        return fut
+
+    def get_environment(self):
+        future = self.client.submit(Utilities.get_env)
+        result = future.result(timeout=10.0)
+        return result
 
     def submit(self, tasks: List, fnf: bool = False, limit: int = 100, no_scaling: bool = False):
         """
@@ -339,6 +353,10 @@ def run_elegant_job(task: ElegantSimJob, dry_run: bool = True, mpi: int = 0, mpi
         l.info(f'>{delta():.3f} Calling elegant (dry run)')
         result = subprocess.run(['echo', str(42)], capture_output=True, text=True)
     else:
+        from ..util.config import ELEGANT_RPN_PATH
+        if ELEGANT_RPN_PATH != '':
+            os.environ['RPN_DEFNS'] = ELEGANT_RPN_PATH
+
         if mpi is not None and mpi > 0:
             from ..util.config import ELEGANT_MPI_MODULE, ELEGANT_MPI_ARGS
             mpi_lib = ELEGANT_MPI_MODULE
@@ -351,7 +369,7 @@ def run_elegant_job(task: ElegantSimJob, dry_run: bool = True, mpi: int = 0, mpi
             l.info(f'>{delta():.3f} Calling: elegant ({str(task_file_abs_path)})')
             result = subprocess.run(['elegant', str(task_file_abs_path)], capture_output=True, text=True)
     task.state = STATE.ENDED
-    #task.sim_result = result
+    # task.sim_result = result
     l.info(f'{delta():.3f} Finished')
     l.info('--------------------------')
     return result, task
@@ -406,8 +424,8 @@ def run_elegant_sdds_import(task, dry_run: bool = True):
                         except Exception as e:
                             l.error(f'>{delta():.3f} Error parsing ({f}), dumping as SDDS:')
                             sdds = SDDS(f, fast=True)
-                            l.error(f'>'+sdds.summary())
-                            #raise e
+                            l.error(f'>' + sdds.summary())
+                            # raise e
                         tracks.append(sdds)
                     data[ext] = tracks
             else:
