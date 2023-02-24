@@ -138,6 +138,9 @@ class SimKick:
         CSX = 'CSx'
         CSY = 'CSy'
         I1 = 'I1'
+        stdevCSX = 'stdevCSx'
+        stdevCSY = 'stdevCSy'
+        stdevI1 = 'stdevI1'
 
     @enum.unique
     class Dataclass(enum.Enum):
@@ -332,7 +335,7 @@ class SimKick:
             yn, ypn = Coordinates.normalize(y, yp, beta_y, alpha_y)
             csy = Invariants.compute_CS_2D(yn, ypn, True)
 
-            i1 = Invariants.compute_I1(xn, xpn, yn, ypn, i1_str, True)
+            i1 = Invariants.compute_I1(xn, xpn, yn, ypn, i1_str, c=None, normalized=True)
 
             csxl.append(csx)
             csyl.append(csy)
@@ -341,6 +344,14 @@ class SimKick:
         data[self.Datatype.CSX.value] = csxl
         data[self.Datatype.CSY.value] = csyl
         data[self.Datatype.I1.value] = i1l
+
+    def calculate_invariants_jitter(self):
+        assert self.has_track
+        data = self.df.iloc[0, self.df.columns.get_loc('track')].df
+
+        data[self.Datatype.stdevCSX.value] = [np.std(x)/np.mean(x) for x in data[self.Datatype.CSX.value]]
+        data[self.Datatype.stdevCSY.value] = [np.std(x)/np.mean(x) for x in data[self.Datatype.CSY.value]]
+        data[self.Datatype.stdevI1.value] = [np.std(x)/np.mean(x) for x in data[self.Datatype.I1.value]]
 
 
 class Kick:
