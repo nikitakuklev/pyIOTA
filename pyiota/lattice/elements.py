@@ -12,7 +12,7 @@ import time
 from enum import Enum
 from pathlib import Path
 from itertools import accumulate
-from typing import Union, List, Dict, Type, Iterable, Callable, Optional
+from typing import Union, List, Dict, Type, Iterable, Callable, Optional, Literal
 
 from ..util import *
 
@@ -1304,20 +1304,21 @@ class OctupoleInsert:
     def __init__(self, **kwargs):
         self.l0 = self.mu0 = None
         self.seq = []
-        self.otype = 1
         self.configure(**kwargs)
 
-    def configure(self, oqK: Union[float, np.ndarray] = 1.0,
-                  run: int = None, l0: float = 1.8, mu0: float = 0.3, otype: int = 1,
-                  olen: Union[float, None] = 0.07, nn: int = 17,
-                  ospacing: float = None,
+    def configure(self, nn: int, l0: float = 1.8, mu0: float = 0.3,
+                  otype: int = 1, oqK: Union[float, np.ndarray] = 1.0,
+                  olen: Union[float, None] = 0.07, ospacing: float = None,
+                  run: int = None,
                   current: float = None,
+                  spacing_mode: Literal['distance','phase'] = 'distance',
                   tn=0.4, cn=0.01,
                   debug: bool = False,
                   positions: np.ndarray = None,
                   olen_eff: float = None,
                   drop_empty_drifts: bool = False,
-                  replace_zero_strength_octupoles: bool = False):
+                  replace_zero_strength_octupoles: bool = False,
+                  skip_config: bool = False):
         """
         Initialize QI configuration. Notation matches that used in original MADX scripts.
 
@@ -1337,6 +1338,10 @@ class OctupoleInsert:
         self.l0 = l0
         self.mu0 = mu0
         self.otype = otype
+        self.tn = tn
+        self.cn = cn
+        if skip_config:
+            return
         if isinstance(oqK, np.ndarray):
             assert len(oqK) == nn
             assert all(not np.isnan(oqkt) for oqkt in oqK)
@@ -1345,43 +1350,6 @@ class OctupoleInsert:
 
         if sum(1 for ct in [olen is not None, ospacing is not None] if ct) != 1:
             raise Exception("Exactly one length spec allowed")
-        if ospacing is not None:
-            oqSpacing = ospacing
-            olen = (l0 - ospacing * nn) / nn
-        else:
-            oqSpacing = (l0 - olen * nn) / nn
-
-        olen_eff = olen_eff or olen or l0 / nn
-
-        if current:
-            logger.info(
-                f'QI - l0:{l0}|nn:{nn}|c:{current}|run:{run}|olen:{olen:.3f}|space:{oqSpacing:.3f}|drop:{drop_empty_drifts}')
-        else:
-            logger.info(
-                f'QI - l0:{l0}|nn:{nn}|tn:{tn}|cn:{cn}|run:{run}|olen:{olen:.3f}|space:{oqSpacing:.3f}|drop:{drop_empty_drifts}')
-        if positions is None:
-            perturbed_mode = False
-            if run is None:
-                # Ideal configuration - all magnets equidistant
-                margin = 0.0
-                positions = l0 / nn * (np.arange(1, nn + 1) - 0.5)
-            elif run == 1:
-                if ospacing is not None:
-                    raise Exception
-                # Margins on the sides were present
-                oqSpacing = 0.03325  # (1.8-0.022375-0.022375-17*0.07)/17
-                margin = 0.022375  # extra margin at the start and end of insert
-                positions = margin + (l0 - 2 * margin) / nn * (np.arange(1, nn + 1) - 0.5)
-            elif run == 2:
-                # Perfect spacing with half drift on each end
-                margin = 0.0
-                positions = l0 / nn * (np.arange(1, nn + 1) - 0.5)
-            else:
-                raise Exception(f"Run ({run}) is unrecognized")
-        else:
-            perturbed_mode = True
-            assert len(positions) == nn
-            assert np.all(positions + olen / 2 < l0) and np.all(positions - olen / 2 > 0.0)
 
         # musect = mu0 + 0.5
         f0, betae, alfae, betas = self.calculate_optics_parameters()
@@ -1389,35 +1357,55 @@ class OctupoleInsert:
         self.beta_edge = betae
         self.alpha_edge = alfae
 
-        # print(f"QI optics: mu0:{mu0:.3f}|f0:{f0:.3f}|1/f0:{1 / f0:.3f}|"
-        #      f"betaedge:{betae:.3f}|alphaedge:{alfae:.3f}|betastar:{betas:.3f}")
-        # value, , oqK, nltype, otype;
+        if spacing_mode == 'phase':
+            # Equal phase
+            assert olen_eff is None
+            assert olen is not None
+            mu_slice = 0.3 / nn
+            distances = []
+            s0 = 0
+            for i in range(nn):
+                if i == 0:
+                    s1 = self.find_phase_distance(s0, mu_slice / 2)
+                    if s1 < olen/2:
+                        raise Exception(f'Magnet {i} geometry will not fit: {s1=} {olen/2=}')
+                else:
+                    s1 = self.find_phase_distance(s0, mu_slice)
+                    if (s1-s0) < olen:
+                        raise Exception(f'Magnet {i} geometry will not fit: {(s1-s0)=} {olen}')
+                distances.append(s1)
+                s0 = s1
+            positions = np.array(distances)
 
-        if current:
-            # Use current-based setting via central current
-            cal_factor = self.calculate_strength_factor(energy=100.0)
-            scale_factor = self.beta(positions) ** -3 / self.beta_star ** -3
-            k3_arr = current * cal_factor * scale_factor
-        else:
-            self.tn = tn
-            self.cn = cn
-            # Use DN formalism to derive k3 from t-strength
-            sn = positions
-            bn = l0 * (1 - sn * (l0 - sn) / l0 / f0) / np.sqrt(1.0 - (1.0 - l0 / 2.0 / f0) ** 2)
-            knn = tn * l0 / nn / bn ** 2
-            cnll = cn * np.sqrt(bn)
-            knll = knn * cnll ** 2
-            k1 = knn * 2  # 1 * 2!
-            k3 = knn / cn ** 2 / bn * 16  # 2 / 3 * 4!
-            k3scaled = k3 * oqK  # Can be an array
-            k3_arr = k3scaled / olen_eff
+            if current:
+                logger.info(
+                    f'QIPHASE - l0:{l0}|mu0:{mu0}|nn:{nn}|c:{current}|run:{run}|olen:{olen:.3f}|drop:{drop_empty_drifts}') #|{positions=}
+            else:
+                logger.info(
+                    f'QIPHASE - l0:{l0}|mu0:{mu0}|nn:{nn}|tn:{tn}|cn:{cn}|run:{run}|olen:{olen:.3f}|drop:{drop_empty_drifts}') #|{positions=}
+            #positions -= olen / 2
+            if current:
+                raise Exception
+            else:
+                self.tn = tn
+                self.cn = cn
+                # Use DN formalism to derive k3 from t-strength
+                sn = positions
+                bn = l0 * (1 - sn * (l0 - sn) / l0 / f0) / np.sqrt(1.0 - (1.0 - l0 / 2.0 / f0) ** 2)
+                knn = tn * l0 / nn / bn ** 2
+                cnll = cn * np.sqrt(bn)
+                knll = knn * cnll ** 2
+                k1 = knn * 2  # 1 * 2!
+                #k3 = knn / cn ** 2 / bn * 16  # 2 / 3 * 4!
+                k3 = knn / cn ** 2 * 16  # 2 / 3 * 4! # make it scale as 1/beta^2 now based on Baturin paper
+                k3scaled = k3 * oqK  # Can be an array
+                k3_arr = k3scaled / olen
 
-        self.seq = seq = []
-        # print(k3_arr)
-        if perturbed_mode:
+            self.seq = seq = []
+            # Always have custom positions
             seq.append(Drift(l=positions[0] - olen / 2, eid='DmarginL'))
             for i, k3 in zip(range(0, nn), k3_arr):
-                k3l = k3 * olen_eff
+                k3l = k3 * olen
                 if otype == 0:
                     assert olen == 0.0
                     seq.append(Multipole(kn=[0., 0., 0., k3l], eid=f'QI{i + 1:02}'))
@@ -1431,47 +1419,149 @@ class OctupoleInsert:
                 if i < nn - 1:
                     seq.append(Drift(l=(positions[i + 1] - positions[i]) - olen, eid=f'D{i + 1:02}'))
             seq.append(Drift(l=l0 - positions[-1] - olen / 2, eid='DmarginR'))
-        else:
-            # Octupole locations are ideal
-            seq.append(Drift(l=margin, eid='oQImarginL'))
-            for i, k3 in zip(range(1, nn + 1), k3_arr):
-                k3l = k3 * olen_eff
-                if otype == 0:
-                    assert olen == 0.0 and oqSpacing != 0.0
-                    seq.append(Drift(l=oqSpacing / 2 + olen / 2, eid=f'oQI{i:02}l'))
-                    seq.append(Multipole(kn=[0., 0., 0., k3l], eid=f'QI{i:02}'))
-                    seq.append(Drift(l=oqSpacing / 2 + olen / 2, eid=f'oQI{i:02}r'))
-                elif otype == 1:
-                    # Thick octupoles
-                    if not (drop_empty_drifts and oqSpacing == 0.0):
-                        seq.append(Drift(l=oqSpacing / 2, eid=f'oQI{i:02}l'))
-                    if replace_zero_strength_octupoles and k3 == 0.0:
-                        seq.append(Drift(l=olen, eid=f'QI{i:02}'))
+
+            l_list = [e.l for e in seq]
+            # print(seq, l_list, sum(l_list))
+            assert np.isclose(sum(l_list), l0)
+
+            # Check symmetry
+            # s_list = []
+            # s = 0
+            # for e in seq:
+            #     s += e.l / 2
+            #     s_list.append(s)
+            #     s += e.l / 2
+            #
+            # s_oct = [s for e, s in zip(seq, s_list) if not isinstance(e, Drift)]
+            # assert np.allclose(np.diff(np.array(s_oct)), oqSpacing + olen)
+
+        elif spacing_mode == 'distance':
+            if positions is None:
+                # Uniform ideal spacing
+                perturbed_mode = False
+                if ospacing is not None:
+                    oqSpacing = ospacing
+                    olen = (l0 - ospacing * nn) / nn
+                else:
+                    oqSpacing = (l0 - olen * nn) / nn
+
+                olen_eff = olen_eff or olen or l0 / nn
+
+                if run is None:
+                    # Ideal configuration - all magnets equidistant
+                    margin = 0.0
+                    positions = l0 / nn * (np.arange(1, nn + 1) - 0.5)
+                elif run == 1:
+                    if ospacing is not None:
+                        raise Exception
+                    # Margins on the sides were present
+                    oqSpacing = 0.03325  # (1.8-0.022375-0.022375-17*0.07)/17
+                    margin = 0.022375  # extra margin at the start and end of insert
+                    positions = margin + (l0 - 2 * margin) / nn * (np.arange(1, nn + 1) - 0.5)
+                elif run == 2:
+                    # Perfect spacing with half drift on each end
+                    margin = 0.0
+                    positions = l0 / nn * (np.arange(1, nn + 1) - 0.5)
+                else:
+                    raise Exception(f"Run ({run}) is unrecognized")
+
+                if current:
+                    logger.info(
+                        f'QI - l0:{l0}|nn:{nn}|c:{current}|run:{run}|olen:{olen:.3f}|space:{oqSpacing:.3f}|drop:{drop_empty_drifts}')
+                else:
+                    logger.info(
+                        f'QI - l0:{l0}|nn:{nn}|tn:{tn}|cn:{cn}|run:{run}|olen:{olen:.3f}|space:{oqSpacing:.3f}|drop:{drop_empty_drifts}')
+            else:
+                perturbed_mode = True
+                assert len(positions) == nn
+                assert np.all(positions + olen / 2 < l0) and np.all(positions - olen / 2 > 0.0)
+
+            # print(f"QI optics: mu0:{mu0:.3f}|f0:{f0:.3f}|1/f0:{1 / f0:.3f}|"
+            #      f"betaedge:{betae:.3f}|alphaedge:{alfae:.3f}|betastar:{betas:.3f}")
+            # value, , oqK, nltype, otype;
+
+            if current:
+                # Use current-based setting via central current
+                cal_factor = self.calculate_strength_factor(energy=100.0)
+                scale_factor = self.beta(positions) ** -3 / self.beta_star ** -3
+                k3_arr = current * cal_factor * scale_factor
+            else:
+                self.tn = tn
+                self.cn = cn
+                # Use DN formalism to derive k3 from t-strength
+                sn = positions
+                bn = l0 * (1 - sn * (l0 - sn) / l0 / f0) / np.sqrt(1.0 - (1.0 - l0 / 2.0 / f0) ** 2)
+                knn = tn * l0 / nn / bn ** 2
+                cnll = cn * np.sqrt(bn)
+                knll = knn * cnll ** 2
+                k1 = knn * 2  # 1 * 2!
+                k3 = knn / cn ** 2 / bn * 16  # 2 / 3 * 4!
+                k3scaled = k3 * oqK  # Can be an array
+                k3_arr = k3scaled / olen_eff
+
+            self.seq = seq = []
+            # print(k3_arr)
+            if perturbed_mode:
+                seq.append(Drift(l=positions[0] - olen / 2, eid='DmarginL'))
+                for i, k3 in zip(range(0, nn), k3_arr):
+                    k3l = k3 * olen_eff
+                    if otype == 0:
+                        assert olen == 0.0
+                        seq.append(Multipole(kn=[0., 0., 0., k3l], eid=f'QI{i + 1:02}'))
+                    elif otype == 1:
+                        seq.append(Octupole(l=olen, k3=k3, eid=f'QI{i + 1:02}'))
+                    elif otype == 2:
+                        assert olen == 0.0
+                        seq.append(HKPoly(K40=k3l / 24., K22=k3l / 4., K04=k3l / 24., eid=f'QI{i + 1:02}'))
                     else:
-                        seq.append(Octupole(l=olen, k3=k3, eid=f'QI{i:02}'))
-                    if not (drop_empty_drifts and oqSpacing == 0.0):
-                        seq.append(Drift(l=oqSpacing / 2, eid=f'oQI{i:02}r'))
-                elif otype == 2:
-                    assert olen == 0.0
-                    seq.append(Drift(l=oqSpacing / 2 + olen / 2, eid=f'oQI{i:02}l'))
-                    seq.append(HKPoly(K40=k3l / 24., K22=k3l / 4., K04=k3l / 24., eid=f'QI{i:02}'))
-                    seq.append(Drift(l=oqSpacing / 2 + olen / 2, eid=f'oQI{i:02}r'))
-                # value, i, bn, sn, k3, k3scaled, (betas ^ 3 / bn ^ 3);
-            seq.append(Drift(l=margin, eid='oQImarginR'))
-        l_list = [e.l for e in seq]
-        # print(seq, l_list, sum(l_list))
-        assert np.isclose(sum(l_list), l0)
+                        raise
+                    if i < nn - 1:
+                        seq.append(Drift(l=(positions[i + 1] - positions[i]) - olen, eid=f'D{i + 1:02}'))
+                seq.append(Drift(l=l0 - positions[-1] - olen / 2, eid='DmarginR'))
+            else:
+                # Octupole locations are ideal
+                seq.append(Drift(l=margin, eid='oQImarginL'))
+                for i, k3 in zip(range(1, nn + 1), k3_arr):
+                    k3l = k3 * olen_eff
+                    if otype == 0:
+                        assert olen == 0.0 and oqSpacing != 0.0
+                        seq.append(Drift(l=oqSpacing / 2 + olen / 2, eid=f'oQI{i:02}l'))
+                        seq.append(Multipole(kn=[0., 0., 0., k3l], eid=f'QI{i:02}'))
+                        seq.append(Drift(l=oqSpacing / 2 + olen / 2, eid=f'oQI{i:02}r'))
+                    elif otype == 1:
+                        # Thick octupoles
+                        if not (drop_empty_drifts and oqSpacing == 0.0):
+                            seq.append(Drift(l=oqSpacing / 2, eid=f'oQI{i:02}l'))
+                        if replace_zero_strength_octupoles and k3 == 0.0:
+                            seq.append(Drift(l=olen, eid=f'QI{i:02}'))
+                        else:
+                            seq.append(Octupole(l=olen, k3=k3, eid=f'QI{i:02}'))
+                        if not (drop_empty_drifts and oqSpacing == 0.0):
+                            seq.append(Drift(l=oqSpacing / 2, eid=f'oQI{i:02}r'))
+                    elif otype == 2:
+                        assert olen == 0.0
+                        seq.append(Drift(l=oqSpacing / 2 + olen / 2, eid=f'oQI{i:02}l'))
+                        seq.append(HKPoly(K40=k3l / 24., K22=k3l / 4., K04=k3l / 24., eid=f'QI{i:02}'))
+                        seq.append(Drift(l=oqSpacing / 2 + olen / 2, eid=f'oQI{i:02}r'))
+                    # value, i, bn, sn, k3, k3scaled, (betas ^ 3 / bn ^ 3);
+                seq.append(Drift(l=margin, eid='oQImarginR'))
+            l_list = [e.l for e in seq]
+            # print(seq, l_list, sum(l_list))
+            assert np.isclose(sum(l_list), l0)
 
-        if not perturbed_mode:
-            s_list = []
-            s = 0
-            for e in seq:
-                s += e.l / 2
-                s_list.append(s)
-                s += e.l / 2
+            if not perturbed_mode:
+                s_list = []
+                s = 0
+                for e in seq:
+                    s += e.l / 2
+                    s_list.append(s)
+                    s += e.l / 2
 
-            s_oct = [s for e, s in zip(seq, s_list) if not isinstance(e, Drift)]
-            assert np.allclose(np.diff(np.array(s_oct)), oqSpacing + olen)
+                s_oct = [s for e, s in zip(seq, s_list) if not isinstance(e, Drift)]
+                assert np.allclose(np.diff(np.array(s_oct)), oqSpacing + olen)
+
+        else:
+            raise Exception(f'Invalid spacing mode {spacing_mode}')
 
     @property
     def elements(self):
@@ -1518,6 +1608,18 @@ class OctupoleInsert:
         s = s - self.l0 / 2
         return -s / self.beta_star
 
+    def find_phase_distance(self, s0, phase):
+        """
+        Compute the distance required from starting point to accumulate desired phase
+        This can be derived from 1/beta integral expression
+        """
+        assert phase > 0
+        assert 0 <= s0 <= self.l0
+        s0 = s0 - self.l0/2
+        s1 = self.beta_star * np.tan(2*np.pi*phase + np.arctan(s0/self.beta_star))
+        assert s1 > s0
+        return s1 + self.l0/2
+
     def integral_invbeta3(self, s0, s1):
         """ Computes integral of 1/beta^3 (i.e. integrated potential) based on Mathematica derivation """
         assert s0 < s1
@@ -1547,9 +1649,9 @@ class OctupoleInsert:
 
     def integral_beta2(self, s0, s1, mu0=None):
         """ Computes integral of beta^2 (i.e. detuning) based on Mathematica derivation """
-        assert s0 < s1
-        assert 0 <= s0 < self.l0
-        assert 0 < s1 <= self.l0 or np.isclose(s1, self.l0, atol=1e-10, rtol=0.0)
+        assert s0 < s1, f'{s0=} {s1=}'
+        assert 0 <= s0 < self.l0, f'{s0=} {s1=}'
+        assert 0 < s1 <= self.l0 or np.isclose(s1, self.l0, atol=1e-10, rtol=0.0) , f'{s0=} {s1=}'
         s0 -= self.l0 / 2
         s1 -= self.l0 / 2
         l2 = self.l0 / 2
@@ -1819,3 +1921,25 @@ class NLInsert:
 
     def to_sequence(self):
         return self.seq
+
+
+class HysteresisQuad(Quadrupole):
+
+    def __init__(self, l: float = 0.0, eid: str = None, **kwargs):
+        if 'hysteresis_model' in kwargs:
+            self.hysteresis_model = kwargs['hysteresis_model']
+        self.l = l
+        self.id = eid
+        self.extra_args = kwargs
+        super().__init__(eid=eid, l=l, **kwargs)
+
+    @property
+    def k1(self):
+        return self.k1
+
+    @k1.setter
+    def k1(self, v):
+        if self.hysteresis_model is not None:
+            new_k1 = self.hysteresis_model.process_setting(v)
+        else:
+            self.k1 = v
