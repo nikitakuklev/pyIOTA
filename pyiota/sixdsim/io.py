@@ -11,12 +11,13 @@ from typing import Callable, Dict
 
 import numpy as np
 
-from ocelot import Monitor, Vcor, Hcor, Solenoid, SBend, Cavity, Edge,\
+from ocelot import Monitor, Vcor, Hcor, Solenoid, SBend, Cavity, Edge, \
     Quadrupole, Drift, Element, Sextupole, Multipole
 from ..acnet.frontends import DoubleDevice, DoubleDeviceSet
 from ..iota import run2 as iota, magnets as iotamags
 
 logger = logging.getLogger(__name__)
+
 
 # Static methods to parse files from 6Dsim format
 
@@ -25,6 +26,7 @@ def __get_pattern(k):
     ke = re.escape(k)
     pattern = r'([()\s=\-+*/])' + f'({ke})' + r'([\s()=\-+*/])'
     return re.compile(pattern)
+
 
 def __replace_vars(assign: str, variables: Dict) -> str:
     """
@@ -36,12 +38,12 @@ def __replace_vars(assign: str, variables: Dict) -> str:
     assign = ' ' + assign + ' '
     for k, v in variables.items():
         if k in assign:
-            #ke = re.escape(k)
+            # ke = re.escape(k)
             p = __get_pattern(k)
-            #pattern = r'[()\s=\-+*/]' + f'({ke})' + r'[\s()=\-+*/]'
+            # pattern = r'[()\s=\-+*/]' + f'({ke})' + r'[\s()=\-+*/]'
             assign = p.sub(r'\1' + f'({v})' + r'\3', assign)
-            #print(assign)
-            #match = re.search(pattern, assign)
+            # print(assign)
+            # match = re.search(pattern, assign)
             # matches = re.findall(pattern, assign)
             # for match in matches:
             #     if match is not None:
@@ -106,7 +108,9 @@ def __parse_id_line(line: str, output_dict: Dict, resolve_against: Dict, verbose
     output_dict[name] = (element, pars_dict)
 
 
-def parse_lattice(fpath: Path, verbose: bool = False, allow_edgeless_dipoles=False, unsafe: bool = False):
+def parse_lattice(fpath: Path, verbose: bool = False, verbose_vars: bool = False,
+                  merge_dipole_edges: bool = True, dipole_merge_method: int = 2,
+                  allow_edgeless_dipoles=False, unsafe: bool = False):
     """
     Parses 6Dsim lattice into native OCELOT object, preserving all compatible elements. All variables
     are resolved to their final numeric values, and evaluated - this is an UNSAFE operation for unstrusted
@@ -142,10 +146,10 @@ def parse_lattice(fpath: Path, verbose: bool = False, allow_edgeless_dipoles=Fal
                 continue
 
             if line in keywords:
-                if verbose: print('MODE:', line)
+                if verbose_vars: print('MODE:', line)
                 mode = keywords[line]
                 if mode == keywords['END']:
-                    if verbose: print('DONE')
+                    if verbose_vars: print('DONE')
                     break
                 else:
                     continue
@@ -166,10 +170,10 @@ def parse_lattice(fpath: Path, verbose: bool = False, allow_edgeless_dipoles=Fal
                     assign = assign.strip()
                     # print('Analyzing line: {}'.format(line))
                     assign = __resolve_vars(assign, variables)
-                    #variables[var] = assign
+                    # variables[var] = assign
                     # print('Variable ({}) resolved to ({})'.format(var, assign))
                     # print(variables)
-                    #extra funcs
+                    # extra funcs
                     sqrt = np.sqrt
                     tan = Tan = np.tan
                     sin = Sin = np.sin
@@ -182,17 +186,17 @@ def parse_lattice(fpath: Path, verbose: bool = False, allow_edgeless_dipoles=Fal
                         print(variables)
                         print(assign)
                         raise e
-                    if verbose: print(f'Variable ({var}) evaluated to ({value})')
+                    if verbose_vars: print(f'Variable ({var}) evaluated to ({value})')
                     lattice_vars[var.strip('$')] = value
                     continue
             elif mode == keywords['ELEMENTS:']:
-                __parse_id_line(line, elements, variables, verbose)
+                __parse_id_line(line, elements, variables, verbose_vars)
                 continue
             elif mode == keywords['CORRECTORS:']:
-                __parse_id_line(line, correctors, variables, verbose)
+                __parse_id_line(line, correctors, variables, verbose_vars)
                 continue
             elif mode == keywords['MONITORS:']:
-                __parse_id_line(line, monitors, variables, verbose)
+                __parse_id_line(line, monitors, variables, verbose_vars)
                 continue
             elif mode == keywords['LATTICE:']:
                 lattice_str += line + ' '
@@ -227,6 +231,8 @@ def parse_lattice(fpath: Path, verbose: bool = False, allow_edgeless_dipoles=Fal
                'OrbitShiftCorrector': None,
                'RFCorrector': 'RF'}
     field_to_gradient_factor = (pc / 1000 / 0.299792458) / 10.0  # kG*m
+    magnetic_rigidity_Tm = (pc / 1000.0 / 0.299792458)
+    magnetic_rigidity_kGcm = magnetic_rigidity_Tm * 100 * 10
 
     def gradient_scale(g):
         return g / field_to_gradient_factor
@@ -250,30 +256,43 @@ def parse_lattice(fpath: Path, verbose: bool = False, allow_edgeless_dipoles=Fal
                 if result is not None:
                     shared_kwargs[v[0]] = v[1](result)
             shared_kwargs['eid'] = item.upper()
+            if verbose:
+                print(f'{item} - {shared_kwargs} | {props}')
             if type_mapped == Drift:
                 oel = Drift(**shared_kwargs)
             elif type_mapped == SBend:
                 if 'G' in props:
                     k1 = props['G'] / field_to_gradient_factor
                 else:
-                    k1 = 0
-                oel = SBend(angle=props['L'] / ((pc / 0.299792458) / props['Hy']),
-                            k1=k1,
+                    k1 = 0.0
+
+                rho = (magnetic_rigidity_kGcm / props['Hy']) / 100.0
+                #oel = SBend(angle=props['L'] / ((pc / 0.299792458) / props['Hy']),
+                oel = SBend(angle=props['L'] / 100.0 / rho,
                             **shared_kwargs)
+                oel.k1 = k1
+                oel.h = 1 / rho
+                oel.Hy = props['Hy']
                 if unsafe:
-                    oel.e1 = props.get('inA',0.0)
-                    oel.e2 = props.get('outA',0.0)
+                    oel.e1 = props.get('inA', 0.0) * np.pi / 180 * np.sign(oel.angle)
+                    oel.e2 = props.get('outA', 0.0) * np.pi / 180 * np.sign(oel.angle)
+                if verbose:
+                    print(f'{item} - {oel.__dict__}')
             elif type_mapped == Edge:
-                if ('poleGap' not in props or getattr(props, 'inA', 0.0) != 0.0) and unsafe:
-                    logger.warning(f'Weird edge {item} - {props}, ignoring inv. curvature')
-                    oel = Edge(**shared_kwargs, edge=props['inA'])
-                    #oel.angle = props['L'] / ((pc / 0.299792458) / props['Hy'])
-                    #oel.inA = props['inA']
-                    oel.Hy = props['Hy']
-                else:
-                    oel = Edge(gap=props['poleGap'] / 100,  # full gap, not half
-                               fint=props['fringeK'],
-                               **shared_kwargs)
+                assert 'Hy' in props
+                # H = angle/length = 1/rho -> angle = length * H  = length / rho
+                rho = (magnetic_rigidity_kGcm / props['Hy']) / 100
+                e = props.get('inA',0.0) * np.pi / 180
+                gap = props.get('poleGap', 0.0) / 100 # full gap, not half
+                fint = props.get('fringeK', 0.0)
+                if 'poleGap' not in props or e != 0.0:
+                    assert unsafe
+                    #logger.warning(f'Weird edge {item} - {props}, ignoring inv. curvature')
+                oel = Edge(**shared_kwargs, gap=gap, fint=fint, edge=e)
+                oel.h = 1 / rho
+                oel.Hy = props['Hy']
+                if verbose:
+                    print(f'{item} - {oel.__dict__}')
             elif type_mapped == Quadrupole:
                 if el_type == 'SQuad':
                     oel = Quadrupole(k1=props['G'] / field_to_gradient_factor,
@@ -291,7 +310,8 @@ def parse_lattice(fpath: Path, verbose: bool = False, allow_edgeless_dipoles=Fal
                         logger.warning(f'Missing multipole strengths, using drift ({item}|{props})')
                         oel = Drift(**shared_kwargs)
                     else:
-                        raise Exception(f"Multipole that is not a sextupole detected ({item}|{el_type}|{type_mapped}|{props})")
+                        raise Exception(
+                            f"Multipole that is not a sextupole detected ({item}|{el_type}|{type_mapped}|{props})")
             elif type_mapped == Solenoid:
                 oel = Drift(**shared_kwargs)
             elif type_mapped == Cavity:
@@ -303,38 +323,119 @@ def parse_lattice(fpath: Path, verbose: bool = False, allow_edgeless_dipoles=Fal
             lattice_list.append(oel)
         except Exception as e:
             print('Element conversion failed!')
-            print((item,el_type, props))
+            print((item, el_type, props))
             raise e
 
     # Dipole edge combination
     lattice_ocelot = lattice_list.copy()
-    assert len(lattice) == len(lattice_list)
-    edge_count = 0
-    edge_warn_exclusions = []
-    for i, (k, v) in enumerate(zip(lattice, lattice_list)):
-        if isinstance(v, Edge):
-            edge_count += 1
-        if isinstance(v, SBend):
-            e1 = lattice_list[i - 1]
-            e2 = lattice_list[i + 1]
-            if not isinstance(e1, Edge) or not isinstance(e2, Edge):
-                if allow_edgeless_dipoles:
-                    if k not in edge_warn_exclusions:
-                        logger.warning(f'Found sector bend {k} without edge elements (e1={e1.id}, e2={e2.id})')
-                        edge_warn_exclusions.append(k)
-                    continue
+    insert_offset = 0
+    if merge_dipole_edges and dipole_merge_method == 1:
+        assert len(lattice) == len(lattice_list)
+        edge_count = 0
+        edge_warn_exclusions = []
+        for i, (k, v) in enumerate(zip(lattice, lattice_list)):
+            if isinstance(v, Edge):
+                edge_count += 1
+            if isinstance(v, SBend):
+                e1 = lattice_list[i - 1]
+                e2 = lattice_list[i + 1]
+                if not isinstance(e1, Edge) or not isinstance(e2, Edge):
+                    if allow_edgeless_dipoles:
+                        if k not in edge_warn_exclusions:
+                            logger.warning(f'Found sector bend {k} without edge elements (e1={e1.id}, e2={e2.id})')
+                            edge_warn_exclusions.append(k)
+                        continue
+                    else:
+                        raise Exception(f'Found sector bend {k} without edge elements - this is not allowed')
+                assert e1.gap == e2.gap
+                assert e1.fint == e2.fint
+                v.fint = e1.fint
+                v.fintx = e2.fint
+                v.gap = e1.gap
+                v.e1 = e1.edge * np.sign(v.angle)
+                v.e2 = e2.edge * np.sign(v.angle)
+                lattice_ocelot.remove(e1)
+                lattice_ocelot.remove(e2)
+                if verbose: print(f'Integrated edges for dipole {k}')
+                edge_count -= 2
+        assert edge_count == 0
+    elif merge_dipole_edges and dipole_merge_method == 2:
+        assert len(lattice) == len(lattice_list)
+        edge_count = 0
+        edge_warn_exclusions = []
+        for i, (k, v) in enumerate(zip(lattice, lattice_list)):
+            if isinstance(v, Edge):
+                edge_count += 1
+            if isinstance(v, SBend):
+                e1 = lattice_list[i - 1]
+                e2 = lattice_list[i + 1]
+
+                if (v.e1 is not None and v.e1 != 0.0) or (v.e2 is not None and v.e2 != 0.0):
+                    assert v.e1 is not None and v.e2 is not None
+                    logger.warning(f'Found bend {k} with nonzero angles {v.e1=} {v.e2=}, adding extra edges')
+                    e1l = Edge(eid=v.id + '_1')
+                    e2l = Edge(eid=v.id + '_2')
+                    assert v.l != 0.0
+                    e1l.h = e2l.h = v.angle / v.l
+                    e1l.edge = v.e1
+                    e2l.edge = v.e2
+                    lattice_ocelot.insert(i + insert_offset, e1l)
+                    lattice_ocelot.insert(i + 2 + insert_offset, e2l)
+                    insert_offset += 2
+
+                if not isinstance(e1, Edge) or not isinstance(e2, Edge):
+                    assert not isinstance(e1, Edge) and not isinstance(e2, Edge)
+                    if allow_edgeless_dipoles:
+                        if k not in edge_warn_exclusions:
+                            logger.warning(f'Found bend {k} without edge elements (e1={e1.id}, e2={e2.id})')
+                            edge_warn_exclusions.append(k)
+                        continue
+                    else:
+                        raise Exception(f'Found bend {k} without edge elements - this is not allowed')
+
+                v.fint = e1.fint
+                v.fintx = e2.fint
+                v.gap = e1.gap
+
+                if v.l != 0.0:
+                    h = v.angle / v.l
                 else:
-                    raise Exception(f'Found sector bend {k} without edge elements - this is not allowed')
-            assert e1.gap == e2.gap
-            assert e1.fint == e2.fint
-            v.fint = e1.fint
-            v.fintx = e2.fint
-            v.gap = e1.gap
-            lattice_ocelot.remove(e1)
-            lattice_ocelot.remove(e2)
-            if verbose: print(f'Integrated edges for dipole {k}')
-            edge_count -= 2
-    assert edge_count == 0
+                    h = 0.0
+
+                for e in [e1, e2]:
+                    eh = getattr(e, 'h', None)
+                    if eh is None:
+                        e.h = h
+                    else:
+                        if not np.isclose(eh, h, atol=1e-10, rtol=0.0):
+                            raise Exception(f'Curvature mismatch for edge ({e.id}|{e.h=}) and bend ({v.id}|{h=})')
+
+                e1.angle = e2.angle = v.angle
+                if v.angle < 0:
+                    e1.edge *= -1
+                    e2.edge *= -1
+                assert e1.gap == e2.gap == v.gap
+                assert e1.dx == e2.dx == v.dx
+                assert e1.dy == e2.dy == v.dy
+                assert e1.tilt == e2.tilt == v.tilt
+                assert e1.dtilt == e2.dtilt == v.dtilt
+                assert e1.k1 == e2.k1 == v.k1
+                assert e1.l == e2.l == 0.0
+
+                assert e1.h_pole == v.h_pole1
+                assert e2.h_pole == v.h_pole2
+
+                if getattr(v, 'e1') is None:
+                    v.e1 = e1.edge
+                if getattr(v, 'e2') is None:
+                    v.e2 = e2.edge
+
+                e1.pos = 1
+                e2.pos = 2
+
+                if verbose: print(f'Updated edges for dipole {k} (method 2)')
+                edge_count -= 2
+        assert edge_count == 0
 
     for item, (el_type, props) in correctors.items():
         shared_kwargs = {}
@@ -385,8 +486,9 @@ def parse_lattice(fpath: Path, verbose: bool = False, allow_edgeless_dipoles=Fal
         oel.shift = props['Shift'] / 100.0
         monitors_ocelot.append(oel)
 
-    logger.info(f'Parsed {len(lattice_ocelot)} objects, {len(correctors_ocelot)} correctors, {len(monitors_ocelot)} monitors')
-    #print(f'Parsed OK - {len(lattice_ocelot)} objects, '
+    logger.info(
+        f'Parsed {len(lattice_ocelot)} objects, {len(correctors_ocelot)} correctors, {len(monitors_ocelot)} monitors')
+    # print(f'Parsed OK - {len(lattice_ocelot)} objects, '
     #      f'{len(correctors_ocelot)} correctors, {len(monitors_ocelot)} monitors')
 
     info_dict = {'source_file': str(fpath), 'source': '6dsim', 'pc': pc, 'N': N}
@@ -480,6 +582,7 @@ class AbstractKnob:
     """
     Superclass of all knobs, which are collections of KnobVariables representing setpoints of devices
     """
+
     def __init__(self, name: str):
         self.name = name
         self.verbose = False
@@ -489,6 +592,7 @@ class Knob(AbstractKnob):
     """
     Experimental, ACNET-based implementation of a knob
     """
+
     def __init__(self, name: str, variables: dict = None):
         self.vars = variables or {}
         self.absolute = True
@@ -678,7 +782,8 @@ class Knob(AbstractKnob):
         devs_v = iota.CORRECTORS.VIRTUAL_V
         devs_s = iota.SKEWQUADS.ALL_CURRENTS
         coils = iota.CORRECTORS.COMBINED_COILS_I
-        #initial_len = len(self.vars)
+
+        # initial_len = len(self.vars)
 
         def grouper(n, iterable):
             it = iter(iterable)
