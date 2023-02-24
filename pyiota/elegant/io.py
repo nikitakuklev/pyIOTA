@@ -1,7 +1,7 @@
 __all__ = [  # 'SDDS', 'SDDSTrack',
     'read_parameters_to_df', 'write_df_to_parameter_file',
     'prepare_folders', 'prepare_folder_structure',
-    'write_df_to_parameter_file_v2']
+    'write_df_to_parameter_file_v2', 'transform_track_list_to_array', 'track_array_to_df']
 
 """
 Collection of IO-related functions for elegant and SDDS file formats
@@ -32,7 +32,8 @@ def load_sdds(num: int = None):
         plt = platform.system()
         if plt == "Linux":
             # SDDS py3.8 for linux is now included as package - throw exception if not found
-            raise e
+            #raise e
+            sys.path.insert(1, "/home/nkuklev/rpm/usr/lib/python3.6/site-packages")
             # sys.path.insert(1, Path.home().joinpath('rpms/usr/lib/python3.6/site-packages').as_posix())
         elif plt == "Windows":
             sys.path.insert(1, str(Path("C:\Python37\Lib")))
@@ -212,7 +213,7 @@ class SDDS:
 
 df_data_columns = ['x', 'xp', 'y', 'yp', 't', 'p', 'dt']
 df_data_columns_dict = {c: i for (c, i) in zip(df_data_columns, range(len(df_data_columns)))}
-df_columns = ['PARTICLE', 'N'] + [c + 'i' for c in df_data_columns] + df_data_columns
+#df_columns = ['PARTICLE', 'N'] + [c + 'i' for c in df_data_columns] + df_data_columns
 df_dtypes = [np.float64] * len(df_data_columns)
 
 
@@ -223,7 +224,7 @@ class SDDSTrack:
 
     def __init__(self, path: Path, as_df: bool = True, fast: bool = True,
                  clear_cdata: bool = True, clear_sd: bool = True,
-                 data_trim: slice = None, columns: List = None):
+                 data_trim: slice = None, columns: list[str] = None):
         """
         Special SDDS container for track data, with many performance and memory options
         :param path: File path
@@ -251,15 +252,16 @@ class SDDSTrack:
             self.cdef = [sd.columnDefinition[i].copy() for i in range(len(sd.columnName))]
             self.pdef = [sd.parameterDefinition[i].copy() for i in range(len(sd.parameterName))]
 
-        self.cdata = self._ragged_nested_list_to_array(sd.columnData,
-                                                       idx_col=self.cdict['particleID'],
-                                                       data_trim=data_trim)
+        self.cdata = [[page for page in sd.columnData[i]] for i in range(len(sd.columnName))]
+        # self.cdata = self._ragged_nested_list_to_array(sd.columnData,
+        #                                                idx_col=self.cdict['particleID'],
+        #                                                data_trim=data_trim)
         # print(f'Track data has shape {self.cdata.shape} (cols|entries|pages)')
         # print(self.cdata)
         self.pdata = [np.array(sd.parameterData[i]) for i in range(len(sd.parameterName))]
         if len(self.cname) > 0:
             if self.cdata is not None:
-                self.pagecnt = self.cdata[0].shape[0]
+                self.pagecnt = len(self.cdata[0])
             else:
                 self.pagecnt = 0
         else:
@@ -412,6 +414,82 @@ class SDDSTrack:
     def prepare_for_serialization(self):
         if hasattr(self, 'sd'):
             del self.sd
+
+def transform_track_list_to_array(data: List, idx_col: int = 7, data_trim: slice = None):
+    """
+    Converts ragged 3d list to a 3d array
+    :param data: 3d list
+    :param idx_col: index column (dim 0)
+    :return:
+    """
+    # Columns are x, xp, etc...
+    n_cols = len(df_data_columns_dict)
+
+    # Pages are 1 per turn
+    n_pages_l = [len(data[i]) for i in range(n_cols)]
+    assert len(np.unique(n_pages_l)) == 1
+    n_pages = n_pages_l[0]
+
+    if n_pages == 0:
+        return None
+
+    # Entries are particles - number varies per page
+    n_entries = max([len(v) for v in data[0]])
+
+    # Particles are identified by their ID - order changes as some are lost
+    col_idx = idx_col
+
+    pages = np.arange(n_pages, dtype=np.int32)
+    if data_trim:
+        pages = pages[data_trim]
+        # print(pages)
+
+    # Allocate the full array
+    arr = np.full((n_cols, n_entries, len(pages)), np.nan, dtype=np.float64)
+
+    for i, page in enumerate(pages):
+        entries = np.array(data[col_idx][page]) - 1
+        for j, (name, idx) in enumerate(df_data_columns_dict.items()):
+            arr[j, entries, i] = data[idx][page]
+    return arr
+
+def track_array_to_df(arr):
+    (n_cols, n_particles, n_turns) = arr.shape
+    idx = list(range(1, n_particles + 1))
+    # df = pd.DataFrame(columns=df_columns, index=range(1, n_particles + 1), dtype=np.float64)
+    series_l = {}
+
+    # print(len(df), df.dtypes)
+    # df = df.astype(dtype= {'PARTICLE':np.int32,'N':np.int32,'X0i':np.float64,'Y0i':np.float64,'Z0i':np.float64})
+    # print(len(df), df.dtypes)
+    # df.loc[:, 'PARTICLE'] = np.array(range(n_particles)) + 1
+    series_l['P'] = pd.Series(np.arange(1, n_particles + 1, dtype=np.int32), index=idx)
+    # print(len(df), df.dtypes)
+    for i, (c, dt) in enumerate(zip(df_data_columns, df_dtypes)):
+        series_l[c] = pd.Series([l[~np.isnan(l)] for l in arr[i, ...]], dtype=object, index=idx)
+        # df.loc[:, c] = pd.Series([l[~np.isnan(l)] for l in arr[i, ...]], index=range(1, n_particles + 1))
+        # print([l[~np.isnan(l)] for l in list(arr[...,i])][0], len(df.loc[:,c]))
+
+    # number of turns
+    series_l['N'] = series_l[df_data_columns[0]].apply(lambda x: len(x)).astype(np.int32)
+    # df.loc[:, 'N'] = df.loc[:, df_data_columns[0]].apply(lambda x: len(x))
+
+    # print(len(df), df.iloc[0:1])
+    # return df
+    # print(len(df), df.iloc[0:1])
+    # print(df.loc[df.X0 == np.nan,:])
+    # print(df.loc[(df.X0 == 0.0),:])
+    for i, c in enumerate(df_data_columns):
+        # print(series_l[c])
+        series_l[c + 'i'] = series_l[c].apply(lambda x: x[0] if len(x) > 0 else np.nan)
+        # df.loc[:, c + 'i'] = df.loc[:, c].apply(lambda x: x[0])
+
+    # Nmax = df.loc[:, 'N'].max()
+    # print(len(df), df.dtypes)
+    # df = df.astype(dtype={'PARTICLE': np.int32, 'N': np.int32})
+    # self.df = df
+    df = pd.DataFrame(series_l, index=idx)
+    return df
 
 
 def read_parameters_to_df(knob: Path,

@@ -592,6 +592,7 @@ class Writer:
             sl.append('\n')
 
         preamble = ''
+        postamble = ''
         if recirculators:
             if opt.add_mal:
                 raise Exception('Legacy add_mal option specified but custom recirculators also present!')
@@ -625,12 +626,17 @@ class Writer:
             sl.append('!Default escape in Elegant (from source): SLOPE_LIMIT=1.0L, COORD_LIMIT=10.0L\n')
 
             if opt.limiting_aperture:
-                preamble += ' APER,'
-                if opt.limiting_aperture != 1:
-                    logger.warning(f'Limiting aperture scaled by ({opt.limiting_aperture})')
-                    sl.append(f'! Limiting aperture scaled by ({opt.limiting_aperture}) from actual\n')
-                    sl.append(f'APER: ECOL, X_MAX={3.9446881e-3 * opt.limiting_aperture:+.10f},'
-                              f' Y_MAX={5.25958413e-3 * opt.limiting_aperture:+.10f}\n')
+                if opt.limiting_aperture < 0:
+                    la = -opt.limiting_aperture
+                    postamble += ', APER'
+                else:
+                    la = opt.limiting_aperture
+                    preamble += ' APER,'
+                if la != 1:
+                    logger.warning(f'Limiting aperture scaled by ({la})')
+                    sl.append(f'! Limiting aperture scaled by ({la}) from actual\n')
+                    sl.append(f'APER: ECOL, X_MAX={3.9446881e-3 * la:+.10f},'
+                              f' Y_MAX={5.25958413e-3 * la:+.10f}\n')
                 else:
                     # 1x actual NL aperture
                     logger.warning(f'Realistic DN aperture added (X_MAX={3.9446881e-3:+.10f},'
@@ -686,7 +692,7 @@ class Writer:
         # wrapstr = 'iota: LINE=(CHRG, MAL, RC, MA1, APER, {})\n'.format(', '.join(seq2))
 
         seq_mod = [el.id for el in lat.sequence if not isinstance(el, Edge)]
-        wrapstr = f"iota: LINE=({preamble} {', '.join(seq_mod)})\n"
+        wrapstr = f"iota: LINE=({preamble} {', '.join(seq_mod)} {postamble})\n"
         sl.append(textwrap.fill(wrapstr, break_long_words=False, break_on_hyphens=False).replace('\n', ' &\n'))
         sl.append('\n\n')
         # sl.append('!Short version has no monitors or markers, from elegant forum might make parallel version faster\n')

@@ -1,6 +1,7 @@
 __all__ = ['template_fma_setup', 'template_task_closed_orbit',
            'template_task_track_single', 'standard_sim_job']
 
+import time
 from typing import Dict
 import numpy as np
 from .taskfile import Task
@@ -24,7 +25,7 @@ def standard_sim_job(work_folder: PurePath,
     defaults.update(kwargs)
 
     if add_random_id:
-        defaults['label'] += '.' + id_generator(8)
+        defaults['label'] += '.' + str(int(time.time_ns())) + '.' + id_generator(4)
 
     label = defaults['label']
     lattice_options = lattice_options or {'sr': 1, 'isr': 1, 'dip_kicks': 64, 'quad_kicks': 32,
@@ -32,7 +33,7 @@ def standard_sim_job(work_folder: PurePath,
     lattice_tag = 'v86_{sr:d}_{isr:d}_{dip_kicks:02d}_{quad_kicks:02d}_{sext_kicks:02d}_{oct_kicks:02d}'.format_map(
         lattice_options)
 
-    work_folder = work_folder or PurePosixPath('/home/nkuklev/studies/dask_tasks/')
+    work_folder = work_folder or PurePosixPath('dask_tasks/')
     run_subfolder = pathlib.PurePosixPath(label + '/')
     lattice_file = pathlib.PurePosixPath(lattice_tag + '.' + defaults['lat_label'] + '.lte')
 
@@ -75,9 +76,6 @@ def template_task_track_single(box: LatticeContainer, t: Task, **kwargs):
 
 def template_task_track_watchpoint(box: LatticeContainer, t: Task, **kwargs):
     """ Task template for tracking over many turns with watchpoints """
-    if len(kwargs) >= 8:
-        print(kwargs)
-        raise Exception
     keys = set(kwargs.keys())
     critical_args = {'n_turns'}
     missing = critical_args.difference(keys)
@@ -124,6 +122,9 @@ def template_task_track_watchpoint(box: LatticeContainer, t: Task, **kwargs):
     if sdds_beam is not None:
         # Input particles via sdds
         t.setup_sdds_beam(path=sdds_beam)
+    elif 'mode' in bunch_dict:
+        # Use a pre-defined mode
+        t.setup_bunched_beam(mode=bunch_dict['mode'], bunch_dict=bunch_dict, create_file=create_file)
     elif bunch_dict is not None:
         # Make a bunch using elegant
         t.setup_bunched_beam(mode='custom_bunch', bunch_dict=bunch_dict, create_file=create_file)

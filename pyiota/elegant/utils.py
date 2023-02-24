@@ -19,6 +19,7 @@ def merge_twiss_with_box(box, twi):
     return df_m
 
 def compare_twiss_to_box(box, twi: pd.DataFrame):
+    """ Rough sanity check to ensure elegant twiss data matches internal calculations """
     df_t = box.twiss_df()
     df_t['name'] = df_t['name'].shift(1).str.lower()
     twi['ElementName'] = twi['ElementName'].str.lower()

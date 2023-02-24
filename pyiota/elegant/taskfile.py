@@ -245,7 +245,10 @@ class Task:
         if create_file:
             strings.append(f'bunch = {self.rf}/%s.bun')
         if mode in ['DA_upperhalf', 'DA_upperright']:
-            assert gridspec, latspec
+            assert gridspec or 'gridspec' in bunch_dict
+            gridspec = gridspec or bunch_dict['gridspec']
+            assert latspec or 'latspec' in bunch_dict
+            latspec = latspec or bunch_dict['latspec']
             x, nx, y, ny = gridspec
             beta_x, beta_y = latspec
             # For DA distribution, elegant forms uniform grid between +- sqrt(emittance*beta)
