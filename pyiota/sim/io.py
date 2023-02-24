@@ -6,9 +6,6 @@ from typing import Optional, List
 import numpy as np
 import pandas as pd
 
-#__import__('tables')  # <-- import PyTables; __import__ so that linters don't complain, used for BLOSC codecs
-import h5py
-
 
 def tbt_load(data_path: Optional[Path] = None,
              info_path: Optional[Path] = None,
@@ -28,6 +25,8 @@ def tbt_load(data_path: Optional[Path] = None,
     :param silent: No debug printing
     :return:
     """
+    # __import__('tables')  # <-- import PyTables; __import__ so that linters don't complain, used for BLOSC codecs
+    import h5py
     if not (data_path and info_path):
         storeinfo = '{}-trackall-{}-info-obs{:04d}.hdf5'.format(root_name, watchpoint, observation_number)
         storedata = '{}-trackall-{}-data-obs{:04d}.hdf5'.format(root_name, watchpoint, observation_number)

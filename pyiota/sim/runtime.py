@@ -1,10 +1,12 @@
 import subprocess
+import sys
+import traceback
 from enum import Enum
 from shutil import which
 from typing import List, Optional, Dict, Union
-from pathlib import PurePath
+from pathlib import PurePath, Path
 import pandas as pd
-
+import lzma
 
 def slurm_available():
     return which('srun') is not None
@@ -26,6 +28,31 @@ class Utilities:
         return os.environ
 
 
+class BinaryFileWrapper:
+    def __init__(self, path: Path, compression: str = 'lzma'):
+        assert path.is_file()
+        self.compression = compression
+        with open(path, 'rb') as f:
+            buffer = f.read()
+        self.uncompressed_size = len(buffer)
+        if compression == 'lzma':
+            cbuffer = lzma.compress(buffer, preset=9 | lzma.PRESET_EXTREME)
+            del buffer
+        elif compression is None:
+            cbuffer = buffer
+        else:
+            raise Exception
+        self.cbuffer = cbuffer
+        self.size = len(self.cbuffer)
+        del buffer
+
+    def unpack(self):
+        if self.compression is None:
+            return self.cbuffer
+        elif self.compression == 'lzma':
+            return lzma.decompress(self.cbuffer)
+
+
 class DaskSLURMSim(Sim):
     def __init__(self, eid: str = None, fallback: bool = True, **kwargs):
         """
@@ -42,13 +69,13 @@ class DaskSLURMSim(Sim):
                             'cores': 1,
                             # 'memory': '2GB',
                             'processes': 1,
-                            #'interface': 'ib0',
+                            # 'interface': 'ib0',
                             'shebang': '#!/usr/bin/env bash',
                             # 'queue': 'broadwl',
                             'walltime': '36:00:00',
                             # 'job-cpu': 1,
                             # 'job-mem': '2GB',
-                            #'log_directory': "~/scratch/slurm_logs",
+                            # 'log_directory': "~/scratch/slurm_logs",
                             }
             cluster_opts.update(kwargs)
             cluster = SLURMCluster(**cluster_opts)
@@ -76,7 +103,7 @@ class DaskSLURMSim(Sim):
 
     def get_environment(self):
         future = self.client.submit(Utilities.get_env)
-        result = future.result(timeout=10.0)
+        result = future.result()
         return result
 
     def submit(self, tasks: List, fnf: bool = False, limit: int = 100, no_scaling: bool = False):
@@ -355,7 +382,8 @@ def run_elegant_job(task: ElegantSimJob, dry_run: bool = True, mpi: int = 0, mpi
     else:
         from ..util.config import ELEGANT_RPN_PATH
         if ELEGANT_RPN_PATH != '':
-            os.environ['RPN_DEFNS'] = ELEGANT_RPN_PATH
+            if 'RPN_DEFNS' not in os.environ:
+                os.environ['RPN_DEFNS'] = ELEGANT_RPN_PATH
 
         if mpi is not None and mpi > 0:
             from ..util.config import ELEGANT_MPI_MODULE, ELEGANT_MPI_ARGS
@@ -419,10 +447,11 @@ def run_elegant_sdds_import(task, dry_run: bool = True):
                     tracks = []
                     for f in files:
                         try:
-                            sdds = SDDSTrack(f, fast=True, as_df=True, clear_sd=True, clear_cdata=True)
+                            sdds = SDDSTrack(f, fast=True, as_df=False, clear_sd=True, clear_cdata=False)
                             sdds.prepare_for_serialization()
-                        except Exception as e:
-                            l.error(f'>{delta():.3f} Error parsing ({f}), dumping as SDDS:')
+                        except Exception as ex:
+                            l.error(
+                                f'>{delta():.3f} Error parsing ({f}), {ex=} {traceback.format_exc()=}, dumping as SDDS:')
                             sdds = SDDS(f, fast=True)
                             l.error(f'>' + sdds.summary())
                             # raise e
@@ -462,6 +491,71 @@ def run_elegant_sdds_import(task, dry_run: bool = True):
                     sdds = SDDS(files[0], fast=False)
                     sdds.prepare_for_serialization()
                     data[ext] = sdds
+
+    task.state = STATE.ENDED_READ
+    l.info(f'{delta():.3f} Finished')
+    l.info('--------------------------')
+    return data, task
+
+
+def run_file_import(task, dry_run: bool = True):
+    from time import perf_counter
+    import datetime
+    start = perf_counter()
+
+    def delta():
+        return perf_counter() - start
+
+    import logging
+    l = logging.getLogger("distributed.worker")
+    l.info('--------------------------')
+    l.info(f'{delta():.3f} Read starting')
+    l.info(f'{delta():.3f} Local time: {datetime.datetime.now()}')
+
+    from pathlib import Path
+
+    run_folder = Path(task.run_folder)
+    l.info(f'{delta():.3f} Run folder: {run_folder}')
+
+    extensions_to_import = ['twi', 'clo', 'cen', 'fin', 'track', 'ctrack',
+                            'sdds', 'fma', 'mom', 'bun', 'twi2']
+    data = {}
+    for ext in extensions_to_import:
+        l.info(f'>{delta():.3f} Checking ({ext})')
+        files = list(run_folder.glob('*.' + ext))
+        # .sdds is not expected, so raise error
+        if ext == 'sdds' and len(files) > 0:
+            raise Exception('.sdds file found?')
+        elif ext in ['track', 'ctrack']:
+            # Track watchpoints
+            if len(files) > 0:
+                if dry_run:
+                    data[ext] = ['42']
+                else:
+                    tracks = []
+                    for f in files:
+                        try:
+                            w = BinaryFileWrapper(f)
+                            tracks.append(w)
+                        except Exception as ex:
+                            l.error(
+                                f'>{delta():.3f} Error parsing ({f}), {ex=} {traceback.format_exc()=}')
+                    data[ext] = tracks
+            else:
+                l.info(f'>{delta():.3f} Missing ({ext})')
+        else:
+            if len(files) > 1:
+                raise ValueError(f'Too many files matched - {[str(f) for f in files]}')
+            elif len(files) == 0:
+                l.info(f'>{delta():.3f} Missing ({ext})')
+                continue
+            else:
+                l.info(f'>{delta():.3f} Importing ({ext})')
+                if dry_run:
+                    data[ext] = '42'
+                else:
+                    w = BinaryFileWrapper(files[0])
+                    data[ext] = w
 
     task.state = STATE.ENDED_READ
     l.info(f'{delta():.3f} Finished')
