@@ -1,3 +1,3 @@
-from .run2 import *
-from .magnets import *
+from .run4 import *
+from .magnets_run4 import *
 from .util import *
