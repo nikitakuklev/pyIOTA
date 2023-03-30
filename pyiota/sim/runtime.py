@@ -8,6 +8,7 @@ from pathlib import PurePath, Path
 import pandas as pd
 import lzma
 
+
 def slurm_available():
     return which('srun') is not None
 
@@ -84,7 +85,9 @@ class DaskSLURMSim(Sim):
                 cluster = dask.distributed.LocalCluster()
             else:
                 raise Exception('SLURM is not available on this node*-')
-        dask.config.set({'distributed.admin.tick.interval': 1000, 'distributed.worker.profile.interval': 1000})
+        dask.config.set({'distributed.admin.tick.interval': 1000,
+                         'distributed.worker.profile.interval': 1000
+                         })
 
         # print(cluster.job_script())
         print(f'Dask cluster started at ({cluster.dashboard_link})')
@@ -173,7 +176,9 @@ class DaskClient:
         r = future.result(timeout=2)
         assert r == run_dummy_task(*args)
 
-    def submit_to_elegant(self, tasks: List, fnf: bool = False, dry_run: bool = True, mpi: int = 0, pure: bool = True):
+    def submit_to_elegant(self, tasks: List, fnf: bool = False, dry_run: bool = True, mpi: int = 0,
+                          pure: bool = True
+                          ):
         import dask.distributed
         # assert all(isinstance(t, ElegantSimJob) for t in tasks)
         # assert all(t.__class__ == ElegantSimJob.__class__ for t in tasks) # to help autoreload
@@ -250,7 +255,8 @@ class ElegantSimJob:
                  lattice_file_name: PurePath,
                  parameter_file_map: Dict[PurePath, pd.DataFrame] = None,
                  task_file_contents: str = None,
-                 lattice_file_contents: str = None):
+                 lattice_file_contents: str = None
+                 ):
         self.label = label
         assert work_folder == data_folder or data_folder is None
         assert work_folder.is_absolute()
@@ -295,6 +301,119 @@ def run_dummy_task(*args, **kwargs):
         return args[0] * args[1]
     else:
         return 42
+
+
+def run_generic_elegant_job(task: ElegantSimJob,
+                            dry_run: bool = True,
+                            mpi: int = 0,
+                            mpi_lib: str = None
+                            ):
+    """ Dask elegant worker function """
+    from time import perf_counter
+    import subprocess, os, logging, datetime
+    from pathlib import Path
+    start = perf_counter()
+
+    def delta():
+        return perf_counter() - start
+
+    l = logging.getLogger("distributed.worker")
+    l.info('--------------------------')
+    l.info(f'{delta():.3f} Elegant sim task starting')
+    l.info(f'{delta():.3f} Local time: {datetime.datetime.now()}')
+
+    task.state = STATE.PREP
+    # raise ValueError('bla')
+    assert os.name == 'posix'
+    work_folder = Path(task.work_folder)
+    task_file_name = Path(task.task_file_name)
+    run_folder = Path(task.run_folder)
+    task_file_abs_path = Path(task.task_file_abs_path)
+    lattice_file_abs_path = Path(task.lattice_file_abs_path)
+
+    l.info(f'>Label: {task.label}')
+    l.info(f'>Work folder: {work_folder}')
+    l.info(f'>Run folder: {run_folder}')
+    l.info(f'>Task file name: {task_file_name}')
+    l.info(f'>Task file path: {task_file_abs_path}')
+    l.info(f'>Task lattice path: {lattice_file_abs_path}')
+    l.info(f'>CWD: {os.getcwd()}')
+
+    assert work_folder.is_absolute()
+    assert work_folder.is_dir()
+    assert work_folder.exists()
+    if run_folder.exists():
+        if not getattr(task, 'file_exists_override', False):
+            raise Exception(f'Run folder ({run_folder}) exists')
+        else:
+            l.warning(f'>Run folder ({run_folder}) exists but overriden')
+    if task_file_abs_path.exists():
+        if not getattr(task, 'file_exists_override', False):
+            raise Exception(f'Task file ({task_file_abs_path}) exists')
+        else:
+            l.warning(f'>Task file ({task_file_abs_path}) exists but overriden')
+    if task.parameter_file_map is not None:
+        for (k, v) in task.parameter_file_map.items():
+            if not isinstance(k, PurePath):
+                raise AttributeError(
+                    f'Parameter key ({k}) is not a path but ({k.__class__.__name__})')
+            if not isinstance(v, pd.DataFrame):
+                raise AttributeError(
+                    f'Parameter file ({k}) is not a dataframe but ({v.__class__.__name__})')
+            k2 = Path(k)
+            assert not k2.exists()
+
+    l.info(f'>{delta():.3f} Writing elegant files')
+    os.chdir(work_folder)
+    if not dry_run:
+        run_folder.mkdir(exist_ok=getattr(task, 'file_exists_override', False))
+        task_file_abs_path.write_text(task.task_file_contents)
+        lattice_file_abs_path.write_text(task.lattice_file_contents)
+        if task.parameter_file_map is not None:
+            from ..elegant.io import SDDS
+            for (k, v) in task.parameter_file_map.items():
+                k2 = Path(k)
+                assert not k2.exists()
+                l.info(f'>{delta():.3f} Writing ({k2})')
+                sdds = SDDS(k2, blank=True)
+                sdds.set(v)
+                sdds.sd.mode = sdds.sd.SDDS_BINARY
+                sdds.write(k2)
+    else:
+        if task.parameter_file_map is not None:
+            from ..elegant.io import SDDS
+            for (k, v) in task.parameter_file_map.items():
+                l.info(f'>{delta():.3f} FAKE Writing ({k})')
+                sdds = SDDS(k, blank=True)
+                sdds.set(v)
+
+    task.state = STATE.STARTED
+    if dry_run:
+        l.info(f'>{delta():.3f} Calling elegant (dry run)')
+        result = subprocess.run(['echo', str(42)], capture_output=True, text=True)
+    else:
+        from ..util.config import ELEGANT_RPN_PATH
+        if ELEGANT_RPN_PATH != '':
+            if 'RPN_DEFNS' not in os.environ:
+                os.environ['RPN_DEFNS'] = ELEGANT_RPN_PATH
+
+        if mpi is not None and mpi > 0:
+            from ..util.config import ELEGANT_MPI_MODULE, ELEGANT_MPI_ARGS
+            mpi_lib = ELEGANT_MPI_MODULE
+            mpi_extra = ELEGANT_MPI_ARGS
+            assert mpi_lib is not None
+            cmd = f'module load {mpi_lib}; mpiexec -n {mpi} {mpi_extra} Pelegant {str(task_file_abs_path)}'
+            l.info(f'>{delta():.3f} Calling: {cmd}')
+            result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+        else:
+            l.info(f'>{delta():.3f} Calling: elegant ({str(task_file_abs_path)})')
+            result = subprocess.run(['elegant', str(task_file_abs_path)], capture_output=True,
+                                    text=True)
+    task.state = STATE.ENDED
+    # task.sim_result = result
+    l.info(f'{delta():.3f} Finished')
+    l.info('--------------------------')
+    return result, task
 
 
 def run_elegant_job(task: ElegantSimJob, dry_run: bool = True, mpi: int = 0, mpi_lib: str = None):
@@ -345,9 +464,11 @@ def run_elegant_job(task: ElegantSimJob, dry_run: bool = True, mpi: int = 0, mpi
     if task.parameter_file_map is not None:
         for (k, v) in task.parameter_file_map.items():
             if not isinstance(k, PurePath):
-                raise AttributeError(f'Parameter key ({k}) is not a path but ({k.__class__.__name__})')
+                raise AttributeError(
+                    f'Parameter key ({k}) is not a path but ({k.__class__.__name__})')
             if not isinstance(v, pd.DataFrame):
-                raise AttributeError(f'Parameter file ({k}) is not a dataframe but ({v.__class__.__name__})')
+                raise AttributeError(
+                    f'Parameter file ({k}) is not a dataframe but ({v.__class__.__name__})')
             k2 = Path(k)
             assert not k2.exists()
 
@@ -395,7 +516,8 @@ def run_elegant_job(task: ElegantSimJob, dry_run: bool = True, mpi: int = 0, mpi
             result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
         else:
             l.info(f'>{delta():.3f} Calling: elegant ({str(task_file_abs_path)})')
-            result = subprocess.run(['elegant', str(task_file_abs_path)], capture_output=True, text=True)
+            result = subprocess.run(['elegant', str(task_file_abs_path)], capture_output=True,
+                                    text=True)
     task.state = STATE.ENDED
     # task.sim_result = result
     l.info(f'{delta():.3f} Finished')
@@ -447,11 +569,12 @@ def run_elegant_sdds_import(task, dry_run: bool = True):
                     tracks = []
                     for f in files:
                         try:
-                            sdds = SDDSTrack(f, fast=True, as_df=False, clear_sd=True, clear_cdata=False)
+                            sdds = SDDSTrack(f, fast=True, as_df=False, clear_sd=True,
+                                             clear_cdata=False)
                             sdds.prepare_for_serialization()
                         except Exception as ex:
                             l.error(
-                                f'>{delta():.3f} Error parsing ({f}), {ex=} {traceback.format_exc()=}, dumping as SDDS:')
+                                    f'>{delta():.3f} Error parsing ({f}), {ex=} {traceback.format_exc()=}, dumping as SDDS:')
                             sdds = SDDS(f, fast=True)
                             l.error(f'>' + sdds.summary())
                             # raise e
@@ -539,7 +662,7 @@ def run_file_import(task, dry_run: bool = True):
                             tracks.append(w)
                         except Exception as ex:
                             l.error(
-                                f'>{delta():.3f} Error parsing ({f}), {ex=} {traceback.format_exc()=}')
+                                    f'>{delta():.3f} Error parsing ({f}), {ex=} {traceback.format_exc()=}')
                     data[ext] = tracks
             else:
                 l.info(f'>{delta():.3f} Missing ({ext})')
