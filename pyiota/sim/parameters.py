@@ -1,6 +1,7 @@
 __all__ = ['Generator', 'Parser']
 
 import itertools
+import pathlib
 import random
 import collections
 from pathlib import Path
@@ -29,7 +30,8 @@ class Parser:
         values = []
         for v in values_temp:
             try:
-                if ('.' in v and 'e' in v and ('+' in v or '-' in v)) or v == '+nan' or v == '-nan' or v == 'nan':
+                if ('.' in v and 'e' in v and (
+                        '+' in v or '-' in v)) or v == '+nan' or v == '-nan' or v == 'nan':
                     values.append(float(v))
                 else:
                     values.append(int(v))
@@ -64,13 +66,15 @@ class Generator:
     def _flatten_parameters(self) -> list:
         # TODO: Reimplement with proper traversal generator
         ls = []
-        [ls.append(sublist) if isinstance(sublist, str) else ls.extend(sublist) for sublist in self.parameters]
+        [ls.append(sublist) if isinstance(sublist, str) else ls.extend(sublist) for sublist in
+         self.parameters]
         return ls
 
     def add_parameter(self,
                       parameter: Union[str, Tuple[str]],
                       values: Union[Any, Iterable[Any]],
-                      override: bool = False):
+                      override: bool = False
+                      ):
         """
         Add a parameter to list. Acceptable syntax:
             'param',value or list of values
@@ -84,7 +88,8 @@ class Generator:
         assert not self.name_links
         if not override: assert parameter not in self.parameters
         is_single_param = isinstance(parameter, str)
-        is_multiple_param = (isinstance(parameter, tuple) and all((isinstance(ps, str) for ps in parameter)))
+        is_multiple_param = (
+                isinstance(parameter, tuple) and all((isinstance(ps, str) for ps in parameter)))
         is_value_list = isinstance(values, (collections.Sequence, np.ndarray, tuple))
         assert is_single_param or is_multiple_param
         if is_multiple_param:
@@ -123,7 +128,8 @@ class Generator:
     def generate_sets(self,
                       downsample_to: int = None,
                       generate_labels: bool = True,
-                      ignore_path_limit: bool = False) -> pd.DataFrame:
+                      ignore_path_limit: bool = False
+                      ) -> pd.DataFrame:
         """
         Use all current parameters to generate permutations, and output resulting set as DataFrame.
         :param generate_labels:
@@ -134,7 +140,8 @@ class Generator:
         values = list(self.parameters.values())
         permutations = list(itertools.product(*values))
 
-        print(f'Generated {len(permutations)} permutations of {len(keys)} parameters ({self._flatten_parameters()})')
+        print(
+                f'Generated {len(permutations)} permutations of {len(keys)} parameters ({self._flatten_parameters()})')
         if downsample_to:
             permutations = random.sample(permutations, downsample_to)
             print(f'Downsampled to: {len(permutations)}')
@@ -181,3 +188,34 @@ class Generator:
             for (k, v) in label_strings.items():
                 df[k] = v
         return df
+
+
+class Dataset:
+    def __init__(self, df: pd.DataFrame):
+        self.df = df
+        self.n_steps = len(df)
+        if 'completed' not in df.columns:
+            df['completed'] = False
+        if 'failed' not in df.columns:
+            df['failed'] = False
+
+    def to_file(self, f):
+        f = pathlib.Path(f)
+        self.df.to_json(f)
+
+    @staticmethod
+    def from_file(f):
+        f = pathlib.Path(f)
+        return Dataset(pd.read_json(f))
+
+    def get_step(self, idx: int):
+        return self.df.loc[idx, :].to_dict()
+
+    def mark_complete(self, idx: int):
+        self.df.loc[idx, 'completed'] = True
+
+    def mark_incomplete(self, idx: int):
+        self.df.loc[idx, 'completed'] = False
+
+    def mark_failed(self, idx: int):
+        self.df.loc[idx, 'failed'] = True
