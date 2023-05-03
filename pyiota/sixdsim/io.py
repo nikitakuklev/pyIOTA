@@ -4,17 +4,20 @@ import functools
 import itertools
 import logging
 import operator
-import time
+import random
 import re
+import time
+import uuid
 from pathlib import Path
+from re import Pattern
 from typing import Callable, Dict
 
 import numpy as np
+from ocelot import Cavity, Drift, Edge, Hcor, Monitor, Multipole, Quadrupole, SBend, Sextupole, \
+    Solenoid, Vcor
 
-from ocelot import Monitor, Vcor, Hcor, Solenoid, SBend, Cavity, Edge, \
-    Quadrupole, Drift, Element, Sextupole, Multipole
-from ..acnet.frontends import DoubleDevice, DoubleDeviceSet
-from ..iota import run2 as iota, magnets as iotamags
+from ..acnet import DoubleDevice, DoubleDeviceSet
+from ..acnet.drf2 import DRF_PROPERTY
 
 logger = logging.getLogger(__name__)
 
@@ -22,17 +25,15 @@ logger = logging.getLogger(__name__)
 # Static methods to parse files from 6Dsim format
 
 @functools.lru_cache(maxsize=None)
-def __get_pattern(k):
+def __get_pattern(k) -> Pattern:
     ke = re.escape(k)
     pattern = r'([()\s=\-+*/])' + f'({ke})' + r'([\s()=\-+*/])'
     return re.compile(pattern)
 
 
-def __replace_vars(assign: str, variables: Dict) -> str:
+def __replace_vars(assign: str, variables: dict) -> str:
     """
     Replaces all variables with their stored values, adding brackets to maintain eval order.
-    :param assign:
-    :param variables:
     :return: Processed string
     """
     assign = ' ' + assign + ' '
@@ -56,25 +57,45 @@ def __replace_vars(assign: str, variables: Dict) -> str:
     return assign
 
 
-def __resolve_vars(assign: str, variables: Dict, recursion_limit: int = 100) -> str:
+def __resolve_vars(assign: str,
+                   variables_dicts: list[dict],
+                   recursion_limit: int = 50
+                   ) -> str:
     """
     Recursively resolves variables and replaces with values, until none are left
-    :param assign:
-    :param variables:
-    :return:
     """
     i = 0
     # print(f'Resolve start: {assign}')
-    while '$' in assign:
-        assign = __replace_vars(assign, variables)
-        # print(f'Resolve iteration {i}: {assign}')
-        i += 1
-        if i > recursion_limit:
-            raise Exception(f'Unable to resolve line {assign} fully against definitions {variables}')
-    return assign
+    # while '$' in assign or
+    # Only true is have letters...EEEEEEE
+    # while assign != assign.swapcase():
+    result = None
+    bad = False
+    while '$' in assign:  # while True:
+        try:
+            for vd in variables_dicts:
+                assign = __replace_vars(assign, vd)
+            # logger.debug(f'Resolve iteration {i}: {assign}')
+            i += 1
+
+            sqrt = np.sqrt
+            tan = Tan = np.tan
+            sin = Sin = np.sin
+            cos = Cos = np.cos
+            result = eval(assign)
+            break
+        except Exception:
+            if i > recursion_limit:
+                bad = True
+                break
+    if bad:
+        raise Exception(f'Unable to resolve line {assign} against {variables_dicts}')
+    return assign  # , result
 
 
-def __parse_id_line(line: str, output_dict: Dict, resolve_against: Dict, verbose: bool = False) -> None:
+def __parse_id_line(line: str, output_dict: Dict,
+                    resolve_against: Dict, verbose: bool = False
+                    ) -> None:
     """
     Parse single element definition line. WARNING - this uses eval(), and is VERY VERY UNSAFE.
     :param line: Line to parse
@@ -94,29 +115,34 @@ def __parse_id_line(line: str, output_dict: Dict, resolve_against: Dict, verbose
         pars = splits[2:]
         if not len(pars) % 2 == 0:
             raise Exception(f'Number of parameters {pars} is not even (i.e. paired)')
-        if verbose: print(f'Parsing parameters ({pars})')
+        if verbose: logger.debug(f'Parsing parameters ({pars})')
         for (k, v) in zip(pars[::2], pars[1::2]):
-            if verbose: print(f'Property ({k}) is ({v})')
+            if verbose:
+                logger.debug(f'Property ({k}) is ({v})')
             try:
-                vr = eval(__resolve_vars(v, resolve_against))
+                resolved = __resolve_vars(v, [resolve_against])
+                vr = eval(resolved)
             except Exception as e:
                 # if verbose: print(f'Failed to evaluate, using as string ({k})-({v}) : {e})')
                 vr = v
-            if verbose: print(f'Property ({k}) resolves to ({vr})')
+            if verbose: logger.debug(f'Property ({k}) resolves to ({vr})')
             pars_dict[k] = vr
     if verbose: print(f'Element ({name}) resolved to ({element})({pars_dict})')
     output_dict[name] = (element, pars_dict)
 
 
-def parse_lattice(fpath: Path, verbose: bool = False, verbose_vars: bool = False,
-                  merge_dipole_edges: bool = True, dipole_merge_method: int = 2,
-                  allow_edgeless_dipoles=False, unsafe: bool = False):
+def parse_lattice(fpath: Path,
+                  verbose: bool = False,
+                  verbose_vars: bool = False,
+                  merge_dipole_edges: bool = True,
+                  dipole_merge_method: int = 2,
+                  allow_edgeless_dipoles=False,
+                  unsafe: bool = False
+                  ):
     """
     Parses 6Dsim lattice into native OCELOT object, preserving all compatible elements. All variables
     are resolved to their final numeric values, and evaluated - this is an UNSAFE operation for unstrusted
     input, so make sure your lattice files are not corrupted.
-    :param fpath: Full file path to parse
-    :param verbose:
     :return: lattice_ocelot, correctors_ocelot, monitors_ocelot, info_dict, var_dict - latter 2 are dicts
     of parsing information and of all present KnobVariables
     """
@@ -125,8 +151,13 @@ def parse_lattice(fpath: Path, verbose: bool = False, verbose_vars: bool = False
     correctors_ocelot = []
     monitors_ocelot = []
     # internal vars
-    keywords = {'INFO:': 1, 'ELEMENTS:': 2, 'CORRECTORS:': 3, 'MONITORS:': 4, 'LATTICE:': 5, 'END': 6}
+    keywords = {'INFO:': 1, 'ELEMENTS:': 2, 'CORRECTORS:': 3, 'MONITORS:': 4, 'LATTICE:': 5,
+                'END': 6
+                }
     variables = {'$PI': str(np.pi)}
+    variables_2 = {}
+    specials = ['$PI']
+    specials_2 = ['PI']
     lattice_vars = {}
     elements = {}
     correctors = {}
@@ -136,7 +167,7 @@ def parse_lattice(fpath: Path, verbose: bool = False, verbose_vars: bool = False
     pc = None
     N = None
 
-    with open(str(fpath), 'r') as f:
+    with open(fpath, 'r') as f:
         lines = f.readlines()
         lcnt = 0
         for line in lines:
@@ -169,7 +200,7 @@ def parse_lattice(fpath: Path, verbose: bool = False, verbose_vars: bool = False
                     var = var.strip()
                     assign = assign.strip()
                     # print('Analyzing line: {}'.format(line))
-                    assign = __resolve_vars(assign, variables)
+                    assign = __resolve_vars(assign, [variables])
                     # variables[var] = assign
                     # print('Variable ({}) resolved to ({})'.format(var, assign))
                     # print(variables)
@@ -180,13 +211,20 @@ def parse_lattice(fpath: Path, verbose: bool = False, verbose_vars: bool = False
                     cos = Cos = np.cos
                     try:
                         value = eval(assign)
+                        if var not in specials:
+                            assert var not in variables, f'{var} already in {variables}'
                         variables[var] = value
+                        vs = var.strip('$')
+                        if vs not in specials_2:
+                            assert vs not in variables_2, f'{vs} already in {variables_2}'
+                        variables_2[var.strip('$')] = value
                     except Exception as e:
-                        print(f'Failed parse on line #{lcnt}')
+                        print(f'Failed on line #{lcnt}: {line}')
                         print(variables)
+                        print(variables_2)
                         print(assign)
                         raise e
-                    if verbose_vars: print(f'Variable ({var}) evaluated to ({value})')
+                    if verbose_vars: logger.debug(f'Variable ({var}) evaluated to ({value})')
                     lattice_vars[var.strip('$')] = value
                     continue
             elif mode == keywords['ELEMENTS:']:
@@ -212,12 +250,14 @@ def parse_lattice(fpath: Path, verbose: bool = False, verbose_vars: bool = False
     for el, (eltype, props) in correctors.items():
         relative_to = props.get('El', None)
         if relative_to is None or relative_to not in elements:
-            raise Exception(f'Relative position of {el} does not have referenced element {relative_to}')
+            raise Exception(
+                    f'Relative position of {el} does not have referenced element {relative_to}')
     for el, (eltype, props) in monitors.items():
         assert eltype == 'BPM'
         relative_to = props.get('El', None)
         if relative_to is None or relative_to not in elements:
-            raise Exception(f'Relative position of {el} does not have referenced element {relative_to}')
+            raise Exception(
+                    f'Relative position of {el} does not have referenced element {relative_to}')
     assert len(set(elements)) == len(elements)
     assert len(set(correctors)) == len(correctors)
     assert len(set(monitors)) == len(monitors)
@@ -229,7 +269,8 @@ def parse_lattice(fpath: Path, verbose: bool = False, verbose_vars: bool = False
                'Gap': Drift, 'BPM': Monitor, 'YCorrector': Vcor, 'XCorrector': Hcor,
                'ElementShiftCorrector': None,
                'OrbitShiftCorrector': None,
-               'RFCorrector': 'RF'}
+               'RFCorrector': 'RF'
+               }
     field_to_gradient_factor = (pc / 1000 / 0.299792458) / 10.0  # kG*m
     magnetic_rigidity_Tm = (pc / 1000.0 / 0.299792458)
     magnetic_rigidity_kGcm = magnetic_rigidity_Tm * 100 * 10
@@ -237,7 +278,7 @@ def parse_lattice(fpath: Path, verbose: bool = False, verbose_vars: bool = False
     def gradient_scale(g):
         return g / field_to_gradient_factor
 
-    def length_scale(l):
+    def length_scale(l: float):
         return l / 100.0
 
     shared_parameter_map = {'L': ('l', length_scale)}  # apply function to these variables
@@ -265,11 +306,13 @@ def parse_lattice(fpath: Path, verbose: bool = False, verbose_vars: bool = False
                     k1 = props['G'] / field_to_gradient_factor
                 else:
                     k1 = 0.0
-
+                fint = props.get('fringeK', 0.0)
                 rho = (magnetic_rigidity_kGcm / props['Hy']) / 100.0
-                #oel = SBend(angle=props['L'] / ((pc / 0.299792458) / props['Hy']),
+                # oel = SBend(angle=props['L'] / ((pc / 0.299792458) / props['Hy']),
                 oel = SBend(angle=props['L'] / 100.0 / rho,
+                            fint=fint,
                             **shared_kwargs)
+
                 oel.k1 = k1
                 oel.h = 1 / rho
                 oel.Hy = props['Hy']
@@ -282,12 +325,12 @@ def parse_lattice(fpath: Path, verbose: bool = False, verbose_vars: bool = False
                 assert 'Hy' in props
                 # H = angle/length = 1/rho -> angle = length * H  = length / rho
                 rho = (magnetic_rigidity_kGcm / props['Hy']) / 100
-                e = props.get('inA',0.0) * np.pi / 180
-                gap = props.get('poleGap', 0.0) / 100 # full gap, not half
+                e = props.get('inA', 0.0) * np.pi / 180
+                gap = props.get('poleGap', 0.0) / 100  # full gap, not half
                 fint = props.get('fringeK', 0.0)
                 if 'poleGap' not in props or e != 0.0:
                     assert unsafe
-                    #logger.warning(f'Weird edge {item} - {props}, ignoring inv. curvature')
+                    # logger.warning(f'Weird edge {item} - {props}, ignoring inv. curvature')
                 oel = Edge(**shared_kwargs, gap=gap, fint=fint, edge=e)
                 oel.h = 1 / rho
                 oel.Hy = props['Hy']
@@ -304,14 +347,15 @@ def parse_lattice(fpath: Path, verbose: bool = False, verbose_vars: bool = False
             elif type_mapped == Multipole:
                 if 'M2N' in props and len(props) <= 3:
                     # Sextupole (length and M2N props)
-                    oel = Sextupole(k2=float(props['M2N']) / field_to_gradient_factor, **shared_kwargs)
+                    oel = Sextupole(k2=float(props['M2N']) / field_to_gradient_factor,
+                                    **shared_kwargs)
                 else:
                     if unsafe:
                         logger.warning(f'Missing multipole strengths, using drift ({item}|{props})')
                         oel = Drift(**shared_kwargs)
                     else:
                         raise Exception(
-                            f"Multipole that is not a sextupole detected ({item}|{el_type}|{type_mapped}|{props})")
+                                f"Multipole that is not a sextupole detected ({item}|{el_type}|{type_mapped}|{props})")
             elif type_mapped == Solenoid:
                 oel = Drift(**shared_kwargs)
             elif type_mapped == Cavity:
@@ -319,7 +363,8 @@ def parse_lattice(fpath: Path, verbose: bool = False, verbose_vars: bool = False
                              freq=props['F'],
                              **shared_kwargs)
             else:
-                raise Exception(f'Empty ocelot object produced converting ({item}|{el_type}|{type_mapped}|{props})')
+                raise Exception(
+                        f'Empty ocelot object produced converting ({item}|{el_type}|{type_mapped}|{props})')
             lattice_list.append(oel)
         except Exception as e:
             print('Element conversion failed!')
@@ -342,11 +387,13 @@ def parse_lattice(fpath: Path, verbose: bool = False, verbose_vars: bool = False
                 if not isinstance(e1, Edge) or not isinstance(e2, Edge):
                     if allow_edgeless_dipoles:
                         if k not in edge_warn_exclusions:
-                            logger.warning(f'Found sector bend {k} without edge elements (e1={e1.id}, e2={e2.id})')
+                            logger.warning(
+                                    f'Found sector bend {k} without edge elements (e1={e1.id}, e2={e2.id})')
                             edge_warn_exclusions.append(k)
                         continue
                     else:
-                        raise Exception(f'Found sector bend {k} without edge elements - this is not allowed')
+                        raise Exception(
+                                f'Found sector bend {k} without edge elements - this is not allowed')
                 assert e1.gap == e2.gap
                 assert e1.fint == e2.fint
                 v.fint = e1.fint
@@ -372,7 +419,8 @@ def parse_lattice(fpath: Path, verbose: bool = False, verbose_vars: bool = False
 
                 if (v.e1 is not None and v.e1 != 0.0) or (v.e2 is not None and v.e2 != 0.0):
                     assert v.e1 is not None and v.e2 is not None
-                    logger.warning(f'Found bend {k} with nonzero angles {v.e1=} {v.e2=}, adding extra edges')
+                    logger.warning(
+                            f'Found bend {k} with nonzero angles {v.e1=} {v.e2=}, adding extra edges')
                     e1l = Edge(eid=v.id + '_1')
                     e2l = Edge(eid=v.id + '_2')
                     assert v.l != 0.0
@@ -387,11 +435,13 @@ def parse_lattice(fpath: Path, verbose: bool = False, verbose_vars: bool = False
                     assert not isinstance(e1, Edge) and not isinstance(e2, Edge)
                     if allow_edgeless_dipoles:
                         if k not in edge_warn_exclusions:
-                            logger.warning(f'Found bend {k} without edge elements (e1={e1.id}, e2={e2.id})')
+                            logger.warning(
+                                    f'Found bend {k} without edge elements (e1={e1.id}, e2={e2.id})')
                             edge_warn_exclusions.append(k)
                         continue
                     else:
-                        raise Exception(f'Found bend {k} without edge elements - this is not allowed')
+                        raise Exception(
+                                f'Found bend {k} without edge elements - this is not allowed')
 
                 v.fint = e1.fint
                 v.fintx = e2.fint
@@ -408,7 +458,8 @@ def parse_lattice(fpath: Path, verbose: bool = False, verbose_vars: bool = False
                         e.h = h
                     else:
                         if not np.isclose(eh, h, atol=1e-10, rtol=0.0):
-                            raise Exception(f'Curvature mismatch for edge ({e.id}|{e.h=}) and bend ({v.id}|{h=})')
+                            raise Exception(
+                                    f'Curvature mismatch for edge ({e.id}|{e.h=}) and bend ({v.id}|{h=})')
 
                 e1.angle = e2.angle = v.angle
                 if v.angle < 0:
@@ -419,7 +470,9 @@ def parse_lattice(fpath: Path, verbose: bool = False, verbose_vars: bool = False
                 assert e1.dy == e2.dy == v.dy
                 assert e1.tilt == e2.tilt == v.tilt
                 assert e1.dtilt == e2.dtilt == v.dtilt
-                assert e1.k1 == e2.k1 == v.k1
+                assert e1.k1 == e2.k1
+                if e1.k1 != v.k1:
+                    logger.warning(f'k1 mismatch in {k}: {e1.k1=} vs {v.k1=}')
                 assert e1.l == e2.l == 0.0
 
                 assert e1.h_pole == v.h_pole1
@@ -459,7 +512,8 @@ def parse_lattice(fpath: Path, verbose: bool = False, verbose_vars: bool = False
         elif type_mapped == Hcor:
             oel = Hcor(**shared_kwargs)
         else:
-            raise Exception(f'Empty ocelot object produced converting ({item}|{el_type}|{type_mapped}|{props})')
+            raise Exception(
+                    f'Empty ocelot object produced converting ({item}|{el_type}|{type_mapped}|{props})')
         oel.end_turn = props['endTurn'] if 'endTurn' in props else None
         oel.ref_el = refs[0]
         correctors_ocelot.append(oel)
@@ -487,7 +541,7 @@ def parse_lattice(fpath: Path, verbose: bool = False, verbose_vars: bool = False
         monitors_ocelot.append(oel)
 
     logger.info(
-        f'Parsed {len(lattice_ocelot)} objects, {len(correctors_ocelot)} correctors, {len(monitors_ocelot)} monitors')
+            f'Parsed {len(lattice_ocelot)} objects, {len(correctors_ocelot)} correctors, {len(monitors_ocelot)} monitors')
     # print(f'Parsed OK - {len(lattice_ocelot)} objects, '
     #      f'{len(correctors_ocelot)} correctors, {len(monitors_ocelot)} monitors')
 
@@ -496,7 +550,7 @@ def parse_lattice(fpath: Path, verbose: bool = False, verbose_vars: bool = False
     return lattice_ocelot, correctors_ocelot, monitors_ocelot, info_dict, var_dict
 
 
-def parse_knobs(fpath: Path, verbose: bool = False) -> Dict:
+def parse_knobs(fpath: Path, verbose: bool = False, randomize: bool = True) -> Dict:
     """
     Parses knob files in 6DSim format. All values are assumed absolute unless explicitly specified.
     :param fpath: Full knob file path
@@ -546,8 +600,12 @@ def parse_knobs(fpath: Path, verbose: bool = False) -> Dict:
                     knobvar = KnobVariable(kind=kspl[0], var=kspl[1], value=float(kspl[2]))
                     knobvars.append(knobvar)
                 knobs.append(knob)
+                if randomize:
+                    random.seed(42)
+                    random.shuffle(knobvars)
                 knob.vars = {k.var: k for k in knobvars}
-                if verbose: print(f'Parsed knob {name} - {len(knob.vars)} devices')
+                if verbose:
+                    print(f'Parsed knob {name} - {len(knob.vars)} devices')
             else:
                 line_num += 1
     return {k.name: k for k in knobs}
@@ -584,7 +642,7 @@ class AbstractKnob:
     """
 
     def __init__(self, name: str):
-        self.name = name
+        self.name = name or uuid.uuid4().hex[:10]
         self.verbose = False
 
 
@@ -593,7 +651,7 @@ class Knob(AbstractKnob):
     Experimental, ACNET-based implementation of a knob
     """
 
-    def __init__(self, name: str, variables: dict = None):
+    def __init__(self, name: str = None, variables: dict = None):
         self.vars = variables or {}
         self.absolute = True
         super().__init__(name)
@@ -601,17 +659,29 @@ class Knob(AbstractKnob):
     def make_absolute(self):
         raise Exception("Not implemented yet")
         assert not self.absolute
-        ds = DoubleDeviceSet(name=self.name, members=[DoubleDevice(d.acnet_var) for d in self.vars.values()])
-        ds.readonce()
+        ds = DoubleDeviceSet(name=self.name,
+                             members=[DoubleDevice(d.acnet_var) for d in self.vars.values()])
+        ds.read()
         for k, v in ds.devices:
             pass
         return self
+
+    def shuffle(self, seed:int = 42):
+        random.seed(seed)
+        keys = list(self.vars.keys())
+        random.shuffle(keys)
+        self.vars = {k:self.vars[k] for k in keys}
 
     def get_dict(self, as_devices=False):
         if as_devices:
             return {v.acnet_var: v.value for v in self.vars.values()}
         else:
             return {v.var: v.value for v in self.vars.values()}
+
+    @staticmethod
+    def from_dict(x: dict):
+        variables = {k: KnobVariable(kind='$', var=k, acnet_var=k, value=v) for k, v in x.items()}
+        return Knob(variables=variables)
 
     def only_keep_shared(self, other: 'Knob'):
         self.vars = {k: v for (k, v) in self.vars.items() if k in other.vars}
@@ -628,7 +698,7 @@ class Knob(AbstractKnob):
 
     def copy(self, new_vars: dict = None):
         """
-        Make a deep copy of knob, optionally with new knobvaribles
+        Make a deep copy of knob, optionally with new knobvariables
         :param new_vars:
         :return:
         """
@@ -641,13 +711,20 @@ class Knob(AbstractKnob):
         knob.verbose = self.verbose
         return knob
 
-    def read_current_state(self, settings: bool = True, verbose: bool = False):
+    def read_current_state(self, settings: bool = True, verbose: bool = False,
+                           split: bool = False
+                           ):
         if verbose or self.verbose:
             verbose = True
-        if verbose: print(f'Reading in knob {self.name} current values')
+        if verbose:
+            print(f'Reading in knob {self.name} current values')
+        devices = [DoubleDevice(d.acnet_var) for d in self.vars.values()]
+        if settings:
+            for d in devices:
+                d.drf2.property = DRF_PROPERTY.SETTING
         ds = DoubleDeviceSet(name=self.name,
-                             members=[DoubleDevice(d.acnet_var) for d in self.vars.values()])
-        ds.readonce(settings=settings, verbose=verbose)
+                             members=devices)
+        ds.read(verbose=verbose, split=split)
         tempdict = {k.acnet_var: k for k in self.vars.values()}
         for k, v in ds.devices.items():
             tempdict[k].value = v.value
@@ -665,31 +742,39 @@ class Knob(AbstractKnob):
     def is_empty(self):
         return len(self.vars) == 0
 
-    def set(self, verbose: bool = False, split_types: bool = False, split: bool = True,
-            calculate_physical_currents: bool = False):
+    def set(self, verbose: bool = False, split_types: bool = False,
+            split: bool = True,
+            calculate_physical_currents: bool = False
+            ):
         """
         Sets the current knob value in actual machine
         :param verbose:
         :param split_types: Whether to split settings by device type
-        :param split:
-        :param calculate_physical_currents:
+        :param split: Whether to ask device sets to split settings
+        :param calculate_physical_currents: Request to convert skew quads/correctors to coils
+        current
         :return:
         """
+        from ..iota import run4 as iota, magnets_run4 as iotamags
         if verbose or self.verbose:
             verbose = True
         if not self.absolute:
             raise Exception('Attempt to set relative knob')
-        if verbose: print(f'Setting knob {self.name}')
+        if verbose:
+            print(f'Setting knob {self.name}')
 
         if split_types:
-            skews = [(DoubleDevice(d.acnet_var), d.value) for d in self.vars.values() if d.acnet_var in
-                     iota.SKEWQUADS.ALL_CURRENTS]
-            corrV = [(DoubleDevice(d.acnet_var), d.value) for d in self.vars.values() if d.acnet_var in
+            skews = [(DoubleDevice(d.acnet_var), d.value) for d in self.vars.values() if
+                     d.acnet_var in
+                     iota.SKEWQUADS.ALL_I]
+            corrV = [(DoubleDevice(d.acnet_var), d.value) for d in self.vars.values() if
+                     d.acnet_var in
                      iota.CORRECTORS.VIRTUAL_V]
-            corrH = [(DoubleDevice(d.acnet_var), d.value) for d in self.vars.values() if d.acnet_var in
+            corrH = [(DoubleDevice(d.acnet_var), d.value) for d in self.vars.values() if
+                     d.acnet_var in
                      iota.CORRECTORS.VIRTUAL_H]
             other = [(DoubleDevice(d.acnet_var), d.value) for d in self.vars.values()
-                     if d.acnet_var not in iota.SKEWQUADS.ALL_CURRENTS
+                     if d.acnet_var not in iota.SKEWQUADS.ALL_I
                      and d.acnet_var not in iota.CORRECTORS.COMBINED_VIRTUAL]
             # random.shuffle(dlist3)
 
@@ -731,7 +816,7 @@ class Knob(AbstractKnob):
                          d.acnet_var in iota.CORRECTORS.COMBINED_COILS_I]
                 devs2 = []
                 devs3 = [d.acnet_var for d in self.vars.values() if
-                         d.acnet_var in iota.SKEWQUADS.ALL_CURRENTS]
+                         d.acnet_var in iota.SKEWQUADS.ALL_I]
                 dev_temp = devs1 + devs2 + devs3
                 devs4 = [d.acnet_var for d in self.vars.values() if d.acnet_var not in dev_temp]
                 devs = devs1 + devs2 + devs3 + devs4
@@ -741,7 +826,7 @@ class Knob(AbstractKnob):
             else:
                 devs_h = iota.CORRECTORS.VIRTUAL_H
                 devs_v = iota.CORRECTORS.VIRTUAL_V
-                devs_s = iota.SKEWQUADS.ALL_CURRENTS
+                devs_s = iota.SKEWQUADS.ALL_I
                 coils = iota.CORRECTORS.COMBINED_COILS_I
 
                 def grouper(n, iterable):
@@ -766,11 +851,12 @@ class Knob(AbstractKnob):
                         if skew: del devs_to_set[s]
                         for i, c in enumerate(cg):
                             devs_to_set[c] = currents[i]
-                        print(f'Recomputed virtual knobs ({hor}-{ver}-{skew}) into physical ({cg}-{currents})')
+                        print(
+                                f'Recomputed virtual knobs ({hor}-{ver}-{skew}) into physical ({cg}-{currents})')
                 ds = DoubleDeviceSet(name=self.name, members=list(devs_to_set.keys()))
                 ds.set([d.value for d in devs_to_set.values()], verbose=verbose, split=split)
 
-    def convert_to_physical_devices(self, copy: bool = True):
+    def convert_to_physical_devices(self, copy: bool = True, silent: bool = True):
         """
         Converts any virtual ACNET devices into physical devices. This is so far only used for combined
         function magnets to go from (H,V,Skew) -> (4 currents), which makes settings faster and reduces
@@ -778,9 +864,10 @@ class Knob(AbstractKnob):
         :param copy: Whether to return a copy of the knob
         :return:
         """
+        from ..iota import run4 as iota, magnets_run4 as iotamags
         devs_h = iota.CORRECTORS.VIRTUAL_H
         devs_v = iota.CORRECTORS.VIRTUAL_V
-        devs_s = iota.SKEWQUADS.ALL_CURRENTS
+        devs_s = iota.SKEWQUADS.ALL_I
         coils = iota.CORRECTORS.COMBINED_COILS_I
 
         # initial_len = len(self.vars)
@@ -807,7 +894,9 @@ class Knob(AbstractKnob):
                 if skew: del devs_to_set[s]
                 for i, c in enumerate(cg):
                     devs_to_set[c] = KnobVariable(kind='$', var=c, value=currents[i])
-                print(f'Virtual knobs ({hor}|{ver}|{skew}) -> physical ({[devs_to_set[c] for c in cg]})')
+                if not silent:
+                    print(
+                            f'Virtual knobs ({hor}|{ver}|{skew}) -> physical ({[devs_to_set[c] for c in cg]})')
         if copy:
             knob = self.copy()
             knob.vars = devs_to_set
@@ -819,7 +908,8 @@ class Knob(AbstractKnob):
     def __len__(self):
         return len(self.vars)
 
-    def __math(self, other, operation: Callable, opcode: str = ' ', keep_unique_values: bool = True):
+    def __math(self, other, operation: Callable, opcode: str = ' ', keep_unique_values: bool = True
+               ):
         """
         General math operation method, that takes care of relative/absolute knob complexities
         :param other:
@@ -844,8 +934,10 @@ class Knob(AbstractKnob):
                             new_vars[k].value = operation(new_vars[k].value, v.value)
                         else:
                             new_vars[k] = v.copy()
-                if (not other.absolute and not set2.issubset(set1)) or (not self.absolute and not set1.issubset(set2)):
-                    raise Exception("Cannot keep unique relative variables when other knob is absolute")
+                if (not other.absolute and not set2.issubset(set1)) or (
+                        not self.absolute and not set1.issubset(set2)):
+                    raise Exception(
+                            "Cannot keep unique relative variables when other knob is absolute")
             else:
                 keyset = set1.intersection(set2)
                 setvars = {k: self.vars[k] for k in keyset}
@@ -864,12 +956,14 @@ class Knob(AbstractKnob):
 
     def __sub__(self, other):
         assert isinstance(other, Knob)
-        if self.verbose: print(f'Subtracting ({other.name}) from ({self.name}) | ({len(self.vars)} values)')
+        if self.verbose: print(
+                f'Subtracting ({other.name}) from ({self.name}) | ({len(self.vars)} values)')
         return self.__math(other, operator.sub, '-')
 
     def __add__(self, other):
         assert isinstance(other, Knob)
-        if self.verbose: print(f'Adding ({other.name}) to ({self.name}) | ({len(self.vars)} values)')
+        if self.verbose: print(
+                f'Adding ({other.name}) to ({self.name}) | ({len(self.vars)} values)')
         return self.__math(other, operator.add, '+')
 
     def __truediv__(self, other):
@@ -883,8 +977,8 @@ class Knob(AbstractKnob):
         return self.__math(other, operator.mul, '*')
 
     def __str__(self):
-
-        return f'Knob(A:{self.absolute}) ({self.name}) at {hex(id(self))}: ({len(self.vars)}) devices'
+        return f'Knob(Abs:{self.absolute}) ({self.name}) at {hex(id(self))}: ({len(self.vars)}) ' \
+               f'devices'
 
     def __repr__(self):
         return self.__str__()
