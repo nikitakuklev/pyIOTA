@@ -7,8 +7,8 @@ from typing import Union, Tuple, List, Dict
 
 import numpy as np, scipy as sc
 # import numba
-from numba import jit
-import numexpr as ne
+#from numba import jit
+#
 import scipy.integrate as sci
 import scipy.signal
 from scipy.optimize import minimize, minimize_scalar
@@ -33,32 +33,40 @@ def _get_integral_v11(ztabs, twin, i_line, coeffs, FR, turns, order):
     return RMD, A, B
 
 
-@jit(nopython=True, fastmath=True, nogil=True)
-def _get_integral_v14(signal, window, i_line, coeffs, tune, turns, order):
-    """
-    NUMBA
-    Dumb inner product integrator (fastest, not as accurate)
-    """
-    i_line = np.arange(0, len(signal))
-    integral = np.sum(signal * window * np.exp(-1.0j * 2 * np.pi * tune * i_line))
-    A = np.real(integral)
-    B = np.imag(integral)
-    RMD = np.abs(integral)
-    return RMD, A, B
+def _get_integral_v14_wrap():
+    from numba import jit
+
+    @jit(nopython=True, fastmath=True, nogil=True)
+    def _get_integral_v14(signal, window, i_line, coeffs, tune, turns, order):
+        """
+        NUMBA
+        Dumb inner product integrator (fastest, not as accurate)
+        """
+        i_line = np.arange(0, len(signal))
+        integral = np.sum(signal * window * np.exp(-1.0j * 2 * np.pi * tune * i_line))
+        A = np.real(integral)
+        B = np.imag(integral)
+        RMD = np.abs(integral)
+        return RMD, A, B
+    return _get_integral_v14
 
 
-def _get_integral_v15(signal, window, i_line, coeffs, tune, turns, order):
-    """
-    NUMEXPR
-    Dumb inner product integrator (fastest, not as accurate)
-    """
-    i_line = np.arange(0, len(signal))
-    pi = np.pi
-    integral = ne.evaluate("sum(signal * window * exp(-1.0j * 2 * pi * tune * i_line))")
-    A = np.real(integral)
-    B = np.imag(integral)
-    RMD = np.abs(integral)
-    return RMD, A, B
+def _get_integral_v15_wrap():
+    import numexpr as ne
+
+    def _get_integral_v15(signal, window, i_line, coeffs, tune, turns, order):
+        """
+        NUMEXPR
+        Dumb inner product integrator (fastest, not as accurate)
+        """
+        i_line = np.arange(0, len(signal))
+        pi = np.pi
+        integral = ne.evaluate("sum(signal * window * exp(-1.0j * 2 * pi * tune * i_line))")
+        A = np.real(integral)
+        B = np.imag(integral)
+        RMD = np.abs(integral)
+        return RMD, A, B
+    return _get_integral_v15
 
 
 class NAFF:
@@ -634,11 +642,13 @@ class NAFF:
                                                   self.coeffs_cache[integrator_order - 1],
                                                   f, turns_naff, integrator_order))
             elif method == 14:
-                integral.append(_get_integral_v14(data, TWIN, i_line,
+                fun = _get_integral_v14_wrap()
+                integral.append(fun(data, TWIN, i_line,
                                                   self.coeffs_cache[integrator_order - 1],
                                                   f, turns_naff, integrator_order))
             elif method == 15:
-                integral.append(_get_integral_v15(data, TWIN, i_line,
+                fun = _get_integral_v15_wrap()
+                integral.append(fun(data, TWIN, i_line,
                                                   self.coeffs_cache[integrator_order - 1],
                                                   f, turns_naff, integrator_order))
             # elif method == 3:
