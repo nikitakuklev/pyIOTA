@@ -4,6 +4,7 @@ __all__ = ['LatticeContainer', 'NLLens', 'HKPoly', 'IBScatter', 'HKPoly', 'ILMat
            'Recirculator']
 
 import logging
+from copy import deepcopy
 
 import numpy as np
 
@@ -133,6 +134,10 @@ class LatticeContainer:
     @property
     def quadrupoles(self):
         return self.get_elements(Quadrupole)
+
+    @property
+    def cors(self):
+        return self.get_elements(Hcor) + self.get_elements(Vcor)
 
     @property
     def dipoles(self):
@@ -307,7 +312,8 @@ class LatticeContainer:
             return self
 
     def split_elements(self, elements: Union[Element, Iterable[Element]], n_parts: int = 2,
-                       return_new_elements: bool = False, at: float = None) -> Union[LatticeContainer, List]:
+                       return_new_elements: bool = False,
+                       at: float = None) -> Union[LatticeContainer, List]:
         """
         Splits elements into several parts, scaling parameters appropriately
         :param return_new_elements: Instead of box, return list of all new elements
@@ -396,6 +402,70 @@ class LatticeContainer:
         else:
             logger.info(f'Inserted ({len(seq_new) - len(seq)}) elements after ({target.id})')
         self.lattice.sequence = seq_new
+        return self
+
+    def make_thin(self,
+                method: Literal['simple','teapot'] = 'teapot',
+                n_pieces: int = 2,
+                 types_to_slice: tuple[type] = (SBend, Quadrupole, Sextupole, Vcor, Hcor)
+                ) -> LatticeContainer:
+        """
+        Converts lattice to thin elements
+        :param method: slicing algorithm
+        :param n_pieces: number of pieces to split into
+        :param types_to_slice: list[type] = (SBend, Quadrupole, Sextupole)
+        """
+        seq = self.lattice.sequence
+        s_original = self.totallen
+        seq_new = []
+
+        def split_thin(el):
+            assert el.l > 0
+            if n_pieces == 1:
+                return []
+            # Convert to k1l, etc.
+            # Keep as full element, not convert to multipole
+            #scaled_parameters = ['k1', 'k2', 'k3', 'k4']
+            el_list = [deepcopy(el) for i in range(n_pieces)]
+            for i, e in enumerate(el_list):
+                # for s in scaled_parameters:
+                #     if hasattr(e, s):
+                #         setattr(e, s, getattr(e, s) * el.l / n_pieces)
+                e.l = 0.0
+                e.id = el.id + f'__{i}'
+            return el_list
+
+        for i, el in enumerate(seq):
+            if el.l == 0.0:
+                seq_new.append(el)
+            elif isinstance(el, types_to_slice):
+                seq_temp = []
+                if method == 'teapot' and n_pieces > 1:
+                    d = el.l * 1/(2*(1+n_pieces))
+                    D = el.l * n_pieces / (2*(1+n_pieces))
+                    lengths = [d] + [D] * (n_pieces-1) + [d]
+                    splits = split_thin(el)
+                    cnt = 0
+                    for j in range(len(splits)):
+                        seq_temp.append(Drift(eid=el.id + f'__d{cnt}', l=lengths[cnt]))
+                        seq_temp.append(splits[cnt])
+                        cnt += 1
+                    seq_temp.append(Drift(eid=el.id+f'__d{cnt}', l=lengths[-1]))
+                    assert len(seq_temp) == 2*n_pieces+1, f'length mismatch {len(seq_temp)}?'
+                    seq_new.extend(seq_temp)
+                elif n_pieces == 1:
+                    seq_new.append(Drift(eid=el.id + f'__d0', l=el.l/2))
+                    el2 = deepcopy(el)
+                    el2.l = 0.0
+                    seq_new.append(el2)
+                    seq_new.append(Drift(eid=el.id + f'__d1', l=el.l / 2))
+            else:
+                seq_new.append(el)
+        logger.info(f'Makethin - new sequence length ({len(seq_new)})')
+        self.lattice.sequence = seq_new
+        self.update_element_positions()
+        assert np.isclose(s_original, self.totallen, atol=1e-10, rtol=0.0),\
+            f'{self.totallen} != {s_original}'
         return self
 
     def remove_elements(self, elements: Union[Element, Iterable[Element]]) -> LatticeContainer:
@@ -1318,7 +1388,8 @@ class OctupoleInsert:
                   olen_eff: float = None,
                   drop_empty_drifts: bool = False,
                   replace_zero_strength_octupoles: bool = False,
-                  skip_config: bool = False):
+                  skip_config: bool = False,
+                  verbose: bool = False):
         """
         Initialize QI configuration. Notation matches that used in original MADX scripts.
 
@@ -1377,13 +1448,14 @@ class OctupoleInsert:
                 s0 = s1
             positions = np.array(distances)
 
-            if current:
-                logger.info(
-                    f'QIPHASE - l0:{l0}|mu0:{mu0}|nn:{nn}|c:{current}|run:{run}|olen:{olen:.3f}|drop:{drop_empty_drifts}') #|{positions=}
-            else:
-                logger.info(
-                    f'QIPHASE - l0:{l0}|mu0:{mu0}|nn:{nn}|tn:{tn}|cn:{cn}|run:{run}|olen:{olen:.3f}|drop:{drop_empty_drifts}') #|{positions=}
-            #positions -= olen / 2
+            if verbose:
+                if current:
+                    logger.info(
+                        f'QIPHASE - l0:{l0}|mu0:{mu0}|nn:{nn}|c:{current}|run:{run}|olen:{olen:.3f}|drop:{drop_empty_drifts}') #|{positions=}
+                else:
+                    logger.info(
+                        f'QIPHASE - l0:{l0}|mu0:{mu0}|nn:{nn}|tn:{tn}|cn:{cn}|run:{run}|olen:{olen:.3f}|drop:{drop_empty_drifts}') #|{positions=}
+                #positions -= olen / 2
             if current:
                 raise Exception
             else:
