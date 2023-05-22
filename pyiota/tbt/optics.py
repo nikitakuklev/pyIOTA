@@ -7,7 +7,7 @@ from typing import Tuple, List
 import numpy as np
 import pandas as pd
 from .tbt import Kick
-from numba import jit
+
 from scipy.optimize import curve_fit
 from scipy.signal import hilbert
 
@@ -16,6 +16,12 @@ from sklearn import decomposition
 
 logger = logging.getLogger(__name__)
 
+try:
+    # from numba import jit
+    # numba_on = True
+    numba_on = False
+except ImportError:
+    numba_on = False
 
 class Routines:
     @staticmethod
@@ -712,14 +718,12 @@ class Envelope:
         return F
 
     @staticmethod
-    @jit(nopython=True)
     def F4D_xx(n: np.ndarray, j_x: float, sigma_x: float, k_xx: float):
         theta = 4 * np.pi * k_xx * sigma_x * sigma_x * n
         F = 1 / (1 + theta * theta) * np.exp(-(j_x * theta * theta) / (2 * sigma_x * sigma_x * (1 + theta * theta)))
         return F
 
     @staticmethod
-    @jit(nopython=True)
     def F4D_xx_Z(n: np.ndarray, Z: float, mu: float):
         # Z = j_x * sigma_x * sigma_x    mu = k_xx / j_x
         # new Z = k_xx * sigma_x * sigma_x     mu = j_x * k_xx
@@ -820,7 +824,6 @@ class Envelope:
     # def budkerfit(xdata, amplitude, tau, c2, freq, ofsx, ofsy):
     #     return amplitude*np.exp(-tau*(xdata-ofsx)**2)*np.exp(-c2*(1-np.cos(freq*(xdata-ofsx)))) + ofsy
     @staticmethod
-    @jit(nopython=True, fastmath=True, nogil=True)
     def budkerfit(xdata: np.ndarray, amplitude: float, tau: float, c2: float, freq: float, ofsx: float,
                   ofsy: float, c3: float):
         ans = amplitude * np.exp(-tau * (xdata - ofsx) ** 2 - c2 * (np.sin(freq * (xdata - ofsx)) ** 2)) + ofsy
@@ -858,6 +861,13 @@ class Envelope:
             -((np.sin(nu * x)) * (c3 / nu)) ** 2) + ofsy
         # ans = ans * (1+c3*np.arange(len(ans)))
         return ans
+
+    if numba_on:
+        # Remember decorators are just sugar - can call directly
+        from numba import jit
+        jit(nopython=True)(F4D_xx)
+        jit(nopython=True)(F4D_xx_Z)
+        jit(nopython=True, fastmath=True, nogil=True)(budkerfit)
 
     def find_envelope(self,
                       data_raw: np.ndarray,
