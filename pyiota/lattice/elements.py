@@ -407,7 +407,8 @@ class LatticeContainer:
     def make_thin(self,
                 method: Literal['simple','teapot'] = 'teapot',
                 n_pieces: int = 2,
-                 types_to_slice: tuple[type] = (SBend, Quadrupole, Sextupole, Vcor, Hcor)
+                 types_to_slice: tuple[type] = (SBend, Quadrupole, Sextupole, Vcor, Hcor),
+                  elements_to_slice: list[Element] = None
                 ) -> LatticeContainer:
         """
         Converts lattice to thin elements

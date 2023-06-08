@@ -295,3 +295,5 @@ class NLKickTM(TransferMap):
         m.delta_e = m.delta_e_z(s)
         m.map = lambda X, energy: m.kick_apply(X, s, m.knll, m.cnll, energy, m.nkick, m.dx, m.dy, m.tilt)
         return m
+
+
