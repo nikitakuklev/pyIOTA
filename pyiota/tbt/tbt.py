@@ -376,7 +376,7 @@ class Kick:
                  df: pd.DataFrame,
                  kick_id: int = -1,
                  id_offset: int = 0,
-                 bpm_list: Optional[List] = None,
+                 bpm_list: Optional[list[str]] = None,
                  parent_sequence: Optional['KickSequence'] = None,
                  file_name: str = None,
                  trim: Tuple = None,
@@ -648,7 +648,7 @@ class Kick:
             if 'raw' not in to_save:
                 self.tracks['raw'] = {}
 
-    def v2_drop_bpms(self, bpms):
+    def v2_drop_bpms(self, bpms: list[str]):
         if len(bpms) == 0:
             raise Exception('Empty bpm update?')
         logger.info(f'Removing bpm ({bpms})')
@@ -1670,14 +1670,15 @@ class Kick:
         """
         Calculates tune by finding peaks in FFT data, optionally using precomputed data to save time
 
-        :param naff: tbt.NAFF object to be used - its setting will take priority over kick values
+        :param naff: tbt.NAFF object to be used - will take priority over kick values
         :param method: Peak finding method - NAFF or FFT
         :param families: Families to perform calculation on - typically H, V, or C
         :param selector: Function that picks correct peak from list
         :param search_kwargs: Method specific extra parameters to be used in the search
-        :param use_precalculated:
+        :param use_precalculated: Whether to use pre-calculated FFT data
         :param data_trim: Trim override - if not provided, use whatever NAFF object has
-        :param pairs:
+        :param pairs: If true, both planes will be resolved at same time. Selectors needs to
+        handle signature like (self, results, (bh, bv), search_kwargs)
         :return:
         """
         families = families or ['H', 'V']
@@ -1697,6 +1698,8 @@ class Kick:
             for i, bpm in enumerate(bpms):
                 family = bpm[-1]
                 if method.upper() == 'FFT':
+                    if selector is None:
+                        raise Exception('FFT tune requires a selector method!')
                     col_fr = bpm + self.Datatype.FFT_FREQ.value
                     col_pwr = bpm + self.Datatype.FFT_POWER.value
                     if use_precalculated and col_fr in self.df.columns and col_pwr in self.df.columns:
@@ -1705,22 +1708,20 @@ class Kick:
                                              search_kwargs=search_kwargs,
                                              fft_freq=self.df.iloc[0].loc[col_fr],
                                              fft_power=self.df.iloc[0].loc[col_pwr])
-                        top_tune, peak_tunes, peak_idx, peak_props, (pf, pp) = res
+
                     else:
-                        top_tune, peak_tunes, peak_idx, peak_props, (pf, pp) = naff.fft_peaks(
+                        res = naff.fft_peaks(
                             data=self.df.iloc[0].loc[bpm],
                             search_peaks=True,
                             search_kwargs=search_kwargs,
                         )
+                    top_tune, peak_tunes, peak_idx, peak_props, (pf, pp) = res
                     # a, b = naff.fft(self.df.iloc[0].loc[bpm])
                     freq[bpm] = pf
                     pwr[bpm] = pp
                     peaks[bpm] = (peak_tunes, peak_props)
-                    if selector:
-                        nu = selector(self, peaks[bpm], bpm)
-                        self.df['nu_' + bpm] = nu
-                    else:
-                        raise Exception('FFT tune requires a selector method!')
+                    nu = selector(self, top_tune, peaks[bpm], bpm, search_kwargs)
+                    self.df['nu_' + bpm] = nu
                     average_tunes[family].append(nu)
                 elif method == 'NAFF':
                     n_components = search_kwargs.get('n_components', 2)
@@ -1734,8 +1735,9 @@ class Kick:
                         nfresult = naff.run_naff_v2(self.get_bpm_data(bpm, no_trim=True),
                                                     n_components=n_components)
                     peaks[bpm] = ([n['tune'] for n in nfresult], nfresult)
+                    top_tune = nfresult[np.argmax([n['absamps'] for n in nfresult])]['tune']
                     if selector:
-                        nu = selector(self, peaks[bpm], bpm, search_kwargs)
+                        nu = selector(self, top_tune, peaks[bpm], bpm, search_kwargs)
                         self.df[bpm + self.Datatype.NU.value] = nu
                         average_tunes[family].append(nu)
                     else:
@@ -2237,13 +2239,16 @@ class KickSequence:
 
     def calculate_tune(self,
                        naff: NAFF,
+                       method: str = 'NAFF',
                        families: List[str] = None,
                        selector: Callable = None,
                        search_kwargs: Dict[str, int] = None):
         naff = naff or self.naff
         assert selector
         for r in self.df.itertuples():
-            r.kick.calculate_tune(naff, families=families, selector=selector, search_kwargs=search_kwargs)
+            r.kick.calculate_tune(naff, method=method,
+                                  families=families, selector=selector,
+                                  search_kwargs=search_kwargs)
 
     def get_kick_magnitudes(self):
         return self.df.loc[:, 'kickV'].values
