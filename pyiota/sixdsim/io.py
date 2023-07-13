@@ -714,16 +714,24 @@ class Knob(AbstractKnob):
     def read_current_state(self, settings: bool = True, verbose: bool = False,
                            split: bool = False
                            ):
+        """
+        Read current ACNET values of the knob
+        :param settings: If true, read setpoint
+        :param verbose:
+        :param split:
+        :return:
+        """
         if verbose or self.verbose:
             verbose = True
         if verbose:
             print(f'Reading in knob {self.name} current values')
         devices = [DoubleDevice(d.acnet_var) for d in self.vars.values()]
-        if settings:
-            for d in devices:
-                d.drf2.property = DRF_PROPERTY.SETTING
+        # if settings:
+        #     for d in devices:
+        #         d.drf2.property = DRF_PROPERTY.SETTING
         ds = DoubleDeviceSet(name=self.name,
-                             members=devices)
+                             members=devices,
+                             settings=settings)
         ds.read(verbose=verbose, split=split)
         tempdict = {k.acnet_var: k for k in self.vars.values()}
         for k, v in ds.devices.items():
@@ -956,24 +964,26 @@ class Knob(AbstractKnob):
 
     def __sub__(self, other):
         assert isinstance(other, Knob)
-        if self.verbose: print(
-                f'Subtracting ({other.name}) from ({self.name}) | ({len(self.vars)} values)')
+        if self.verbose:
+            print(f'Subtracting ({other.name}) from ({self.name}) | ({len(self.vars)} values)')
         return self.__math(other, operator.sub, '-')
 
     def __add__(self, other):
         assert isinstance(other, Knob)
-        if self.verbose: print(
-                f'Adding ({other.name}) to ({self.name}) | ({len(self.vars)} values)')
+        if self.verbose:
+            print(f'Adding ({other.name}) to ({self.name}) | ({len(self.vars)} values)')
         return self.__math(other, operator.add, '+')
 
     def __truediv__(self, other):
         assert isinstance(other, float) or isinstance(other, int)
-        if self.verbose: print(f'Diving knob {self.name} by {other} (returning copy)')
+        if self.verbose:
+            print(f'Diving knob {self.name} by {other} (returning copy)')
         return self.__math(other, operator.truediv, '/')
 
     def __mul__(self, other):
         assert isinstance(other, float) or isinstance(other, int)
-        if self.verbose: print(f'Multiplying knob {self.name} by {other} (returning copy)')
+        if self.verbose:
+            print(f'Multiplying knob {self.name} by {other} (returning copy)')
         return self.__math(other, operator.mul, '*')
 
     def __str__(self):
