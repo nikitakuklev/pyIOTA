@@ -612,20 +612,28 @@ class Knob(AbstractKnob):
         self.vars = {k: self.vars[k] for k in keys}
         return self
 
-    def get_dict(self, as_devices=False):
+    def get_dict(self, as_devices=True) -> dict[str, 'KnobVariable']:
+        """ Get dictionary of knob variables """
         if as_devices:
             return {v.acnet_var: v.value for v in self.vars.values()}
         else:
             return {v.var: v.value for v in self.vars.values()}
 
     @staticmethod
-    def from_dict(x: dict):
+    def from_dict(x: dict[str, float]):
+        """
+        Create new know from dict. Note that no syntax enforcement will be done, both variable
+        and acnet names will be set to dict keys.
+        :param x: dict of {var: value}
+        :return:
+        """
         variables = {k: KnobVariable(kind='$', var=k, acnet_var=k, value=v) for k, v in x.items()}
         return Knob(variables=variables)
 
     def only_keep_shared(self, other: 'Knob') -> 'Knob':
         """
-        Remove all varibles not shared with another Knob
+        Remove all variables not shared with another Knob.
+        This operation is done inplace.
         :param other: Knob 2
         """
         self.vars = {k: v for (k, v) in self.vars.items() if k in other.vars}
@@ -633,7 +641,8 @@ class Knob(AbstractKnob):
 
     def union(self, other: 'Knob') -> 'Knob':
         """
-        Returns knob with only variables contained in both and their values match
+        Returns knob with only variables that are contained in both and their values match.
+        This operation is done inplace.
         :param other: Knob 2
         """
         self.vars = {k: v for (k, v) in self.vars.items() if k in other.vars and other.vars[k] == v}
