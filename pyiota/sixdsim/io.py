@@ -16,8 +16,7 @@ import numpy as np
 from ocelot import Cavity, Drift, Edge, Hcor, Monitor, Multipole, Quadrupole, SBend, Sextupole, \
     Solenoid, Vcor
 
-from ..acnet import DoubleDevice, DoubleDeviceSet
-from ..acnet.drf2 import DRF_PROPERTY
+from pyiota.acnet import DoubleDevice, DoubleDeviceSet
 
 logger = logging.getLogger(__name__)
 
@@ -550,67 +549,6 @@ def parse_lattice(fpath: Path,
     return lattice_ocelot, correctors_ocelot, monitors_ocelot, info_dict, var_dict
 
 
-def parse_knobs(fpath: Path, verbose: bool = False, randomize: bool = True) -> Dict:
-    """
-    Parses knob files in 6DSim format. All values are assumed absolute unless explicitly specified.
-    :param fpath: Full knob file path
-    :param verbose:
-    :return:
-    """
-    knobs = []
-    with open(str(fpath), 'r') as f:
-        lines = f.readlines()
-        # if verbose: print(f'Parsing {len(lines)} lines')
-        assert lines[0] == "KNOBS:\n"
-        line_num = 0
-        while line_num <= len(lines) - 1:
-            l = lines[line_num]
-            if l.startswith('Knob'):
-                spl = l.split(' ', 2)
-                assert len(spl) == 3, spl[0] == 'Knob:'
-                assert spl[2].strip().startswith('{')
-                name = spl[1]
-                # if verbose: print(f'Parsing knob {name}')
-
-                knobvars = []
-                knob = Knob(name=name)
-
-                line_num += 1
-                s2str = spl[2].strip()
-                vals = s2str[1:] if len(s2str) > 1 else ''
-                # print(spl, vals)
-                if vals.endswith('}'):
-                    vals = vals[:-1]
-                else:
-                    while not lines[line_num].strip().endswith('}'):
-                        vals += lines[line_num]
-                        line_num += 1
-                        if line_num == len(lines):
-                            raise Exception('Unclosed bracket found in knob file')
-                    if lines[line_num].strip() != '}':
-                        vals += lines[line_num].strip()[:-1]
-                knob_str_list = vals.strip().replace('\n', '').split(',')
-                # print(knob_str_list)
-                for k in knob_str_list:
-                    ks = k.strip().strip('(').strip(')')
-                    kspl = ks.split('|')
-                    assert len(kspl) == 3
-                    if kspl[0] != '$':
-                        raise Exception(f'Unsupported knob type: {kspl}')
-                    knobvar = KnobVariable(kind=kspl[0], var=kspl[1], value=float(kspl[2]))
-                    knobvars.append(knobvar)
-                knobs.append(knob)
-                if randomize:
-                    random.seed(42)
-                    random.shuffle(knobvars)
-                knob.vars = {k.var: k for k in knobvars}
-                if verbose:
-                    print(f'Parsed knob {name} - {len(knob.vars)} devices')
-            else:
-                line_num += 1
-    return {k.name: k for k in knobs}
-
-
 def parse_transfer_maps(file: Path):
     """
     Parses outpout of sixdsim transfer map export. Note special, old format.
@@ -629,9 +567,9 @@ def parse_transfer_maps(file: Path):
                 if j == 0:
                     matr = []
                 # print(list(filter(None, l.strip().split(' '))))
-                matr.append(np.array(list(filter(None, l.strip().split(' ')))).astype(np.float))
+                matr.append(np.array(list(filter(None, l.strip().split(' ')))).astype(np.float64))
                 if j == 5:
-                    tmaps[to] = (src, np.stack(matr));  # print(dataarr)
+                    tmaps[to] = (src, np.stack(matr))  # print(dataarr)
         tmaps['start'] = ('end', np.identity(6))
     return tmaps
 
@@ -648,7 +586,7 @@ class AbstractKnob:
 
 class Knob(AbstractKnob):
     """
-    Experimental, ACNET-based implementation of a knob
+    ACNET-based implementation of a knob
     """
 
     def __init__(self, name: str = None, variables: dict = None):
@@ -658,19 +596,21 @@ class Knob(AbstractKnob):
 
     def make_absolute(self):
         raise Exception("Not implemented yet")
-        assert not self.absolute
-        ds = DoubleDeviceSet(name=self.name,
-                             members=[DoubleDevice(d.acnet_var) for d in self.vars.values()])
-        ds.read()
-        for k, v in ds.devices:
-            pass
-        return self
+        # assert not self.absolute
+        # ds = DoubleDeviceSet(name=self.name,
+        #                      members=[DoubleDevice(d.acnet_var) for d in self.vars.values()])
+        # ds.read()
+        # for k, v in ds.devices:
+        #     pass
+        # return self
 
-    def shuffle(self, seed:int = 42):
+    def shuffle(self, seed: int = 42):
+        """ Shuffle variables """
         random.seed(seed)
         keys = list(self.vars.keys())
         random.shuffle(keys)
-        self.vars = {k:self.vars[k] for k in keys}
+        self.vars = {k: self.vars[k] for k in keys}
+        return self
 
     def get_dict(self, as_devices=False):
         if as_devices:
@@ -683,30 +623,32 @@ class Knob(AbstractKnob):
         variables = {k: KnobVariable(kind='$', var=k, acnet_var=k, value=v) for k, v in x.items()}
         return Knob(variables=variables)
 
-    def only_keep_shared(self, other: 'Knob'):
+    def only_keep_shared(self, other: 'Knob') -> 'Knob':
+        """
+        Remove all varibles not shared with another Knob
+        :param other: Knob 2
+        """
         self.vars = {k: v for (k, v) in self.vars.items() if k in other.vars}
         return self
 
-    def union(self, other: 'Knob'):
+    def union(self, other: 'Knob') -> 'Knob':
         """
         Returns knob with only variables contained in both and their values match
-        :param other:
-        :return:
+        :param other: Knob 2
         """
         self.vars = {k: v for (k, v) in self.vars.items() if k in other.vars and other.vars[k] == v}
         return self
 
-    def copy(self, new_vars: dict = None):
+    def copy(self, new_vars: dict = None) -> 'Knob':
         """
-        Make a deep copy of knob, optionally with new knobvariables
-        :param new_vars:
-        :return:
+        Make a deep copy of knob, optionally with new variables
+        :param new_vars: New variables dict
         """
         knob = Knob(name=self.name)
         if new_vars:
             knob.vars = new_vars
         else:
-            knob.vars = {k.var: k.copy() for k in self.vars.values()}
+            knob.vars = {k: v.copy() for (k, v) in self.vars.items()}
         knob.absolute = self.absolute
         knob.verbose = self.verbose
         return knob
@@ -717,8 +659,8 @@ class Knob(AbstractKnob):
         """
         Read current ACNET values of the knob
         :param settings: If true, read setpoint
-        :param verbose:
-        :param split:
+        :param verbose: Verbose printing
+        :param split: Whether to split ACNET reads into several smaller ones
         :return:
         """
         if verbose or self.verbose:
@@ -742,9 +684,9 @@ class Knob(AbstractKnob):
         if verbose or self.verbose:
             verbose = True
         if verbose:
-            pruned = {k.var: k.value for k in self.vars.values() if np.abs(k.value) <= tol}
+            pruned = {k.acnet_var: k.value for k in self.vars.values() if np.abs(k.value) <= tol}
             print(f'{len(pruned)} pruned:', pruned)
-        self.vars = {k.var: k for k in self.vars.values() if np.abs(k.value) > tol}
+        self.vars = {k.acnet_var: k for k in self.vars.values() if np.abs(k.value) > tol}
         return self
 
     def is_empty(self):
@@ -870,6 +812,7 @@ class Knob(AbstractKnob):
         function magnets to go from (H,V,Skew) -> (4 currents), which makes settings faster and reduces
         beam losses. #justACNETthings
         :param copy: Whether to return a copy of the knob
+        :param silent: Suppress printing logs
         :return:
         """
         from ..iota import run4 as iota, magnets_run4 as iotamags
@@ -897,9 +840,12 @@ class Knob(AbstractKnob):
             skew = devs_to_set.get(s, None)
             if any([hor, ver, skew]):
                 currents = iotamags.get_combfun_coil_currents(ch=hor, cv=ver, skew=skew)
-                if hor: del devs_to_set[h]
-                if ver: del devs_to_set[v]
-                if skew: del devs_to_set[s]
+                if hor:
+                    del devs_to_set[h]
+                if ver:
+                    del devs_to_set[v]
+                if skew:
+                    del devs_to_set[s]
                 for i, c in enumerate(cg):
                     devs_to_set[c] = KnobVariable(kind='$', var=c, value=currents[i])
                 if not silent:
@@ -934,14 +880,16 @@ class Knob(AbstractKnob):
             if keep_unique_values:
                 if self.absolute == other.absolute:
                     # Both absolute or relative
-                    new_vars = {kv.var: KnobVariable(kind=kv.kind, var=kv.var,
-                                                     value=kv.value
-                                                     ) for knob, kv in self.vars.items()}
+                    new_vars = {kv.acnet_var: KnobVariable(kind=kv.kind, var=kv.var, value=kv.value,
+                                                           acnet_var=kv.acnet_var
+                                                           ) for knob, kv in self.vars.items()}
                     for k, v in other.vars.items():
-                        if k in new_vars:
-                            new_vars[k].value = operation(new_vars[k].value, v.value)
+                        if v.acnet_var in new_vars:
+                            new_vars[v.acnet_var].value = operation(new_vars[v.acnet_var].value,
+                                                                    v.value)
                         else:
-                            new_vars[k] = v.copy()
+                            # print(f'Added extra var {k}')
+                            new_vars[v.acnet_var] = v.copy()
                 if (not other.absolute and not set2.issubset(set1)) or (
                         not self.absolute and not set1.issubset(set2)):
                     raise Exception(
@@ -949,18 +897,24 @@ class Knob(AbstractKnob):
             else:
                 keyset = set1.intersection(set2)
                 setvars = {k: self.vars[k] for k in keyset}
-                new_vars = {kv.var: KnobVariable(kind=kv.kind, var=kv.var,
-                                                 value=operation(kv.value, other.vars[knob].value)
-                                                 ) for knob, kv in setvars}
+                new_vars = {kv.acnet_var: KnobVariable(kind=kv.kind, var=kv.var,
+                                                       value=operation(kv.value,
+                                                                       other.vars[knob].value),
+                                                       acnet_var=kv.acnet_var
+                                                       ) for knob, kv in setvars}
             knob.name = '(' + self.name + opcode + other.name + ')'
         else:
-            new_vars = {kv.var: KnobVariable(kind=kv.kind, var=kv.var,
-                                             value=operation(kv.value, other)
-                                             ) for knob, kv in self.vars.items()}
+            new_vars = {kv.acnet_var: KnobVariable(kind=kv.kind, var=kv.var,
+                                                   value=operation(kv.value, other),
+                                                   acnet_var=kv.acnet_var
+                                                   ) for knob, kv in self.vars.items()}
             knob.name = '(' + self.name + opcode + str(other) + ')'
-        knob.vars = new_vars
+        knob.vars = new_vars  # noqa
         knob.absolute = True if (self.absolute or other.absolute) else False
         return knob
+
+    def __getitem__(self, item):
+        return self.vars[item].value
 
     def __sub__(self, other):
         assert isinstance(other, Knob)
@@ -969,7 +923,7 @@ class Knob(AbstractKnob):
         return self.__math(other, operator.sub, '-')
 
     def __add__(self, other):
-        assert isinstance(other, Knob)
+        # assert isinstance(other, Knob)
         if self.verbose:
             print(f'Adding ({other.name}) to ({self.name}) | ({len(self.vars)} values)')
         return self.__math(other, operator.add, '+')
@@ -1014,3 +968,69 @@ class KnobVariable:
 
     def __repr__(self):
         return self.__str__()
+
+    def __eq__(self, other):
+        return (self.kind == other.kind and self.var == other.var and self.acnet_var ==
+                other.acnet_var and self.value == other.value)
+
+
+def parse_knobs(fpath: Path, verbose: bool = False, randomize: bool = True) -> Dict[str, Knob]:
+    """
+    Parses knob files in 6DSim format. All values are assumed absolute unless explicitly specified.
+    :param fpath: Full knob file path
+    :param verbose: If True, print more infor
+    :param randomize: If True, final order is randomized
+    :return:
+    """
+    knobs = []
+    with open(str(fpath), 'r') as f:
+        lines = f.readlines()
+        # if verbose: print(f'Parsing {len(lines)} lines')
+        assert lines[0] == "KNOBS:\n"
+        line_num = 0
+        while line_num <= len(lines) - 1:
+            l = lines[line_num]
+            if l.startswith('Knob'):
+                spl = l.split(' ', 2)
+                assert len(spl) == 3, spl[0] == 'Knob:'
+                assert spl[2].strip().startswith('{')
+                name = spl[1]
+                # if verbose: print(f'Parsing knob {name}')
+
+                knobvars = []
+                knob = Knob(name=name)
+
+                line_num += 1
+                s2str = spl[2].strip()
+                vals = s2str[1:] if len(s2str) > 1 else ''
+                # print(spl, vals)
+                if vals.endswith('}'):
+                    vals = vals[:-1]
+                else:
+                    while not lines[line_num].strip().endswith('}'):
+                        vals += lines[line_num]
+                        line_num += 1
+                        if line_num == len(lines):
+                            raise Exception('Unclosed bracket found in knob file')
+                    if lines[line_num].strip() != '}':
+                        vals += lines[line_num].strip()[:-1]
+                knob_str_list = vals.strip().replace('\n', '').split(',')
+                # print(knob_str_list)
+                for k in knob_str_list:
+                    ks = k.strip().strip('(').strip(')')
+                    kspl = ks.split('|')
+                    assert len(kspl) == 3
+                    if kspl[0] != '$':
+                        raise Exception(f'Unsupported knob type: {kspl}')
+                    knobvar = KnobVariable(kind=kspl[0], var=kspl[1], value=float(kspl[2]))
+                    knobvars.append(knobvar)
+                knobs.append(knob)
+                if randomize:
+                    random.seed(42)
+                    random.shuffle(knobvars)
+                knob.vars = {k.acnet_var: k for k in knobvars}
+                if verbose:
+                    print(f'Parsed knob {name} - {len(knob.vars)} devices')
+            else:
+                line_num += 1
+    return {k.name: k for k in knobs}
