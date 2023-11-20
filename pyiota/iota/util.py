@@ -1,18 +1,23 @@
-from typing import Callable, List, Literal, Optional
+import pathlib
+from typing import List, Literal, Optional, Union
 import logging
 import ocelot
-from ocelot import MethodTM
-from ocelot.cpbd.elements import *
+from ocelot import CouplerKick, Drift, Element, Marker, Matrix, MethodTM, Monitor, Multipole, \
+    Octupole, Quadrupole
+
 import numpy as np
 
 from .. import lattice as lat
-import pyiota.iota
+from . import run4
 
 logger = logging.getLogger(__name__)
 
 
-def load_iota(method=None, file_name: str = None, insert_monitors: bool = True,
-              parse_kwargs=None):
+def load_iota(method=None,
+              file_name: Union[str, pathlib.Path] = None,
+              insert_monitors: bool = True,
+              parse_kwargs=None
+              ):
     """
     Loads IOTA lattice with standard options
     :param method: ocelot method object
@@ -23,15 +28,17 @@ def load_iota(method=None, file_name: str = None, insert_monitors: bool = True,
     method = method or ocelot.MethodTM()
     parse_kwargs = parse_kwargs or {}
     assert file_name is not None
+    file_name = pathlib.Path(file_name)
     # file_name = file_name or 'IOTA_1NL_100MeV_v8.6.1.4.6ds'
-    lattice_list, correctors, monitors, info, variables = sixdsim.parse_lattice(file_name,
-                                                                                verbose=False,
-                                                                                **parse_kwargs)
+    elements = sixdsim.parse_lattice(file_name, **parse_kwargs)
+    lattice_list, correctors, monitors, info, variables = elements
     box = lat.LatticeContainer(name='IOTA', lattice=lattice_list, correctors=correctors,
-                               monitors=monitors, info=info, variables=variables, silent=False, method=method)
+                               monitors=monitors, info=info, variables=variables, silent=False,
+                               method=method)
     box.correctors = [c for c in box.correctors if
                       not c.end_turn and not isinstance(c.ref_el, Drift) and not 'M' in c.id]
-    box.monitors = [el for el in box.monitors if any([el.id in bpm for bpm in pyiota.iota.run2.BPMS.ALL])]
+    box.monitors = [el for el in box.monitors if
+                    any([el.id in bpm for bpm in run4.BPMS.ALL])]
     # box.pc = 100.0
     if 'pc' in info:
         box.pc = info['pc']
@@ -54,15 +61,18 @@ def load_iota(method=None, file_name: str = None, insert_monitors: bool = True,
 def insert_qi(nn: int, tn: int, empty_space: float, ref_detuning: float = None, **kwargs):
     """ Generates QI insert with thick elements (octupoles) """
     if ref_detuning == 0.0:
-        qi = lat.OctupoleInsert(nn=nn, tn=tn, olen=None, ospacing=empty_space / nn, run=None, oqK=0.0, **kwargs)
+        qi = lat.OctupoleInsert(nn=nn, tn=tn, olen=None, ospacing=empty_space / nn, run=None,
+                                oqK=0.0, **kwargs)
         logger.info(f'QI thick ({nn}/{tn}) - TURNED OFF')
     else:
-        qi = lat.OctupoleInsert(nn=nn, tn=tn, olen=None, ospacing=empty_space / nn, run=None, **kwargs)
+        qi = lat.OctupoleInsert(nn=nn, tn=tn, olen=None, ospacing=empty_space / nn, run=None,
+                                **kwargs)
         dq = qi.compute_relative_detuning()
         if ref_detuning is not None:
             oqK = ref_detuning / dq if dq != 0.0 else 0.0
             logger.info(f'QI thick ({nn}/{tn}) - scaled by {ref_detuning:.3f}/{dq:.3f} = {oqK:.3f}')
-            qi.configure(nn=nn, tn=tn, olen=None, ospacing=empty_space / nn, run=None, oqK=oqK, **kwargs)
+            qi.configure(nn=nn, tn=tn, olen=None, ospacing=empty_space / nn, run=None, oqK=oqK,
+                         **kwargs)
         else:
             logger.info(f'QI thick ({nn}/{tn}) - no scaling, dq = {dq:.3f}')
     return qi, [el for el in qi.seq if isinstance(el, Octupole)]
@@ -72,14 +82,16 @@ def insert_qi_phase(nn: int, tn: int, empty_space: float, ref_detuning: float = 
     """ Generates QI insert with thick elements (octupoles) spaced in equal phase"""
     olen = (1.8 - empty_space) / nn
     if ref_detuning == 0.0:
-        qi = lat.OctupoleInsert(nn=nn, tn=tn, olen=olen, spacing_mode='phase', run=None, oqK=0.0, **kwargs)
+        qi = lat.OctupoleInsert(nn=nn, tn=tn, olen=olen, spacing_mode='phase', run=None, oqK=0.0,
+                                **kwargs)
         logger.info(f'QI thick phase ({nn}/{tn}) - TURNED OFF')
     else:
         qi = lat.OctupoleInsert(nn=nn, tn=tn, olen=olen, spacing_mode='phase', run=None, **kwargs)
         dq = qi.compute_relative_detuning()
         if ref_detuning is not None:
             oqK = ref_detuning / dq if dq != 0.0 else 0.0
-            logger.info(f'QI thick phase ({nn}/{tn}) - scaled by {ref_detuning:.3f}/{dq:.3f} = {oqK:.3f}')
+            logger.info(
+                    f'QI thick phase ({nn}/{tn}) - scaled by {ref_detuning:.3f}/{dq:.3f} = {oqK:.3f}')
             qi.configure(nn=nn, tn=tn, olen=olen, spacing_mode='phase', run=None, oqK=oqK, **kwargs)
         else:
             logger.info(f'QI thick ({nn}/{tn}) - no scaling, dq = {dq:.3f}')
@@ -89,7 +101,8 @@ def insert_qi_phase(nn: int, tn: int, empty_space: float, ref_detuning: float = 
 def insert_dn(nn: int, tn: int, empty_space: float, ref_detuning: float = None, **kwargs):
     """ Generates DN insert with thick elements (octupoles) """
     if ref_detuning == 0.0:
-        qi = lat.NLInsert(nn=nn, tn=tn, olen=None, ospacing=empty_space / nn, run=None, oqK=0.0, **kwargs)
+        qi = lat.NLInsert(nn=nn, tn=tn, olen=None, ospacing=empty_space / nn, run=None, oqK=0.0,
+                          **kwargs)
         print(f'DN thick ({nn}/{tn}) - TURNED OFF')
     else:
         qi = lat.NLInsert(nn=nn, tn=tn, olen=None, ospacing=empty_space / nn, run=None, **kwargs)
@@ -135,10 +148,14 @@ def insert_noop(*args, **kwargs):
     return None, None
 
 
-def build_lattice(lattice_style: Literal['iota', 'iota_nio_ior', 'iota_ior_nio_ior', 'dn',
-'iota_ior', 'iota_iol', 'ideal', 'ideal_bare'],
+LATTICE_STYLES = Literal['iota', 'iota_nio_ior', 'iota_ior_nio_ior', 'dn',
+'iota_ior', 'iota_iol', 'ideal', 'ideal_bare']
+
+
+def build_lattice(lattice_style: LATTICE_STYLES,
                   insert_style: Optional[Literal['flat', 'qi', 'qi_thin', 'dn', 'qi_phase']],
-                  nn: int = None, tn: int = None,
+                  nn: int = None,
+                  tn: int = None,
                   empty_space: float = None,
                   olen: float = None,
                   ref_detuning: float = None,
@@ -149,7 +166,8 @@ def build_lattice(lattice_style: Literal['iota', 'iota_nio_ior', 'iota_ior_nio_i
                   rotate_to_nio_center: bool = True,
                   insert_monitors: bool = True,
                   lattice_load_kwargs: dict = None,
-                  **kwargs):
+                  **kwargs
+                  ):
     method = method or ocelot.MethodTM()
     ll_kwargs = lattice_load_kwargs or None
     if insert_style is None:
@@ -166,20 +184,25 @@ def build_lattice(lattice_style: Literal['iota', 'iota_nio_ior', 'iota_ior_nio_i
                 if empty_space is not None:
                     pass
                 elif olen is not None:
-                    empty_space = (1.8-olen*nn)
+                    empty_space = (1.8 - olen * nn)
                 else:
                     raise Exception
         insert_styles = {'flat': insert_flat, 'qi': insert_qi,
                          'qi_thin': insert_qi_thin, 'dn': insert_dn,
-                         'qi_phase': insert_qi_phase}
+                         'qi_phase': insert_qi_phase
+                         }
         assert insert_style in insert_styles
 
         kwargs = {'drop_empty_drifts': drop_empty_octupole_drifts,
-                  'replace_zero_strength_octupoles': replace_disabled_elements, **kwargs}
-        qi, ocps = insert_styles[insert_style](nn, tn, empty_space, ref_detuning=ref_detuning, **kwargs)
+                  'replace_zero_strength_octupoles': replace_disabled_elements, **kwargs
+                  }
+        qi, ocps = insert_styles[insert_style](nn, tn, empty_space, ref_detuning=ref_detuning,
+                                               **kwargs)
         f0, betae, alfae, betas = qi.calculate_optics_parameters()
-        mat = Matrix(l=0.0, eid='TInsert', r11=1, r22=1, r33=1, r44=1, r55=1, r66=1, r21=-1 / f0, r43=-1 / f0)
-        qibox = lat.LatticeContainer('ideal', qi.to_sequence() + [mat], reset_elements_to_defaults=False, method=method)
+        mat = Matrix(l=0.0, eid='TInsert', r11=1, r22=1, r33=1, r44=1, r55=1, r66=1, r21=-1 / f0,
+                     r43=-1 / f0)
+        qibox = lat.LatticeContainer('ideal', qi.to_sequence() + [mat],
+                                     reset_elements_to_defaults=False, method=method)
         qibox.qi = qi
     logger.info('QI built, making lattice')
 
@@ -283,7 +306,7 @@ def build_lattice(lattice_style: Literal['iota', 'iota_nio_ior', 'iota_ior_nio_i
             m = Marker(eid='IOL')
             qibox.insert_elements(m, before=last_el)
             qiseq = qibox.sequence[:-1]
-            #qiseq = qiseq[:len(qiseq) // 2] + [m] + qiseq[len(qiseq) // 2:]
+            # qiseq = qiseq[:len(qiseq) // 2] + [m] + qiseq[len(qiseq) // 2:]
             seq = box.sequence[:i1 + 1] + qiseq + box.sequence[i2:]
             box.sequence = seq
             box.update_element_positions()
@@ -306,7 +329,8 @@ def build_lattice(lattice_style: Literal['iota', 'iota_nio_ior', 'iota_ior_nio_i
         seq += qi.to_sequence() + [mat]
         for i in range(drift_cnt // 2 - 1):
             seq.extend([Drift(l=1.8)] + [Monitor(l=0.0, eid=f'BPM{i + drift_cnt // 2}')] + [mat])
-        seq = seq[:-2] + [seq[-1]] + [Monitor(l=0.0, eid='BPMBB1R'), Drift(l=1.8), Monitor(l=0.0, eid='BPMBB2R'), mat]
+        seq = seq[:-2] + [seq[-1]] + [Monitor(l=0.0, eid='BPMBB1R'), Drift(l=1.8),
+                                      Monitor(l=0.0, eid='BPMBB2R'), mat]
 
         box = lat.LatticeContainer('ideal', seq, reset_elements_to_defaults=False, method=method)
         box.pc = 150.0
@@ -329,10 +353,11 @@ def build_lattice(lattice_style: Literal['iota', 'iota_nio_ior', 'iota_ior_nio_i
         box.lattice.sequence = [ocelot.Marker(eid='S')] + box.lattice.sequence
         box.update()
     elif lattice_style == 'ideal_bare':
-        #if nn % 2 != 0:
+        # if nn % 2 != 0:
         #    raise AttributeError('Even lattices only')
         seq: List[Element] = qi.to_sequence() + [mat]
-        box = lat.LatticeContainer('ideal_bare', seq, reset_elements_to_defaults=False, method=method)
+        box = lat.LatticeContainer('ideal_bare', seq, reset_elements_to_defaults=False,
+                                   method=method)
         box.pc = 150.0
         box.update()
 
@@ -351,7 +376,8 @@ def build_lattice(lattice_style: Literal['iota', 'iota_nio_ior', 'iota_ior_nio_i
         els_center = box.at(0.9)
         assert len(els_center) == 1
         logger.info(f'{els_center=}')
-        assert np.isclose(els_center[0].s_start, 0.9, atol=1e-10, rtol=0), f'{els_center[0].s_start=}'
+        assert np.isclose(els_center[0].s_start, 0.9, atol=1e-10,
+                          rtol=0), f'{els_center[0].s_start=}'
         m = ocelot.Marker(eid='IOL')
         box.insert_elements(m, before=els_center[-1])
         if rotate_to_nio_center:

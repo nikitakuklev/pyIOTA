@@ -2,7 +2,7 @@
 pyIOTA accelerator control and analysis framework
 """
 
-__version__ = '0.9.4'
+__version__ = '0.9.5'
 __author__ = "Nikita Kuklev"
 
 # General imports - without these, most things will not work
@@ -13,7 +13,8 @@ import logging
 #import pandas as pd
 
 logging.basicConfig(  # format='[%(asctime)s] {%(name)s:%(funcName)s:%(lineno)d} %(levelname)s - %(message)s',
-    format='[%(asctime)s] {%(funcName)s:%(lineno)d} %(levelname)s - %(message)s',
+    #format='[%(asctime)s][%(funcName)s:%(lineno)d}] %(levelname)s - %(message)s',
+    format='[%(levelname)-5.5s][%(asctime)s][%(name)10.10s:%(lineno)4s] %(message)s',
     level=logging.INFO,
     stream=sys.stdout)
 

@@ -6,13 +6,10 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from ..sixdsim.io import KnobVariable
 
-
+# ?
 def calc_octupole_strengths(current: float, energy: float, mu0: float = 0.3, nn=17):
     """
     Calculated quasi-integrable insert strenth K3 distibution for given central current and beam energy
-    :param current:
-    :param energy:
-    :return:
     """
     current = current / 1000  # Amps
     # ! phase advance over straight section

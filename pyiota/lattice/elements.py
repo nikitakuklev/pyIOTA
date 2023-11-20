@@ -1378,8 +1378,10 @@ class OctupoleInsert:
         self.configure(**kwargs)
 
     def configure(self, nn: int, l0: float = 1.8, mu0: float = 0.3,
-                  otype: int = 1, oqK: Union[float, np.ndarray] = 1.0,
-                  olen: Union[float, None] = 0.07, ospacing: float = None,
+                  otype: int = 1,
+                  oqK: Union[float, np.ndarray] = 1.0,
+                  olen: Union[float, None] = 0.07,
+                  ospacing: float = None,
                   run: int = None,
                   current: float = None,
                   spacing_mode: Literal['distance','phase'] = 'distance',
@@ -1390,7 +1392,8 @@ class OctupoleInsert:
                   drop_empty_drifts: bool = False,
                   replace_zero_strength_octupoles: bool = False,
                   skip_config: bool = False,
-                  verbose: bool = False):
+                  verbose: bool = False,
+                  override_strengths: np.ndarray= None,):
         """
         Initialize QI configuration. Notation matches that used in original MADX scripts.
 
@@ -1473,6 +1476,9 @@ class OctupoleInsert:
                 k3 = knn / cn ** 2 * 16  # 2 / 3 * 4! # make it scale as 1/beta^2 now based on Baturin paper
                 k3scaled = k3 * oqK  # Can be an array
                 k3_arr = k3scaled / olen
+
+            if override_strengths is not None:
+                k3_arr = override_strengths
 
             self.seq = seq = []
             # Always have custom positions
@@ -1572,6 +1578,9 @@ class OctupoleInsert:
                 k3scaled = k3 * oqK  # Can be an array
                 k3_arr = k3scaled / olen_eff
 
+            if override_strengths is not None:
+                k3_arr = override_strengths
+
             self.seq = seq = []
             # print(k3_arr)
             if perturbed_mode:
@@ -1647,6 +1656,11 @@ class OctupoleInsert:
     @property
     def magnet_lengths(self):
         return [el.l for el in self.seq if not isinstance(el, Drift)]
+
+    @property
+    def normalized_strengths(self):
+        k3arr = np.array([el.k3 for el in self.seq if isinstance(el, Octupole)])
+        return k3arr / k3arr.max()
 
     def calculate_optics_parameters(self):
         """

@@ -124,6 +124,7 @@ class CORRECTORS:
 
     ALL_I = list(set(COMBINED_COILS_AND_DIPOLE_SHIMS_AND_OTHER_I +
                      COMBINED_VIRTUAL_AND_DIPOLE_SHIMS_AND_OTHER_I))
+    ALL_V = list(set(COMBINED_COILS_AND_DIPOLE_SHIMS_AND_OTHER_V))
     ALL = list(set(ALL_I).union(set(COMBINED_COILS_AND_DIPOLE_SHIMS_AND_OTHER_V)))
 
 
@@ -156,16 +157,24 @@ class SEXTUPOLES:
             ['N:TS' + str(i) + 'V' for i in __sext_names_v2]
     ALL_BIPOLAR_I = ['N:IS' + str(i) + 'I' for i in __sext_names]
     ALL_BIPOLAR_V = ['N:IS' + str(i) + 'V' for i in __sext_names]
+    ALL_UNIPOLAR_I = ['N:TS' + str(i) + 'I' for i in __sext_names_v2]
+    ALL_UNIPOLAR_V = ['N:TS' + str(i) + 'V' for i in __sext_names_v2]
     ALL = ALL_I + ALL_V
 
 
 class OCTUPOLES:
-    ALL_I = ['N:IO' + str(i) + 'LI' for i in range(1, 19)] + ['N:OB9L6I', 'N:O4L6I',
-                                                              'N:O14L6I']
-    ALL_V = ['N:IO' + str(i) + 'LV' for i in range(1, 19)] + ['N:OB9L6V', 'N:O4L6V',
-                                                              'N:O14L6V']
-    ALL_I_ACTIVE = ['N:IO' + str(i) + 'LI' for i in range(1, 10)]
-    ALL_V_ACTIVE = ['N:IO' + str(i) + 'LV' for i in range(1, 10)]
+    # ALL_I = ['N:IO' + str(i) + 'LI' for i in range(1, 19)] + ['N:OB9L6I', 'N:O4L6I',
+    #                                                           'N:O14L6I']
+    # ALL_V = ['N:IO' + str(i) + 'LV' for i in range(1, 19)] + ['N:OB9L6V', 'N:O4L6V',
+    #                                                           'N:O14L6V']
+    # ALL_I_ACTIVE = ['N:IO' + str(i) + 'LI' for i in range(1, 10)]
+    # ALL_V_ACTIVE = ['N:IO' + str(i) + 'LV' for i in range(1, 10)]
+
+    # Bira hooked up
+    ALL_I = [f'N:IO{i:02d}BI' for i in range(1, 10)]
+    ALL_V = []
+    ALL_I_ACTIVE = ALL_I
+    ALL_V_ACTIVE = ALL_V
     ALL = ALL_I + ALL_V
 
 
@@ -204,7 +213,7 @@ class CONTROLS:
     VKICKER_ONOFF_DEVICES = [VKICKER_RESCHARGE, VKICKER_TRIG]
     VKICKER_ALL = [VKICKER, VKICKER_USER_KNOB, VKICKER_DELAY] + VKICKER_ONOFF_DEVICES
 
-    KICKER_STATE_FLOATS = [TRIGGER_A5, TRIGGER_A6, 'N:IKPSV', 'N:IKPSH', 'N:IKPSVX', 'N:IKPSVD']
+    KICKER_STATE_FLOATS = [TRIGGER_A5, TRIGGER_A6, VKICKER, HKICKER, VKICKER_USER_KNOB, VKICKER_DELAY]
 
     ALL = INJECTION_ALL + HKICKER_ALL + VKICKER_ALL
 
@@ -226,6 +235,8 @@ class OTHER:
     RF = [RF_FREQ, 'N:IRFLLA', 'N:IRFMOD', 'N:IRFEAT', 'N:IRFEPC']
     BEAM_CURRENT = 'N:IBEAM'
     BEAM_CURRENT_AVERAGE = 'N:IBEAMA'
+    BEAM_CURRENT_SL = 'N:IBEASL'
+    M2L_PMT_VOLTAGE = 'N:ISHV2'
     WCM_PARAMS = ['N:IWCMBF', 'N:IWCMBR', 'N:IWCMI', 'N:IWCMBP', 'N:IRFEPA', 'N:IRFEPP']
     BPM_ATN = 'Z:RP2ATN'
     BPM_CHAN = 'Z:RP2CHN'
@@ -233,8 +244,8 @@ class OTHER:
     BPM_EXTRAS = [BPM_ATN, BPM_CHAN, BPM_BOARD_NUM]
     CHIP_TEST_PLC = 'G:CHIPLC'
     TEST_DEVICE = 'Z:ACLTST'
-    AUX_DEVICES = [BEAM_CURRENT, BEAM_CURRENT_AVERAGE] + WCM_PARAMS + BPM_EXTRAS
-
+    AUX_DEVICES = ([BEAM_CURRENT, BEAM_CURRENT_AVERAGE, BEAM_CURRENT_SL, M2L_PMT_VOLTAGE]
+                   + WCM_PARAMS + BPM_EXTRAS)
 
 MASTER_STATUS_DEVICES = CONTROLS.VKICKER_ONOFF_DEVICES + \
                         CONTROLS.HKICKER_ONOFF_DEVICES + \
@@ -252,6 +263,16 @@ MASTER_STATE_CURRENTS = DIPOLES.ALL_I + \
                         CONTROLS.KICKER_STATE_FLOATS + \
                         OTHER.RF  # + \
 # + OTHER.AUX_DEVICES
+
+MASTER_STATE_VOLTAGES = DIPOLES.ALL_V + \
+                        CORRECTORS.ALL_V + \
+                        QUADS.ALL_V + \
+                        SKEWQUADS.ALL_V + \
+                        SEXTUPOLES.ALL_V + \
+                        OCTUPOLES.ALL_V + \
+                        DNMAGNET.ALL_V
+
+
 
 assert len(MASTER_STATE_CURRENTS) == len(set(MASTER_STATE_CURRENTS))
 
