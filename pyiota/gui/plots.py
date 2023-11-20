@@ -13,7 +13,8 @@ from matplotlib.font_manager import FontProperties
 
 from ..lattice.elements import ILMatrix, LatticeContainer
 from ocelot import Quadrupole, Bend, SBend, RBend, Vcor, Hcor, Sextupole, Undulator, \
-    Cavity, Multipole, Marker, Edge, Octupole, Matrix, Monitor, Drift, Solenoid, UnknownElement, TDCavity, TWCavity, \
+    Cavity, Multipole, Marker, Edge, Octupole, Matrix, Monitor, Drift, Solenoid, UnknownElement, \
+    TDCavity, TWCavity, \
     MagneticLattice, Element, Twiss
 
 logger = logging.getLogger(__name__)
@@ -28,7 +29,8 @@ def plot_simple(*args,
                 demean: bool = False,
                 normalize: bool = False,
                 twiny_args: Union[List, Dict, np.ndarray] = None,
-                **kwargs):
+                **kwargs
+                ):
     """
     Routine to plot data sharing a single plot. Each tuple is treated as (x,y) pair, and any number of singletons,
     lists or dicts containing these tuples can be supplied. Plotting on right y axis is supported with respective arguments.
@@ -68,7 +70,8 @@ def plot_simple(*args,
             elif isinstance(data_dict, pd.Series):
                 arrs.append((str(i), data_dict.values))
             else:
-                raise Exception(f'Supplied argument is not supported: {data_dict.__class__.__name__}')
+                raise Exception(
+                    f'Supplied argument is not supported: {data_dict.__class__.__name__}')
 
     fig, ax = plt.subplots(1, 1, figsize=(sizes[0], sizes[1]))
     for z, (i, v) in enumerate(arrays):
@@ -97,7 +100,7 @@ def plot_simple(*args,
     if arrays_twiny:
         axy = ax.twinx()
         axy.grid(False)
-        axy._get_lines.prop_cycler = ax._get_lines.prop_cycler
+        axy._get_lines = ax._get_lines
         for z, (i, v) in enumerate(arrays_twiny):
             if demean:
                 v = v.copy() - np.mean(v)
@@ -130,11 +133,13 @@ def plot_simple_grid(*args,
                      colorbar: bool = False,
                      no_title_idx=True,
                      no_title=False,
+                     title_inside=False,
                      sharey=True,
                      sharex=True,
                      return_all=False,
-                     equal:bool = False,
-                     **kwargs):
+                     equal: bool = False,
+                     **kwargs
+                     ):
     """
     Plot a grid of data sharing x/y axes. Each top level argument creates a new plot grid.
     Each argument must be a dict or list of dicts or list of arrays or list of tuples.
@@ -210,9 +215,11 @@ def plot_simple_grid(*args,
                     else:
                         # Tuple of (x,y,z) tuples
                         assert all(len(v2) == 2 for v2 in v) or all(len(v2) == 3 for v2 in v)
-                        x = [v2[0] if not isinstance(v2, np.ndarray) else np.arange(len(v)) for v2 in v]
+                        x = [v2[0] if not isinstance(v2, np.ndarray) else np.arange(len(v)) for v2
+                             in v]
                         y = [v2[1] if not isinstance(v2, np.ndarray) else v2 for v2 in v]
-                        z = [v2[2] if not isinstance(v2, np.ndarray) and len(v2) == 3 else None for v2 in v]
+                        z = [v2[2] if not isinstance(v2, np.ndarray) and len(v2) == 3 else None for
+                             v2 in v]
                         tuples_list.append((x, y, z, k))
                 elif isinstance(v, list):
                     # List of things
@@ -225,9 +232,11 @@ def plot_simple_grid(*args,
                     else:
                         # List of tuples (x,y,z)
                         assert all(len(v2) == 2 for v2 in v) or all(len(v2) == 3 for v2 in v)
-                        x = [v2[0] if not isinstance(v2, np.ndarray) else np.arange(len(v2)) for v2 in v]
+                        x = [v2[0] if not isinstance(v2, np.ndarray) else np.arange(len(v2)) for v2
+                             in v]
                         y = [v2[1] if not isinstance(v2, np.ndarray) else v2 for v2 in v]
-                        z = [v2[2] if not isinstance(v2, np.ndarray) and len(v2) == 3 else None for v2 in v]
+                        z = [v2[2] if not isinstance(v2, np.ndarray) and len(v2) == 3 else None for
+                             v2 in v]
                         tuples_list.append((x, y, z, k))
                 elif isinstance(v, np.ndarray):
                     # Just have x
@@ -267,21 +276,27 @@ def plot_simple_grid(*args,
                     else:
                         ax[i].plot(x, y, **kwargs)
                     if equal:
-                        ax[i].set_aspect('equal','box')
+                        ax[i].set_aspect('equal', 'box')
                 if not no_title:
                     if no_title_idx:
-                        ax[i].set_title(f"{k}", fontsize=fontsize)
+                        tlt = f"{k}"
                     else:
-                        ax[i].set_title(f"{i}|{k}", fontsize=fontsize)
+                        tlt = f"{i}|{k}"
+                    if title_inside:
+                        ax[i].text(0.5, 0.9, tlt, ha='center',
+                                   transform=ax[i].transAxes,
+                                   fontsize=fontsize)
+                    else:
+                        ax[i].set_title(tlt, fontsize=fontsize)
 
                 all_artists.append(artist_list)
             all_artists_arr = np.empty(shape, dtype=object)
-            #print(all_artists_arr)
-            #print(all_artists)
-            #for i in
-            all_artists_arr = np.array(all_artists) #[arr for arr in all_artists]
-            #print([arr for arr in all_artists])
-            #all_artists = np.array([np.array(arr) for arr in all_artists]).reshape(shape)
+            # print(all_artists_arr)
+            # print(all_artists)
+            # for i in
+            all_artists_arr = np.array(all_artists)  # [arr for arr in all_artists]
+            # print([arr for arr in all_artists])
+            # all_artists = np.array([np.array(arr) for arr in all_artists]).reshape(shape)
             ret_l.append(all_artists_arr)
     if len(args) == 1:
         fig = fig_l[0]
@@ -318,7 +333,8 @@ def plot_floor_map(fig=None,
                    lattice: MagneticLattice = None,
                    monitors: List = None,
                    legend: bool = False,
-                   **kwargs):
+                   **kwargs
+                   ):
     fig, ax = get_ax(fig, ax)
     if 'octupole_scaling' in kwargs:
         maxh = kwargs['octupole_scaling']
@@ -468,7 +484,7 @@ def plot_optics(box: LatticeContainer,
     """
     if fig is None:
         if fig_name is None:
-            fig = plt.figure(figsize=(10,5))
+            fig = plt.figure(figsize=(10, 5))
         else:
             fig = plt.figure(fig_name)
     else:
@@ -493,7 +509,7 @@ def plot_optics(box: LatticeContainer,
         ax_el = fig.add_axes(rect3, sharex=ax_top)
         axes = [ax_top, ax_bot, ax_el]
     else:
-        rect2 = [left, 0.19, width, 0.46+0.3]
+        rect2 = [left, 0.19, width, 0.46 + 0.3]
         rect3 = [left, 0.07, width, 0.12]
 
         ax_bot = fig.add_axes(rect2)
@@ -522,7 +538,7 @@ def plot_optics(box: LatticeContainer,
             _plot_extra_parameters(ax_bot2, s, tws, top_plot, font_props, twinx=True)
 
     # new_plot_elems(ax_el, lat, s_point = S[0], legend = legend, y_scale=0.8)  # plot elements
-    plot_elems(fig, ax_el, box.lattice, s_point=0,#s[0],
+    plot_elems(fig, ax_el, box.lattice, s_point=0,  # s[0],
                legend=legend, y_scale=0.8, font_size=font_size,
                excld_legend=excld_legend)
 
@@ -535,8 +551,10 @@ def plot_optics(box: LatticeContainer,
 
     return fig, *axes
 
+
 def _plot_extra_parameters(ax: plt.Axes, s: List[float], tws: List[Twiss],
-                           attributes: List[str], font_props: FontProperties, twinx: bool = False):
+                           attributes: List[str], font_props: FontProperties, twinx: bool = False
+                           ):
     """
      Gen 2 plots
 
@@ -563,7 +581,7 @@ def _plot_extra_parameters(ax: plt.Axes, s: List[float], tws: List[Twiss],
         if elem == 'Dx':
             elem = 'D_{x}'
         top_label = r"$" + greek + elem + "$"
-        names.append(greek+elem)
+        names.append(greek + elem)
         ax.plot(s, values, lw=2, label=top_label, c=color)
 
     d_F = max(vspan)
@@ -595,7 +613,8 @@ def _plot_extra_parameters(ax: plt.Axes, s: List[float], tws: List[Twiss],
     leg2.get_frame().set_alpha(0.2)
 
 
-def _plot_beta(ax: plt.Axes, s: List[float], beta_x, beta_y, font_props, label='', madx_colors=True):
+def _plot_beta(ax: plt.Axes, s: List[float], beta_x, beta_y, font_props, label='', madx_colors=True
+               ):
     """
      Gen 2 plots
 
@@ -610,13 +629,15 @@ def _plot_beta(ax: plt.Axes, s: List[float], beta_x, beta_y, font_props, label='
     ax.plot(s, beta_y, cby, lw=2, label=r"$\beta_{y}$" + f" {label}")
     ax.tick_params(axis='both', labelsize=font_props.get_size())
     ax.set_ylim(bottom=0.0)
-    leg = ax.legend(loc='upper left', shadow=False, fancybox=True, facecolor='gray', prop=font_props)
+    leg = ax.legend(loc='upper left', shadow=False, fancybox=True, facecolor='gray',
+                    prop=font_props)
     leg.get_frame().set_alpha(0.2)
 
 
-
-def plot_opt_func(fig, lat, tws, top_plot=None, legend=False, fig_name=None, grid=True, font_size=12,
-                  excld_legend=None, ontop: bool = False):
+def plot_opt_func(fig, lat, tws, top_plot=None, legend=False, fig_name=None, grid=True,
+                  font_size=12,
+                  excld_legend=None, ontop: bool = False
+                  ):
     """
     Modified from OCELOT
 
@@ -690,7 +711,8 @@ def plot_betas(ax, S, beta_x, beta_y, font_size, label=''):
     ax.plot(S, beta_x, 'b', lw=2, label=r"$\beta_{x}$" + f" {label}")
     ax.plot(S, beta_y, 'r--', lw=2, label=r"$\beta_{y}$" + f" {label}")
     ax.tick_params(axis='both', labelsize=font_size)
-    leg = ax.legend(loc='upper left', shadow=False, fancybox=True, prop=font_manager.FontProperties(size=font_size))
+    leg = ax.legend(loc='upper left', shadow=False, fancybox=True,
+                    prop=font_manager.FontProperties(size=font_size))
     leg.get_frame().set_alpha(0.2)
 
 
@@ -699,7 +721,8 @@ def plot_alphas(ax, S, x, y, font_size):
     ax.plot(S, x, 'b', lw=2, label=r"$\alpha_{x}$")
     ax.plot(S, y, 'r--', lw=2, label=r"$\alpha_{y}$")
     ax.tick_params(axis='both', labelsize=font_size)
-    leg = ax.legend(loc='upper left', shadow=False, fancybox=True, prop=font_manager.FontProperties(size=font_size))
+    leg = ax.legend(loc='upper left', shadow=False, fancybox=True,
+                    prop=font_manager.FontProperties(size=font_size))
     leg.get_frame().set_alpha(0.2)
 
 
@@ -744,7 +767,8 @@ def plot_disp(ax, tws, top_plot, font_size):
     ax.set_ylabel(top_ylabel, fontsize=font_size)
     ax.tick_params(axis='both', labelsize=font_size)
     # ax.plot(S, Dx,'black', lw = 2, label=lable)
-    leg2 = ax.legend(loc='upper right', shadow=False, fancybox=True, prop=font_manager.FontProperties(size=font_size))
+    leg2 = ax.legend(loc='upper right', shadow=False, fancybox=True,
+                     prop=font_manager.FontProperties(size=font_size))
     leg2.get_frame().set_alpha(0.2)
 
 
@@ -794,7 +818,8 @@ def plot_API(lat, fig=None, legend=False, fig_name=1, grid=True, font_size=12, n
 
     # plot_elems(ax_el, lat, nturns = 1, legend = True) # plot elements
     # new_plot_elems(fig, ax_el, lat, nturns = 1, legend = legend)
-    plot_elems(fig, ax_el, lat, legend=legend, y_scale=0.8, font_size=font_size, n_start=n_start, n_end=n_end)
+    plot_elems(fig, ax_el, lat, legend=legend, y_scale=0.8, font_size=font_size, n_start=n_start,
+               n_end=n_end)
 
     return fig, ax_xy
 
@@ -849,7 +874,8 @@ def plot_resonance_lines(ax, order=4, **kwargs):
                     xylist.append((np.array([-xv, -xv]), np.array([0, 1])))
                     # print(x,y,3)
         xyfinal = [(x, y) for (x, y) in xylist if
-                   not (x[0] > 1 and x[1] > 1) and not (y[0] > 1 and y[1] > 1) and not (x[0] < 0 and x[1] < 0) and not (
+                   not (x[0] > 1 and x[1] > 1) and not (y[0] > 1 and y[1] > 1) and not (
+                               x[0] < 0 and x[1] < 0) and not (
                            y[0] < 0 and y[1] < 0)]
         # xyfinal = xylist
         for (x, y) in xyfinal:
@@ -1038,7 +1064,8 @@ dict_plot.update({ILMatrix:     {"scale": 0.7, "color": "pink",         "edgecol
 
 def plot_elems(fig, ax, lat, s_point=0, nturns=1, y_lim=None, y_scale=1,
                legend=True, font_size=18, excld_legend=None,
-               n_start=0, n_end=None):
+               n_start=0, n_end=None
+               ):
     legend_font_size = font_size
 
     if excld_legend is None:
@@ -1086,8 +1113,9 @@ def plot_elems(fig, ax, lat, s_point=0, nturns=1, y_lim=None, y_scale=1,
     sol_max = np.max(np.abs(sol)) if len(sol) != 0 else 0
     rf_max = np.max(np.abs(rf)) if len(rf) != 0 else 0
     m_max = np.max(m) if len(m) != 0 else 0
-    ncols = np.sign(len(q)) + np.sign(len(b)) + np.sign(len(s)) + np.sign(len(c)) + np.sign(len(u)) + np.sign(
-        len(rf)) + np.sign(len(m))
+    ncols = np.sign(len(q)) + np.sign(len(b)) + np.sign(len(s)) + np.sign(len(c)) + np.sign(
+        len(u)) + np.sign(
+            len(rf)) + np.sign(len(m))
 
     labels_dict = {}
     for elem in dict_copy.keys():
@@ -1116,8 +1144,9 @@ def plot_elems(fig, ax, lat, s_point=0, nturns=1, y_lim=None, y_scale=1,
             ecolor = dict_copy[UnknownElement]["edgecolor"]
         ampl = 1
         s_coord = np.array(
-            [L + elem.l / 2. - l / 2., L + elem.l / 2. - l / 2., L + elem.l / 2. + l / 2., L + elem.l / 2. + l / 2.,
-             L + elem.l / 2. - l / 2.]) + s_point
+                [L + elem.l / 2. - l / 2., L + elem.l / 2. - l / 2., L + elem.l / 2. + l / 2.,
+                 L + elem.l / 2. + l / 2.,
+                 L + elem.l / 2. - l / 2.]) + s_point
 
         rect = np.array([-1, 1, 1, -1, -1])
 
@@ -1146,7 +1175,8 @@ def plot_elems(fig, ax, lat, s_point=0, nturns=1, y_lim=None, y_scale=1,
                 point, = ax.fill(s_coord, rect * ampl * scale * y_scale, "lightcyan", edgecolor="k",
                                  alpha=0.5, label=dict_copy[elem.__class__]["label"])
             else:
-                point, = ax.fill(s_coord, (rect + 1) * ampl * scale * y_scale, color, edgecolor=ecolor,
+                point, = ax.fill(s_coord, (rect + 1) * ampl * scale * y_scale, color,
+                                 edgecolor=ecolor,
                                  alpha=alpha, label=dict_copy[elem.__class__]["label"])
             dict_copy[Hcor]["label"] = ""
             dict_copy[Vcor]["label"] = ""
@@ -1160,7 +1190,8 @@ def plot_elems(fig, ax, lat, s_point=0, nturns=1, y_lim=None, y_scale=1,
         elif elem.__class__ in [Cavity, TWCavity, TDCavity]:
             ampl = 1
             point, = ax.fill(s_coord, rect * ampl * scale * y_scale, color,
-                             alpha=alpha, edgecolor="lightgreen", label=dict_copy[elem.__class__]["label"])
+                             alpha=alpha, edgecolor="lightgreen",
+                             label=dict_copy[elem.__class__]["label"])
             dict_copy[elem.__class__]["label"] = ""
 
         elif elem.__class__ == Undulator:
@@ -1190,7 +1221,7 @@ def plot_elems(fig, ax, lat, s_point=0, nturns=1, y_lim=None, y_scale=1,
         # # by default, disable the annotation visibility
         # annotation.set_visible(False)
         L += elem.l
-        #points_with_annotation.append([point, annotation])
+        # points_with_annotation.append([point, annotation])
         ax.set_xlabel("s [m]", fontsize=font_size)
 
     # def on_move(event):
@@ -1204,6 +1235,7 @@ def plot_elems(fig, ax, lat, s_point=0, nturns=1, y_lim=None, y_scale=1,
     #     if visibility_changed:
     #         plt.draw()
 
-    #on_move_id = fig.canvas.mpl_connect('motion_notify_event', on_move)
+    # on_move_id = fig.canvas.mpl_connect('motion_notify_event', on_move)
     if legend:
-        ax.legend(loc='upper center', ncol=ncols, shadow=False, prop=font_manager.FontProperties(size=legend_font_size))
+        ax.legend(loc='upper center', ncol=ncols, shadow=False,
+                  prop=font_manager.FontProperties(size=legend_font_size))
