@@ -3,7 +3,7 @@ __all__ = ['Generator', 'Parser']
 import itertools
 import pathlib
 import random
-import collections
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Union, Any, Iterable, Tuple
 
@@ -90,7 +90,7 @@ class Generator:
         is_single_param = isinstance(parameter, str)
         is_multiple_param = (
                 isinstance(parameter, tuple) and all((isinstance(ps, str) for ps in parameter)))
-        is_value_list = isinstance(values, (collections.Sequence, np.ndarray, tuple))
+        is_value_list = isinstance(values, (Sequence, np.ndarray, tuple))
         assert is_single_param or is_multiple_param
         if is_multiple_param:
             if is_value_list:
@@ -134,6 +134,7 @@ class Generator:
         Use all current parameters to generate permutations, and output resulting set as DataFrame.
         :param generate_labels:
         :param downsample_to:
+        :param ignore_path_limit
         :return:
         """
         keys = list(self.parameters.keys())
