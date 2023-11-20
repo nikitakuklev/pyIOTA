@@ -1,3 +1,5 @@
+import numpy as np
+
 from sixdsim import Knob, parse_knobs
 
 
@@ -10,6 +12,27 @@ def test_knob():
     assert list(ka1.vars.keys()) == ['x2', '$N_BLABLA', '$N_BLA2']
 
     # assert list(ka1.vars.keys()) == ['N:BLABLA', 'N:BLA2']
+
+    kminus = k1 - ka1
+    assert len(kminus.vars) == 4
+    assert kminus.vars['x2'].value == -7.0
+    assert kminus.vars['$N_BLABLA'].value == -0.8
+    assert kminus.vars['$N_BLA2'].value == 30.0
+
+    kminus2 = 1 - ka1
+    assert len(kminus2.vars) == 3
+    np.allclose([kminus2.vars[x].value for x in ['x2', '$N_BLABLA', '$N_BLA2']],
+                [-9.0, 0.2, 31.0], rtol=0)
+
+    kminus3 = -(ka1 - 1)
+    assert len(kminus3.vars) == 3
+    np.allclose([kminus3.vars[x].value for x in ['x2', '$N_BLABLA', '$N_BLA2']],
+                [-9.0, 0.2, 31.0], rtol=0)
+
+    kminus4 = -(-2 * ka1 - 1) / 2
+    assert len(kminus4.vars) == 3
+    np.allclose([kminus4.vars[x].value for x in ['x2', '$N_BLABLA', '$N_BLA2']],
+                [21 / 2, 2.6 / 2, -59 / 2], rtol=0)
 
     k3 = k1 + k2
     assert len(k3.vars) == 2
@@ -67,6 +90,7 @@ def test_knob_parse():
     knob3 = knob + 0.5
     check_no_dollar(knob3)
     assert len(knob3.vars) == 49
+    assert set(knob3.vars.keys()) == set(knob.vars.keys())
     for k, v in knob3.vars.items():
         assert v.value == knob.vars[k].value + 0.5
 
@@ -74,6 +98,12 @@ def test_knob_parse():
     check_no_dollar(knob3)
     assert len(knob3.vars) == 49
     for k, v in knob3.vars.items():
+        assert v.value == knob.vars[k].value * 0.5
+
+    k = knob - (knob / 2)
+    check_no_dollar(k)
+    assert len(k.vars) == 49
+    for k, v in k.vars.items():
         assert v.value == knob.vars[k].value * 0.5
 
     knob_delta = knob - knob3
@@ -90,4 +120,3 @@ def test_knob_parse():
     knob_prune.vars['N:IHC1RI'].value += 1.0
     knob_prune.prune(tol=1e-3)
     assert len(knob_prune) == 1
-

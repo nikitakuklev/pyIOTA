@@ -10,7 +10,7 @@ import time
 import uuid
 from pathlib import Path
 from re import Pattern
-from typing import Callable, Dict
+from typing import Callable, Dict, Union
 
 import numpy as np
 from ocelot import Cavity, Drift, Edge, Hcor, Monitor, Multipole, Quadrupole, SBend, Sextupole, \
@@ -590,7 +590,7 @@ class Knob(AbstractKnob):
     """
 
     def __init__(self, name: str = None, variables: dict = None):
-        self.vars = variables or {}
+        self.vars: dict[str, KnobVariable] = variables or {}
         self.absolute = True
         super().__init__(name)
 
@@ -627,8 +627,15 @@ class Knob(AbstractKnob):
         :param x: dict of {var: value}
         :return:
         """
-        variables = {k: KnobVariable(kind='$', var=k, acnet_var=k, value=v) for k, v in x.items()}
+        variables = {k: KnobVariable(kind='$', var=k, acnet_var=k, value=float(v)) for k,
+        v in x.items()}
         return Knob(variables=variables)
+
+    def remove(self, var: str):
+        """ Remove variable from knob """
+        if var in self.vars:
+            del self.vars[var]
+        return self
 
     def only_keep_shared(self, other: 'Knob') -> 'Knob':
         """
@@ -662,20 +669,24 @@ class Knob(AbstractKnob):
         knob.verbose = self.verbose
         return knob
 
-    def read_current_state(self, settings: bool = True, verbose: bool = False,
-                           split: bool = False
+    def read_current_state(self,
+                           settings: bool = True,
+                           verbose: bool = False,
+                           split: bool = False,
+                           accept_null: bool = False
                            ):
         """
         Read current ACNET values of the knob
         :param settings: If true, read setpoint
         :param verbose: Verbose printing
         :param split: Whether to split ACNET reads into several smaller ones
+        :param accept_null: If True, device value of None will be accepted, otherwise retried
         :return:
         """
         if verbose or self.verbose:
             verbose = True
         if verbose:
-            print(f'Reading in knob {self.name} current values')
+            logger.info(f'Reading in knob {self.name} current values')
         devices = [DoubleDevice(d.acnet_var) for d in self.vars.values()]
         # if settings:
         #     for d in devices:
@@ -683,25 +694,41 @@ class Knob(AbstractKnob):
         ds = DoubleDeviceSet(name=self.name,
                              members=devices,
                              settings=settings)
-        ds.read(verbose=verbose, split=split)
+        ds.read(verbose=verbose, split=split, accept_null=accept_null)
         tempdict = {k.acnet_var: k for k in self.vars.values()}
         for k, v in ds.devices.items():
             tempdict[k].value = v.value
         return self
 
-    def prune(self, tol: float = 1e-4, verbose: bool = False):
+    def prune(self, tol: float = 1e-4, verbose: bool = False, exceptions: dict[str, float] = None):
+        """
+        Remove all variables with absolute value less than tol
+        :param tol: Tolerance
+        :param verbose:
+        :return:
+        """
         if verbose or self.verbose:
             verbose = True
+        # if verbose:
+        pruned = {}
+        notpruned = {}
+        exceptions = exceptions or {}
+        for k in self.vars.values():
+            toltemp = exceptions.get(k.acnet_var, tol)
+            if np.abs(k.value) <= toltemp:
+                pruned[k.acnet_var] = k.value
+            else:
+                notpruned[k.acnet_var] = k.value
         if verbose:
-            pruned = {k.acnet_var: k.value for k in self.vars.values() if np.abs(k.value) <= tol}
-            print(f'{len(pruned)} pruned:', pruned)
-        self.vars = {k.acnet_var: k for k in self.vars.values() if np.abs(k.value) > tol}
+            logger.info(f'{len(pruned)} pruned:', pruned)
+        self.vars = {k.acnet_var: k for k in self.vars.values() if k.acnet_var in notpruned}
         return self
 
     def is_empty(self):
         return len(self.vars) == 0
 
-    def set(self, verbose: bool = False, split_types: bool = False,
+    def set(self, verbose: bool = False,
+            split_types: bool = False,
             split: bool = True,
             calculate_physical_currents: bool = False
             ):
@@ -859,7 +886,7 @@ class Knob(AbstractKnob):
                     devs_to_set[c] = KnobVariable(kind='$', var=c, value=currents[i])
                 if not silent:
                     print(
-                            f'Virtual knobs ({hor}|{ver}|{skew}) -> physical ({[devs_to_set[c] for c in cg]})')
+                            f'Virtual ({hor}|{ver}|{skew}) -> physical ({[devs_to_set[c] for c in cg]})')
         if copy:
             knob = self.copy()
             knob.vars = devs_to_set
@@ -871,14 +898,20 @@ class Knob(AbstractKnob):
     def __len__(self):
         return len(self.vars)
 
-    def __math(self, other, operation: Callable, opcode: str = ' ', keep_unique_values: bool = True
+    def __math(self, other: Union[float, 'Knob'],
+               operation: Callable,
+               opcode: str = ' ',
+               keep_unique_values: bool = True,
+               identity_missing_value=None,
                ):
         """
         General math operation method, that takes care of relative/absolute knob complexities
         :param other:
         :param operation:
         :param opcode:
-        :param keep_unique_values:
+        :param keep_unique_values: Whether to keep values only present in one of two knobs
+        :param identity_missing_value: if keep_unique_values is True, will be used as placeholder
+         for the callable operations (typically this is 1.0, such that 1.0*[other value])
         :return:
         """
         knob = self.copy()
@@ -897,8 +930,15 @@ class Knob(AbstractKnob):
                             new_vars[v.acnet_var].value = operation(new_vars[v.acnet_var].value,
                                                                     v.value)
                         else:
-                            # print(f'Added extra var {k}')
-                            new_vars[v.acnet_var] = v.copy()
+                            if identity_missing_value is None:
+                                raise ValueError(f'Variable {v.acnet_var} is only present in 1 '
+                                                 f'knob, an identity op value must be provided')
+                            else:
+                                val = operation(identity_missing_value, v.value)
+                                knob = KnobVariable(kind=v.kind, var=v.var, value=val,
+                                                    acnet_var=v.acnet_var)
+                                new_vars[v.acnet_var] = knob
+
                 if (not other.absolute and not set2.issubset(set1)) or (
                         not self.absolute and not set1.issubset(set2)):
                     raise Exception(
@@ -922,32 +962,56 @@ class Knob(AbstractKnob):
         knob.absolute = True if (self.absolute or other.absolute) else False
         return knob
 
-    def __getitem__(self, item):
+    def __getitem__(self, item: str) -> float:
         return self.vars[item].value
 
-    def __sub__(self, other):
-        assert isinstance(other, Knob)
+    def _check_other(self, other):
+        if isinstance(other, int):
+            other = float(other)
+        assert isinstance(other, Knob) or isinstance(other, float)
+        return other
+
+    def __sub__(self, other) -> 'Knob':
+        # self - B
+        other = self._check_other(other)
         if self.verbose:
             print(f'Subtracting ({other.name}) from ({self.name}) | ({len(self.vars)} values)')
-        return self.__math(other, operator.sub, '-')
+        return self.__math(other, operator.sub, '-', identity_missing_value=0.0)
 
-    def __add__(self, other):
-        # assert isinstance(other, Knob)
+    def __rsub__(self, other) -> 'Knob':
+        # B - self
+        other = self._check_other(other)
+        if self.verbose:
+            print(f'Subtracting ({other.name}) from ({self.name}) | ({len(self.vars)} values)')
+        negknob = self.__math(-1.0, operator.mul, '*')
+        return negknob.__math(other, operator.add, '+', identity_missing_value=1.0)
+
+    def __add__(self, other) -> 'Knob':
+        other = self._check_other(other)
         if self.verbose:
             print(f'Adding ({other.name}) to ({self.name}) | ({len(self.vars)} values)')
-        return self.__math(other, operator.add, '+')
+        return self.__math(other, operator.add, '+', identity_missing_value=0.0)
 
-    def __truediv__(self, other):
-        assert isinstance(other, float) or isinstance(other, int)
-        if self.verbose:
-            print(f'Diving knob {self.name} by {other} (returning copy)')
-        return self.__math(other, operator.truediv, '/')
+    def __radd__(self, other) -> 'Knob':
+        return self.__add__(other)
 
-    def __mul__(self, other):
-        assert isinstance(other, float) or isinstance(other, int)
+    def __truediv__(self, other) -> 'Knob':
+        other = self._check_other(other)
         if self.verbose:
-            print(f'Multiplying knob {self.name} by {other} (returning copy)')
-        return self.__math(other, operator.mul, '*')
+            print(f'Diving knob [{self.name}] by [{other}] (returning copy)')
+        return self.__math(other, operator.truediv, '/', identity_missing_value=None)
+
+    def __mul__(self, other) -> 'Knob':
+        other = self._check_other(other)
+        if self.verbose:
+            print(f'Multiplying knob [{self.name}] by [{other}] (returning copy)')
+        return self.__math(other, operator.mul, '*', identity_missing_value=1.0)
+
+    def __rmul__(self, other) -> 'Knob':
+        return self.__mul__(other)
+
+    def __neg__(self) -> 'Knob':
+        return self.__math(-1.0, operator.mul, '*')
 
     def __str__(self):
         return f'Knob(Abs:{self.absolute}) ({self.name}) at {hex(id(self))}: ({len(self.vars)}) ' \
