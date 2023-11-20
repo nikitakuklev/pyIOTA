@@ -6,9 +6,6 @@ import time
 from typing import Union, Tuple, List, Dict
 
 import numpy as np, scipy as sc
-# import numba
-#from numba import jit
-#
 import scipy.integrate as sci
 import scipy.signal
 from scipy.optimize import minimize, minimize_scalar

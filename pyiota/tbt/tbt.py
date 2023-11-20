@@ -61,7 +61,8 @@ class Util:
             props2 = parse(props_fpath2)
             if props or props2:
                 # Manual overrides auto generated values
-                logger.info(f'{folder} - {len(fs)} files (cfg LOADED - {len(props)} gen + {len(props2)} manual keys)')
+                logger.info(
+                    f'{folder} - {len(fs)} files (cfg LOADED - {len(props)} gen + {len(props2)} manual keys)')
                 props.update(props2)
             else:
                 # No config
@@ -159,8 +160,10 @@ class SimKick:
 
     @staticmethod
     def convert_tbt_matrices_to_track_df(bpms: Iterable[str],
-                                         mx: np.ndarray, mpx: np.ndarray, my: np.ndarray, mpy: np.ndarray,
-                                         families: Iterable[str] = None):
+                                         mx: np.ndarray, mpx: np.ndarray, my: np.ndarray,
+                                         mpy: np.ndarray,
+                                         families: Iterable[str] = None
+                                         ):
         """
         Convert data matrices from M bpms x N turns format into a track dataframe of single particle
         """
@@ -190,7 +193,8 @@ class SimKick:
 
     def __init__(self,
                  df: pd.DataFrame,
-                 families: Tuple = None):
+                 families: Tuple = None
+                 ):
         """
         Stores data from a tracking simulation. Many methods are analogous to experimental Kick class.
         :param df: master dataframe
@@ -239,7 +243,8 @@ class SimKick:
                       families: List = None,
                       spacing: float = 1.0,
                       data_trim: slice = None,
-                      store: bool = True):
+                      store: bool = True
+                      ):
         """ Calculates FFT for each particle and store results """
         assert self.has_track
         data = self.tdata
@@ -276,7 +281,8 @@ class SimKick:
                         search_kwargs: Dict[str, int] = None,
                         use_precalculated: bool = True,
                         data_trim: slice = None,
-                        pairs: bool = False):
+                        pairs: bool = False
+                        ):
         """
         Calculates tune by finding peaks in FFT data, optionally using precomputed data to save time
 
@@ -302,7 +308,8 @@ class SimKick:
                         fft_freq_l = data.loc[:, col_fr]
                         fft_power_l = data.loc[:, col_pwr]
                     else:
-                        fft_freq_l, fft_power_l = self.calculate_fft(naff, [f], data_trim=data_trim, store=False)[0]
+                        fft_freq_l, fft_power_l = \
+                        self.calculate_fft(naff, [f], data_trim=data_trim, store=False)[0]
 
                     for fft_freq, fft_power in zip(fft_freq_l, fft_power_l):
                         tunes.append(fft_freq[np.argmax(fft_power)])
@@ -314,7 +321,8 @@ class SimKick:
 
     def calculate_invariants(self, beta_x, alpha_x, beta_y, alpha_y,
                              i1_str=0.0,
-                             data_trim: slice = None):
+                             data_trim: slice = None
+                             ):
         from .optics import Coordinates
         from .optics import Invariants
         assert self.has_track
@@ -349,9 +357,12 @@ class SimKick:
         assert self.has_track
         data = self.df.iloc[0, self.df.columns.get_loc('track')].df
 
-        data[self.Datatype.stdevCSX.value] = [np.std(x)/np.mean(x) for x in data[self.Datatype.CSX.value]]
-        data[self.Datatype.stdevCSY.value] = [np.std(x)/np.mean(x) for x in data[self.Datatype.CSY.value]]
-        data[self.Datatype.stdevI1.value] = [np.std(x)/np.mean(x) for x in data[self.Datatype.I1.value]]
+        data[self.Datatype.stdevCSX.value] = [np.std(x) / np.mean(x) for x in
+                                              data[self.Datatype.CSX.value]]
+        data[self.Datatype.stdevCSY.value] = [np.std(x) / np.mean(x) for x in
+                                              data[self.Datatype.CSY.value]]
+        data[self.Datatype.stdevI1.value] = [np.std(x) / np.mean(x) for x in
+                                             data[self.Datatype.I1.value]]
 
 
 class Kick:
@@ -380,7 +391,8 @@ class Kick:
                  parent_sequence: Optional['KickSequence'] = None,
                  file_name: str = None,
                  trim: Tuple = None,
-                 iota_defaults: bool = False):
+                 iota_defaults: bool = False
+                 ):
         """
         Represents a single kick (continuous TBT time series) measured by multiple BPMs
 
@@ -415,12 +427,15 @@ class Kick:
         if bpm_list is None:
             if iota_defaults:
                 bpm_list = set([k[:-1] for k in iota.BPMS.ALLA])
-                logger.info(f'BPM list not specified - deducing ({len(bpm_list)}) IOTA BPMs: ({bpm_list})')
+                logger.info(
+                    f'BPM list not specified - deducing ({len(bpm_list)}) IOTA BPMs: ({bpm_list})')
             else:
                 bpm_list = set(
-                    [k[:-1] for k in df.columns if k not in special_keys and k.endswith(('V', 'H', 'S', 'C'))])
+                        [k[:-1] for k in df.columns if
+                         k not in special_keys and k.endswith(('V', 'H', 'S', 'C'))])
                 logger.warning('Deducing BPMs!')
-                logger.info(f'BPM list not specified - deducing ({len(bpm_list)}) BPMs: ({bpm_list})')
+                logger.info(
+                    f'BPM list not specified - deducing ({len(bpm_list)}) BPMs: ({bpm_list})')
 
         self.bpm_list_orig = list(copy.copy(bpm_list))
         self.bpm_list = list(copy.copy(bpm_list))
@@ -440,7 +455,8 @@ class Kick:
         self.bpm_families_active = {'H': self.H, 'V': self.V, 'PX': self.PX, 'PY': self.PY,
                                     'S': self.S,
                                     'A': self.ALL,
-                                    'C': self.C, 'CH': self.CH, 'CV': self.CV}
+                                    'C': self.C, 'CH': self.CH, 'CV': self.CV
+                                    }
         self.bpm_families_all = copy.deepcopy(self.bpm_families_active)
 
         # Store original data
@@ -529,7 +545,8 @@ class Kick:
             raise Exception(f'Null values found in data!')
 
         if not silent:
-            logger.info(f'Upgraded to v2 - ({len(self.tracks["orig"])})/({len(self.tracks["raw"])}) orig/raw frames')
+            logger.info(
+                f'Upgraded to v2 - ({len(self.tracks["orig"])})/({len(self.tracks["raw"])}) orig/raw frames')
             logger.info(f'Sizes o: ({ {k: v.shape for k, v in self.tracks["orig"].items()} })')
             logger.info(f'Sizes r: ({ {k: v.shape for k, v in self.tracks["raw"].items()} })')
 
@@ -605,7 +622,7 @@ class Kick:
             assert df.index[0] == bpm_name
             if df.iloc[0, 0] != df_orig.loc[bpm_name, :].values[self.trim][0]:
                 raise ValueError(
-                    f'Error rolling ({f}): {df.iloc[0, 0:5]} != {df_orig.loc[bpm_name, :].values[self.trim][0:5]}')
+                        f'Error rolling ({f}): {df.iloc[0, 0:5]} != {df_orig.loc[bpm_name, :].values[self.trim][0:5]}')
         rlen = self.tracks['raw'][families[0]].shape[1]
         olen = self.tracks['orig'][families[0]].shape[1]
 
@@ -621,6 +638,10 @@ class Kick:
     def NB(self):
         """ Current number of enabled default family BPMs """
         return len(self.bpm_list)
+
+    @property
+    def custom(self):
+        return self.df.iloc[0,self.df.columns.get_loc('custom')]
 
     def v2_raw_from_orig(self, f):
         """ Raw matrices from orig ones """
@@ -681,7 +702,8 @@ class Kick:
 
     def copy(self) -> 'Kick':
         df2 = self.df.copy(deep=True)
-        kick = Kick(df=df2, kick_id=self.idx, id_offset=self.idx_offset, trim=self.trim, parent_sequence=self.ks)
+        kick = Kick(df=df2, kick_id=self.idx, id_offset=self.idx_offset, trim=self.trim,
+                    parent_sequence=self.ks)
         kick.H = self.H
         kick.V = self.V
         kick.S = self.S
@@ -721,7 +743,7 @@ class Kick:
                 return self.df.iloc[0, column]
             else:
                 raise Exception(
-                    f'Key ({column}) is neither a column nor valid integer index - have: ({self.df.columns})')
+                        f'Key ({column}) is neither a column nor valid integer index - have: ({self.df.columns})')
 
     def col(self, column: Union[str, int]):
         """
@@ -746,7 +768,7 @@ class Kick:
 
     def summarize(self):
         print(
-            f'Kick idx ({self.idx}) idxglobal ({self.idxg}): ({self.get_turns()}) turns, trim ({self.trim}), at ({self.kickh:.5f})H ({self.kickv:.5f})V')
+                f'Kick idx ({self.idx}) idxglobal ({self.idxg}): ({self.get_turns()}) turns, trim ({self.trim}), at ({self.kickh:.5f})H ({self.kickv:.5f})V')
         self.bpms_summarize_status()
 
     def set_trim(self, trim: slice):
@@ -755,8 +777,11 @@ class Kick:
     def reset_trim(self):
         self.trim = self.default_trim
 
-    def suggest_trim(self, min_idx: int, max_idx: int, threshold: float = 0.2, min_turns: int = None,
-                     n_refturns: int = 50, families: list = None, verbose: bool = False, silent: bool = True):
+    def suggest_trim(self, min_idx: int, max_idx: int, threshold: float = 0.2,
+                     min_turns: int = None,
+                     n_refturns: int = 50, families: list = None, verbose: bool = False,
+                     silent: bool = True
+                     ):
         """
         Finds longest signal trim within constraints, based on local SNR
         :param n_refturns: Initial signal interval past minidx to compare to
@@ -781,14 +806,16 @@ class Kick:
                         break
                     elif offset + 30 > max_idx - min_idx:
                         if not silent:
-                            logger.warning(f'Trim search on BPM ({k}) reached END OF SIGNAL ({offset})+({min_idx})')
+                            logger.warning(
+                                f'Trim search on BPM ({k}) reached END OF SIGNAL ({offset})+({min_idx})')
                         break
                     elif offset + 30 > len(v):
                         # logger.warning('Suggested trim search reached END OF SIGNAL')
                         # break
                         raise Exception('Out of bounds problem - check trim logic')
                     offset += 5
-                if verbose: print(f'BPM {k}: Iampl {initial_ampl:.3f}, Fampl {ampl:.3f}, offset {offset}')
+                if verbose: print(
+                    f'BPM {k}: Iampl {initial_ampl:.3f}, Fampl {ampl:.3f}, offset {offset}')
                 offsets[k] = offset
         if verbose: print(f'Found trims: {min_idx} + {offsets}')
         offset_avg = int(np.round(np.mean(list(offsets.values()))))
@@ -807,7 +834,9 @@ class Kick:
         match_keys = list(filter(r.match, state.keys()))
         return {k: state[k] for k in match_keys}
 
-    def get_column_names(self, bpms: List = None, family: str = None, data_type: Datatype = Datatype.RAW):
+    def get_column_names(self, bpms: List = None, family: str = None,
+                         data_type: Datatype = Datatype.RAW
+                         ):
         """
         Determines final column names
         :param bpms:
@@ -845,7 +874,8 @@ class Kick:
                      use_cache: bool = True,
                      add_to_cache: bool = True,
                      no_trim: bool = False,
-                     data_trim: slice = None):
+                     data_trim: slice = None
+                     ):
         """
         General data retrieval method for data that is per-bpm
 
@@ -868,7 +898,8 @@ class Kick:
 
         if columns is not None:
             if data_type is not self.Datatype.RAW:
-                raise Exception(f'Column list used with nondefault datatype {data_type} - this seems like an error')
+                raise Exception(
+                    f'Column list used with nondefault datatype {data_type} - this seems like an error')
 
         if not isinstance(bpms, list) and bpms is not None:
             bpms = [bpms]
@@ -926,6 +957,19 @@ class Kick:
         else:
             raise Exception(f'Unknown return type ({return_type}')
 
+    def drop_bpm_data(self,
+                      bpms: Union[List[str], str] = None,
+                      family: str = 'A',
+                      data_type: Datatype = None,
+                      ):
+        if data_type is not None:
+            dtypes = [data_type]
+        else:
+            dtypes = [x for x in Kick.Datatype]
+        for d in dtypes:
+            columns = self.get_column_names(bpms, family, d)
+            self.df.drop(columns, axis=1, inplace=True, errors='ignore')
+
     def get_bpm_matrix(self, family: str = 'V', remove_sequence_data: bool = False) -> np.ndarray:
         """
         Returns all raw data of active BPMs in a family as 2D array (M BPMs x N turns)
@@ -967,10 +1011,12 @@ class Kick:
         :param bpm: BPM name
         :return: Frequency, Power arrays
         """
-        return self.col(bpm + self.Datatype.FFT_FREQ.value), self.col(bpm + self.Datatype.FFT_POWER.value)
+        return self.col(bpm + self.Datatype.FFT_FREQ.value), self.col(
+            bpm + self.Datatype.FFT_POWER.value)
 
     def get_fft_data(self, bpm: str) -> Tuple[np.ndarray, np.ndarray]:
-        return self.col(bpm + self.Datatype.FFT_FREQ.value), self.col(bpm + self.Datatype.FFT_POWER.value)
+        return self.col(bpm + self.Datatype.FFT_FREQ.value), self.col(
+            bpm + self.Datatype.FFT_POWER.value)
 
     def get_tune_data(self, bpm: str):
         return self.fft_freq[bpm], self.fft_pwr[bpm], self.peaks[bpm]
@@ -1005,6 +1051,8 @@ class Kick:
         :param soft_fail:
         :return: List of string BPM keys
         """
+        if len(self.bpm_list_orig) == 0:
+            return []
         bpms = []
         if isinstance(family, str):
             family = [family]
@@ -1044,7 +1092,7 @@ class Kick:
 
     def bpms_add(self, bpms: List, family: str = 'C'):
         """ Add bpm id to an active family - typically implies it already has data """
-        raise Exception  # temp disable
+        #raise Exception  # temp disable
         for b in bpms:
             fam = family or 'C'
             fam_list = self.bpm_families_active[fam]
@@ -1095,16 +1143,19 @@ class Kick:
             v_all = self.bpm_families_all[k]
             delta = set(v_all).difference(set(v))
             if delta:
-                print(f'Plane ({k:2s}): ({len(v_all):<2d}) BPMs total, ({len(v):<2d}) active, disabled: ({delta})')
+                print(
+                    f'Plane ({k:2s}): ({len(v_all):<2d}) BPMs total, ({len(v):<2d}) active, disabled: ({delta})')
             else:
-                print(f'Plane ({k:2s}): ({len(v_all):<2d}) BPMs total, ({len(v):<2d}) active, disabled: (None)')
+                print(
+                    f'Plane ({k:2s}): ({len(v_all):<2d}) BPMs total, ({len(v):<2d}) active, disabled: (None)')
 
     def bpms_apply_filters(self,
                            plane: str,
                            methods: List[Tuple[Callable, Tuple]],
                            data_type: Datatype = Datatype.RAW,
                            delete_on_fail: bool = False,
-                           debug: bool = True):
+                           debug: bool = True
+                           ):
         """
         Applies the provided methods with the parameter tuples, and determines which BPMs failed the tests
         :param plane:
@@ -1121,6 +1172,7 @@ class Kick:
         for m, kw in methods:
             kw = kw or {}
             (results, results_data) = m(data, **kw)
+            assert set(results.keys()) == set(data.keys())
             r.append(results)
             r_data.append(results_data)
 
@@ -1153,7 +1205,8 @@ class Kick:
                           method_kwargs: Dict = None,
                           data_type: Datatype = Datatype.RAW,
                           delete_on_fail: bool = False,
-                          silent: bool = True) -> Tuple[Dict, Dict]:
+                          silent: bool = True
+                          ) -> Tuple[Dict, Dict]:
         """
         Applies the provided method onto each bpm in a plane, optionally removing those that failed. DEPRECATED.
         :param silent:
@@ -1183,7 +1236,8 @@ class Kick:
                              data: Dict,
                              method: str = 'mean',
                              sigma: float = 2.0,
-                             use_percentile_std: bool = True):
+                             use_percentile_std: bool = True
+                             ):
         if method == 'mean':
             means = {k: np.mean(v) for k, v in data.items()}
             means_vals = np.array([v for v in means.values()])
@@ -1193,9 +1247,11 @@ class Kick:
                 std = np.std(means_vals[(means_vals > pcs[0]) & (means_vals < pcs[1])])
             else:
                 std = np.std(means_vals)
-            outliers = {k: v for k, v in means.items() if v > mean + sigma * std or v < mean - sigma * std}
+            outliers = {k: v for k, v in means.items() if
+                        v > mean + sigma * std or v < mean - sigma * std}
             results = {k: k not in outliers for k, v in data.items()}
-            results_data = {k: {'method': 'mean', 'values': (mean, std * sigma, v)} for k, v in means.items()}
+            results_data = {k: {'method': 'mean', 'values': (mean, std * sigma, v)} for k, v in
+                            means.items()}
         else:
             raise Exception(f'Method ({method}) is unrecognized')
         return results, results_data
@@ -1204,7 +1260,8 @@ class Kick:
                            data: Dict,
                            method: str = 'abs',
                            threshold: float = 10.0,
-                           neg_threshold: float = None):
+                           neg_threshold: float = None
+                           ):
         """
         Filters data by absolute signal threshold. Specify negative value, or -positive will be assumed.
         :param data:
@@ -1230,33 +1287,40 @@ class Kick:
     def bpms_filter_symmetry(self,
                              data: Dict,
                              method: str = 'mean',
-                             threshold: float = 1.2):
+                             threshold: float = 1.2
+                             ):
         if method == 'mean':
             data_demean = {k: v[1:] - np.mean(v[1:]) for k, v in data.items()}
             vals1 = {k: (np.mean(v[v > 0.0]), -np.mean(v[v < 0.0])) for k, v in data_demean.items()}
-            outliers = {k: v for k, v in vals1.items() if v[0] / v[1] > threshold or v[1] / v[0] > threshold}
+            outliers = {k: v for k, v in vals1.items() if
+                        v[0] / v[1] > threshold or v[1] / v[0] > threshold}
             results = {k: k not in outliers for k, v in data.items()}
             results_data = {k: {'method': method,
-                                'values': (threshold, v[0], v[1], v[0] / v[1], v[1] / v[0])} for (k, v) in
+                                'values': (threshold, v[0], v[1], v[0] / v[1], v[1] / v[0])
+                                } for (k, v) in
                             vals1.items()}
         elif method == 'pilot':
             pilot_slice = np.s_[1:171]
             data_demean = {k: v[1:] - np.mean(v[pilot_slice]) for k, v in data.items()}
             vals1 = {k: (np.mean(v[v > 0.0]), -np.mean(v[v < 0.0])) for k, v in data_demean.items()}
-            outliers = {k: v for k, v in vals1.items() if v[0] / v[1] > threshold or v[1] / v[0] > threshold}
+            outliers = {k: v for k, v in vals1.items() if
+                        v[0] / v[1] > threshold or v[1] / v[0] > threshold}
             results = {k: k not in outliers for k, v in data.items()}
             results_data = {k: {'method': method,
                                 # 'values': (threshold, v[0], v[1], v[0]/v[1], v[1]/v[0])} for (k, v) in vals1.items()}
-                                'values': f'+avg:{v[0]:.3f} vs -avg:{v[1]:.3f} above ratio of {threshold}'}
+                                'values': f'+avg:{v[0]:.3f} vs -avg:{v[1]:.3f} above ratio of {threshold}'
+                                }
                             for (k, v) in vals1.items()}
         elif method == 'endpilot':
             pilot_slice = np.s_[500:]
             data_demean = {k: v[172:] - np.mean(v[pilot_slice]) for k, v in data.items()}
             vals1 = {k: (np.mean(v[v > 0.0]), -np.mean(v[v < 0.0])) for k, v in data_demean.items()}
-            outliers = {k: v for k, v in vals1.items() if v[0] / v[1] > threshold or v[1] / v[0] > threshold}
+            outliers = {k: v for k, v in vals1.items() if
+                        v[0] / v[1] > threshold or v[1] / v[0] > threshold}
             results = {k: k not in outliers for k, v in data.items()}
             results_data = {k: {'method': method,
-                                'values': (threshold, v[0], v[1], v[0] / v[1], v[1] / v[0])} for (k, v) in
+                                'values': (threshold, v[0], v[1], v[0] / v[1], v[1] / v[0])
+                                } for (k, v) in
                             vals1.items()}
         else:
             raise Exception(f'Method ({method}) is unrecognized')
@@ -1268,7 +1332,8 @@ class Kick:
                                  threshold: int = 2,
                                  splits: int = 4,
                                  data_region: slice = None,
-                                 relative: bool = True):
+                                 relative: bool = True
+                                 ):
         """
         Tests if first region of signal has specified property, optionally relative to the last region
         """
@@ -1295,7 +1360,9 @@ class Kick:
                 val1, val2 = fun(split_signals[0]), fun(split_signals[-1])
                 result = val1 / val2 > threshold
                 results[k] = result
-                results_data[k] = {'test': method + '_relative', 'values': (threshold, val1, val2, val1 / val2)}
+                results_data[k] = {'test': method + '_relative',
+                                   'values': (threshold, val1, val2, val1 / val2)
+                                   }
         return results, results_data
 
     # Helpers for state categories
@@ -1329,10 +1396,13 @@ class Kick:
         elements = [q + '.SETTING' for q in iota.SEXTUPOLES.ALL_CURRENTS]
         return {k: self.state(k) for k in elements}
 
-    def get_turns(self) -> int:
-        bpm = self.get_bpms()[0]
+    def get_turns(self):
+        bpms = self.get_bpms()
         # print(self.col(bpm))
-        return len(self.col(bpm))
+        if len(bpms) > 0:
+            return len(self.col(bpms[0]))
+        else:
+            return None
 
     ### Physics starts here
 
@@ -1446,7 +1516,8 @@ class Kick:
                     env = matrix[row, :]
                     data_y = matrix_data[row, :]
 
-                    res = scopt.differential_evolution(fun, bounds=bounds, args=(data_x, env), popsize=10)
+                    res = scopt.differential_evolution(fun, bounds=bounds, args=(data_x, env),
+                                                       popsize=10)
                     reslist.append(res)
                     reslist_x.append(res.x)
                     data_env[row, :] = amp(data_x, res.x)
@@ -1467,7 +1538,8 @@ class Kick:
                         data_dec[row, :] = data_y.copy()
                         reslist_x.append([0])
                 else:
-                    res = scopt.differential_evolution(fun, bounds=bounds, args=(data_x, env), popsize=100)
+                    res = scopt.differential_evolution(fun, bounds=bounds, args=(data_x, env),
+                                                       popsize=100)
                     reslist = [res for i in range(matrix.shape[0])]
                     for row in range(matrix.shape[0]):
                         data_y = matrix_data[row, :]
@@ -1515,7 +1587,8 @@ class Kick:
                 # bpmmax = df.index[np.argmax(np.abs(U))]
                 cmax = np.argmax(np.max(np.abs(U), axis=0))
                 if dominance:
-                    raise ValueError(f'Dominance detected C{cmax}{family}: {np.max(np.abs(U), axis=0)}')
+                    raise ValueError(
+                        f'Dominance detected C{cmax}{family}: {np.max(np.abs(U), axis=0)}')
                 else:
                     logger.warning(f'Dominance {family}: {np.max(np.abs(U), axis=0)}')
 
@@ -1567,8 +1640,11 @@ class Kick:
                 for row in range(matrix.shape[0]):
                     bx = df_optics.loc[df.index[row], 'B' + optics_map[family]]
                     ax = df_optics.loc[df.index[row], 'A' + optics_map[family]]
-                    data_xnorm[row, :], data_pxnorm[row, :] = Coordinates.normalize(matrix[row, :], matrix_p[row, :],
-                                                                                    beta=bx, alpha=ax)
+                    data_xnorm[row, :], data_pxnorm[row, :] = Coordinates.normalize(matrix[row, :],
+                                                                                    matrix_p[row,
+                                                                                    :],
+                                                                                    beta=bx,
+                                                                                    alpha=ax)
             else:
                 for row in range(matrix.shape[0]):
                     bx = df_optics.loc[df.index[row], 'B' + optics_map[family]]
@@ -1588,7 +1664,8 @@ class Kick:
                     pairs: list = None,
                     optics_map: dict = None,
                     normalized: bool = True,
-                    debug: bool = False):
+                    debug: bool = False
+                    ):
         """ Compute momentum pairwise for either all pairs or only those starting at particular BPM """
         from . import Coordinates
         assert families is not None
@@ -1627,7 +1704,8 @@ class Kick:
                     index_list.append((bpm1, bpm2))
                     x1 = df.loc[bpm1, :]
                     x2 = df.loc[bpm2, :]
-                    dp = df_optics.loc[bpm2, 'MU' + optics_map[family]] - df_optics.loc[bpm1, 'MU' + optics_map[family]]
+                    dp = df_optics.loc[bpm2, 'MU' + optics_map[family]] - df_optics.loc[
+                        bpm1, 'MU' + optics_map[family]]
                     px1n = Coordinates.calc_pxn_from_normalized_bpms(x1n=x1, x2n=x2, dphase=dp)
                     data[row, :] = px1n
                     if debug:
@@ -1641,11 +1719,14 @@ class Kick:
                     b2 = df_optics.loc[bpm2, 'B' + optics_map[family]]
                     a1 = df_optics.loc[bpm1, 'A' + optics_map[family]]
                     a2 = df_optics.loc[bpm2, 'A' + optics_map[family]]
-                    dp = df_optics.loc[bpm2, 'MU' + optics_map[family]] - df_optics.loc[bpm1, 'MU' + optics_map[family]]
-                    px1n = Coordinates.calc_px_from_bpms(x1, x2, beta1=b1, beta2=b2, a1=a1, a2=a2, dphase=-dp)
+                    dp = df_optics.loc[bpm2, 'MU' + optics_map[family]] - df_optics.loc[
+                        bpm1, 'MU' + optics_map[family]]
+                    px1n = Coordinates.calc_px_from_bpms(x1, x2, beta1=b1, beta2=b2, a1=a1, a2=a2,
+                                                         dphase=-dp)
                     data[row, :] = px1n
                     if debug:
-                        logger.info(f'Pair ({(bpm1, bpm2)}) - {b1=:.3f}, {b2=:.3f}, {a1=:.3f}, {a2=:.3f}, {dp=:.3f}')
+                        logger.info(
+                            f'Pair ({(bpm1, bpm2)}) - {b1=:.3f}, {b2=:.3f}, {a1=:.3f}, {a2=:.3f}, {dp=:.3f}')
             # if out is None:
             output[family] = pd.DataFrame(index=index_list, data=data)
             if out is not None:
@@ -1666,7 +1747,8 @@ class Kick:
                        freq_trim: tuple = None,
                        pairs: bool = False,
                        append_results: bool = False,
-                       **kwargs):
+                       **kwargs
+                       ):
         """
         Calculates tune by finding peaks in FFT data, optionally using precomputed data to save time
 
@@ -1711,9 +1793,9 @@ class Kick:
 
                     else:
                         res = naff.fft_peaks(
-                            data=self.df.iloc[0].loc[bpm],
-                            search_peaks=True,
-                            search_kwargs=search_kwargs,
+                                data=self.df.iloc[0].loc[bpm],
+                                search_peaks=True,
+                                search_kwargs=search_kwargs,
                         )
                     top_tune, peak_tunes, peak_idx, peak_props, (pf, pp) = res
                     # a, b = naff.fft(self.df.iloc[0].loc[bpm])
@@ -1821,9 +1903,11 @@ class Kick:
                       families: List[str] = None,
                       spacing: float = 1.0,
                       data_trim: slice = None,
-                      data_type: Datatype = Datatype.RAW):
+                      data_type: Datatype = Datatype.RAW
+                      ):
         """
         Calculates FFT for each bpms and stores in dataframe
+        :param naff: NAFF object that will do the FFT
         :param families:
         :param naff:
         :return:
@@ -1833,11 +1917,12 @@ class Kick:
         for i, bpm in enumerate(bpms):
             if data_trim:
                 # Use provided trims
-                data = self.get_bpm_data(bpms=bpm, no_trim=True, data_type=data_type).copy()[data_trim]
+                data = self.get_bpm_data(bpms=bpm, no_trim=True, data_type=data_type).copy()[
+                    data_trim]
                 fft_freq, fft_power = naff.fft(
-                    data,
-                    data_trim=np.s_[:],
-                    spacing=spacing)
+                        data,
+                        data_trim=np.s_[:],
+                        spacing=spacing)
             else:
                 # Use NAFF trims
                 data = self.get_bpm_data(bpms=bpm, no_trim=True, data_type=data_type).copy()
@@ -1899,7 +1984,7 @@ class Kick:
         if len(columns) != len(columns_extra):
             if len(columns_extra) != 0:
                 raise Exception(
-                    f'Columns are mixed up - they should all exist or all not exist, but have ({len(columns)}) vs ({len(columns_extra)})! ({columns})({columns_extra})')
+                        f'Columns are mixed up - they should all exist or all not exist, but have ({len(columns)}) vs ({len(columns_extra)})! ({columns})({columns_extra})')
         if columns_extra:
             # print(f'Adding extra cols: {columns_extra}')
             # print(np.hstack([averages, variances]).shape)
@@ -1909,7 +1994,8 @@ class Kick:
             # print(df_temp)
             self.df = pd.concat([self.df, df_temp], axis=1)
         else:
-            print(len(columns), np.hstack([averages, variances])[np.newaxis, :].shape, self.df.loc[0, columns])
+            print(len(columns), np.hstack([averages, variances])[np.newaxis, :].shape,
+                  self.df.loc[0, columns])
             self.df.loc[0, columns] = np.hstack([averages, variances])[np.newaxis, :]
 
         return stats
@@ -1955,7 +2041,8 @@ class KickSequence:
                                 skew_tol=3e-3,
                                 bad_word_strings: List[str] = None,
                                 bad_word_keys: List[str] = None,
-                                exclusions: List[int] = None) -> Set[str]:
+                                exclusions: List[int] = None
+                                ) -> Set[str]:
         """
         Checks if certain state parameters are the same for all kicks.
         Includes all standard elements + RF. Some categories can be disabled when differences are expected.
@@ -1999,7 +2086,8 @@ class KickSequence:
                         return [np.abs(v - vals[0]) > skew_tol for v in vals]
                     elif dev in iota.DNMAGNET.ALL_CURRENTS + iota.OCTUPOLES.ALL_CURRENTS:
                         # Only compare nonzeroes
-                        uniques, counts = np.unique([v for v in vals if v != 0.], return_counts=True)
+                        uniques, counts = np.unique([v for v in vals if v != 0.],
+                                                    return_counts=True)
                         if len(uniques) > 1:
                             return [True if v == 0. else v == uniques[0] for v in vals]
                     else:
@@ -2012,8 +2100,10 @@ class KickSequence:
                     # print(key, mask)
                     if any(mask):
                         # uniques, counts, idxs = np.unique()
-                        ok_tuples = [(kick.idx, sd[key]) for (kick, sd, m) in zip(kicks, sd_list, mask) if not m]
-                        bad_tuples = [(kick.idx, sd[key], kick.kickh, kick.kickv) for (kick, sd, m) in
+                        ok_tuples = [(kick.idx, sd[key]) for (kick, sd, m) in
+                                     zip(kicks, sd_list, mask) if not m]
+                        bad_tuples = [(kick.idx, sd[key], kick.kickh, kick.kickv) for (kick, sd, m)
+                                      in
                                       zip(kicks, sd_list, mask) if m]
                         # If we have exclusions, check their global id against exclusions
                         if exclusions:
@@ -2021,7 +2111,8 @@ class KickSequence:
                             idxs_excluded = [idx for idx in idxs if idx in exclusions]
                             idxs_not_excluded = [idx for idx in idxs if idx not in exclusions]
                             if not idxs_not_excluded:
-                                logger.warning(f'Inconsistent kicks {idxs_excluded} overriden, rest passed!')
+                                logger.warning(
+                                    f'Inconsistent kicks {idxs_excluded} overriden, rest passed!')
                                 continue
                         logger.error(f'{key} inconsistent')
                         logger.error(f'>OK:{ok_tuples}')
@@ -2078,15 +2169,19 @@ class KickSequence:
         if sextupoles: check_category([k.get_sextupoles() for k in kicks])
         # Octupoles
         if octupoles: check_category(
-            [{dev: k.state(dev + '.SETTING') for dev in iota.OCTUPOLES.ALL_CURRENTS} for k in kicks])
+                [{dev: k.state(dev + '.SETTING') for dev in iota.OCTUPOLES.ALL_CURRENTS} for k in
+                 kicks])
         # NL
-        if nl: check_category([{dev: k.state(dev + '.SETTING') for dev in iota.DNMAGNET.ALL_CURRENTS} for k in kicks])
+        if nl: check_category(
+                [{dev: k.state(dev + '.SETTING') for dev in iota.DNMAGNET.ALL_CURRENTS} for k in
+                 kicks])
         # Abort if any fail
         if abort:
             raise Exception('Sequence states inconsistent')
 
         # Check that remaining keys all match exactly
-        kvtuples_rem = [set(k.get_full_state().items()) - set(ss.items()) for k, ss in zip(kicks, sum_states)]
+        kvtuples_rem = [set(k.get_full_state().items()) - set(ss.items()) for k, ss in
+                        zip(kicks, sum_states)]
         shared_kvts = set.intersection(*kvtuples_rem)
         outliers = set()
         for kvt in kvtuples_rem:
@@ -2096,7 +2191,8 @@ class KickSequence:
             outlier_keys.update((e[0],))
         outlier_devs = set([x.split('.')[0] for x in outlier_keys])
         if len(invariant_devices.intersection(outlier_devs)) != 0:
-            raise Exception(f'Found invariants in outlier devices: {invariant_devices.intersection(outlier_devs)}')
+            raise Exception(
+                f'Found invariants in outlier devices: {invariant_devices.intersection(outlier_devs)}')
 
         # Check for bad strings in custom keys (i.e. kicker status)
         if bad_word_keys and bad_word_strings:
@@ -2105,8 +2201,10 @@ class KickSequence:
                     for key in bad_word_keys:
                         value = k.state(key)
                         if word in value:
-                            logging.warning(f'Found bad word ({word}) in ({key}) for kick ({k.idx})({k.idxg})')
-                            raise Exception(f'Found bad word ({word}) in ({key}) for kick ({k.idx})({k.idxg})')
+                            logging.warning(
+                                f'Found bad word ({word}) in ({key}) for kick ({k.idx})({k.idxg})')
+                            raise Exception(
+                                f'Found bad word ({word}) in ({key}) for kick ({k.idx})({k.idxg})')
         return outlier_devs
 
     # Deprecated
@@ -2165,7 +2263,8 @@ class KickSequence:
     def summarize(self):
         kv = [k.kickv for k in self.kicks]
         kh = [k.kickh for k in self.kicks]
-        print(f'KickSequence ({self.id}): ({len(self.kicks)}) kicks, max H ({max(kh):.5f}), max V ({max(kv):.5f})')
+        print(
+            f'KickSequence ({self.id}): ({len(self.kicks)}) kicks, max H ({max(kh):.5f}), max V ({max(kv):.5f})')
         print(f'Config dictionary: {self.props}')
         ids = [k.idx for k in self.kicks]
         print(f'IDs: {ids}')
@@ -2188,11 +2287,14 @@ class KickSequence:
             raise AttributeError(f'Kick ({tp}) id ({kick_id}) not found - have ({indices.values})')
         df_row = self.df.loc[indices == kick_id]
         if df_row.shape[0] != 1:
-            raise AttributeError(f'Kick ({tp}) id ({kick_id}) is not unique - result size is ({df_row.shape})')
+            raise AttributeError(
+                f'Kick ({tp}) id ({kick_id}) is not unique - result size is ({df_row.shape})')
         else:
             return df_row.iloc[0, self.df.columns.get_loc('kick')]
 
-    def get_tune_data(self, families: Union[List[str], str], filter_fun: Callable = None, i: int = None):
+    def get_tune_data(self, families: Union[List[str], str], filter_fun: Callable = None,
+                      i: int = None
+                      ):
         """
         Get previously computed tune data (mean and std) for the specified families.
         :param i: Which result set to return
@@ -2212,7 +2314,8 @@ class KickSequence:
         kicksv = np.array([k.kickv for k in kicks])
         for family in families:
             tunes = np.nanmean([k.get_tunes(k.get_bpms(family=family), i=i) for k in kicks], axis=1)
-            tunes_std = np.nanstd([k.get_tunes(k.get_bpms(family=family), i=i) for k in kicks], axis=1)
+            tunes_std = np.nanstd([k.get_tunes(k.get_bpms(family=family), i=i) for k in kicks],
+                                  axis=1)
             nu.append(tunes)
             sig.append(tunes_std)
         return (kicksh, kicksv), nu, sig
@@ -2242,7 +2345,8 @@ class KickSequence:
                        method: str = 'NAFF',
                        families: List[str] = None,
                        selector: Callable = None,
-                       search_kwargs: Dict[str, int] = None):
+                       search_kwargs: Dict[str, int] = None
+                       ):
         naff = naff or self.naff
         assert selector
         for r in self.df.itertuples():

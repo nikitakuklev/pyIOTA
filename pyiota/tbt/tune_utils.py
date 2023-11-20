@@ -19,21 +19,21 @@ def get_distances2(combinations, a, n, offsets):
     for nux, nuy in combinations:
         p = np.array([nux, nuy])
         d_line = pmath.point_line_distance(a, n, p)
-        #dx = np.sqrt((p[0] - a[0])**2 + (p[0] - a[0])**2)
-        #dx = (p[0] - a[0])/-n[1]
+        # dx = np.sqrt((p[0] - a[0])**2 + (p[0] - a[0])**2)
+        # dx = (p[0] - a[0])/-n[1]
         ofs = offsets[0]
-        #abot = np.array([a[0] - n[1] * ofs, a[0] + n[0] * ofs])
-        #ybot = (abot + n * (dx + n[1] * ofs))[1]
+        # abot = np.array([a[0] - n[1] * ofs, a[0] + n[0] * ofs])
+        # ybot = (abot + n * (dx + n[1] * ofs))[1]
         abot = np.array([a[0] - n[1] * ofs, a[1] + n[0] * ofs])
-        dx = (p[0]-abot[0])/n[0]
+        dx = (p[0] - abot[0]) / n[0]
         ybot = (abot + n * dx)[1]
-        #print(f'Dbot: {dx=:.5f}, {n[0]=:.5f}, {n[1]=:.5f}, {ofs=}, {(abot + n * dx)=}')
+        # print(f'Dbot: {dx=:.5f}, {n[0]=:.5f}, {n[1]=:.5f}, {ofs=}, {(abot + n * dx)=}')
         ofs = offsets[2]
         atop = np.array([a[0] - n[1] * ofs, a[1] + n[0] * ofs])
         dx = (p[0] - atop[0]) / n[0]
         ytop = (atop + n * dx)[1]
-        #print(dx, n[1], ofs, dx, (abot + n * dx))
-        #print(f'Dtop: {dx=:.5f}, {n[0]=:.5f}, {n[1]=:.5f}, {ofs=}, {(atop + n * dx)=}')
+        # print(dx, n[1], ofs, dx, (abot + n * dx))
+        # print(f'Dtop: {dx=:.5f}, {n[0]=:.5f}, {n[1]=:.5f}, {ofs=}, {(atop + n * dx)=}')
 
         if ytop < ybot:
             temp = ybot
@@ -65,7 +65,8 @@ def get_distances2(combinations, a, n, offsets):
         return np.nan, combinations, distances
     if any([not b and d < 5e-4 and not np.isnan(d) for d, b in zip(distances, is_b)]):
         mask = [not b for b in is_b]
-        fwd_masked_do = [do if m and dl < 5e-4 else -np.inf for dl, do, m in zip(distances, distances_o, mask)]
+        fwd_masked_do = [do if m and dl < 5e-4 else -np.inf for dl, do, m in
+                         zip(distances, distances_o, mask)]
         print(f'Points {[c for c, m in zip(combinations, mask)]} - dorigin {fwd_masked_do}')
         minidx = np.nanargmax(fwd_masked_do)
     else:
@@ -77,16 +78,18 @@ def filter_tunes(tunes_l, bmin, bmax):
     # Filter all tunes in list
     tl2 = []
     for t in tunes_l:
-        t2 = t[np.logical_and(t>bmin,t<bmax)]
-        t2 = t2[t2<bmax]
+        t2 = t[np.logical_and(t > bmin, t < bmax)]
+        t2 = t2[t2 < bmax]
         if len(t2) == 0:
             t2 = np.array([np.nan])
         tl2.append(t2.astype(np.float64))
-        #print(t,t2)
+        # print(t,t2)
     return tl2
 
 
 from sklearn.utils.extmath import cartesian
+
+
 def find_closest_tunes(tunes_l):
     """ Returns sorted distances of various tune combinations """
     # mesh = np.meshgrid(*tunes_filtered)
@@ -94,21 +97,22 @@ def find_closest_tunes(tunes_l):
     N = np.product(np.array([len(l) for l in tunes_l]))
     print(f'Checking {np.product(np.array([len(l) for l in tunes_l]))} tune combinations')
     if N > 1e8: raise Exception
-    combinations = cartesian(tunes_l) # numpy way of itertools.product(*tunes_l)
+    combinations = cartesian(tunes_l)  # numpy way of itertools.product(*tunes_l)
     assert len(combinations) == N
-    distances = np.nanstd(combinations, axis=1) # RMS distance of points from mean, roughly how spread out cluster is
-    cd = [(d, c) for d, c in zip(distances,combinations)]
+    distances = np.nanstd(combinations,
+                          axis=1)  # RMS distance of points from mean, roughly how spread out cluster is
+    cd = [(d, c) for d, c in zip(distances, combinations)]
     cd = sorted(cd, key=lambda x: x[0])
     return cd
 
 
-def reject_outliers(data, m = 2.):
+def reject_outliers(data, m=2.):
     if len(data) <= 2:
         return data
     d = np.abs(data - np.nanmedian(data))
     mdev = np.nanmedian(d)
-    s = d/mdev if mdev else 0.
-    data[(s>m) & (d>5e-4)] = np.nan
+    s = d / mdev if mdev else 0.
+    data[(s > m) & (d > 5e-4)] = np.nan
     return data
 
 
@@ -136,14 +140,16 @@ def select_tunes_cluster_pairs(k, bounds, families, model=1, **kwargs):
     resultsV = find_closest_tunes(tunes_filtered)
 
     clustersH, clustersV = resultsH[:model], resultsV[:model]
-    print(f'Have {len(clustersH)}/{len(resultsH)} H and {len(clustersV)}/{len(resultsV)} V clusters')
+    print(
+        f'Have {len(clustersH)}/{len(resultsH)} H and {len(clustersV)}/{len(resultsV)} V clusters')
 
     meansH, meansV = [np.nanmean(c[1]) for c in clustersH], [np.nanmean(c[1]) for c in clustersV]
     combinations = list(itertools.product(meansH, meansV))
     combinations_idx = list(itertools.product(range(len(meansH)), range(len(meansV))))
     nldict = kwargs['nldict']
     n = nldict[kwargs['line']]
-    minidx, combinations, distances = get_distances2(combinations, kwargs['a'], n, kwargs['offsets'])
+    minidx, combinations, distances = get_distances2(combinations, kwargs['a'], n,
+                                                     kwargs['offsets'])
 
     if np.isnan(minidx):
         clusterH = np.ones(len(clustersH[0][1])) * np.nan

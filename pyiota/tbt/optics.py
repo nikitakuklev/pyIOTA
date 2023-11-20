@@ -941,7 +941,7 @@ class SVD:
         """
         Clean kick using SVD, reconstructing each BPM from specified number of components
         """
-        raise Exception
+        #raise Exception
         families = families or ['H', 'V', 'S']
         assert kick.__class__.__name__ == 'Kick'  # assert isinstance(kick, Kick)
         for family in families:
@@ -949,10 +949,12 @@ class SVD:
             signal = U[:, :n_comp] @ np.diag(S[:n_comp]) @ vh[:n_comp, :]
             bpms = kick.get_bpms(family)
             for i, b in enumerate(bpms):
-                if b + kick.Datatype.ORIG.value not in kick.df.columns:
-                    kick.set(b + kick.Datatype.ORIG.value, kick.get_bpm_data(b).copy())
-                else:
-                    raise Exception('Double cleaning!')
+                # ORIG is stored by default
+                # if b + kick.Datatype.ORIG.value not in kick.df.columns:
+                #     kick.set(b + kick.Datatype.ORIG.value, kick.get_bpm_data(b).copy())
+                # else:
+                #     #raise Exception('Double cleaning!')
+                #     pass
                 kick.set(b + kick.Datatype.RAW.value, signal[i, :].copy())
 
     def decompose2D(self, data: Kick, plane: str = None, use_kick_trim: bool = True):
@@ -983,8 +985,10 @@ class SVD:
         V = vh.T  # transpose it back to conventional U @ S @ V.T
         return U, S, V, vh
 
-    def decompose_kick_2D(self, kick: Kick, tag: str = 'SVD', use_kick_trim: bool = True,
-                          add_virtual_bpms: bool = True, families: List[str] = None,
+    def decompose_kick_2D(self, kick: Kick, tag: str = 'SVD',
+                          use_kick_trim: bool = True,
+                          add_virtual_bpms: bool = True,
+                          families: List[str] = None,
                           n_components: int = 2):
         """
         Decompose kick using SVD and store results
