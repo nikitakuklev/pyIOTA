@@ -19,14 +19,15 @@ def load_data_tbt(fpath: Path,
                   soft_fail: bool = None,
                   force_load: bool = None,
                   idx: int = None,
-                  use_meters: bool = False
+                  use_meters: bool = False,
+                  load_bpms: bool = True,
                   ):
     """
     Loads data from experimental HDF5 TBT format
     :param fpath: Full directory or file path
-    :param verbose: Print various info
-    :param version: Which format version to load. Roughly, v1 was used start-middle of run 2,
-     v2 for rest of run 2.
+    :param verbose: Print various debug info
+    :param version: Which format version to load.
+     Roughly, v1 was used start-middle of run 2; v2 for rest of run 2; v3 used in run4.
     :param soft_fail: Whether to suppress exception if data inconsistency is found
     :param force_load: Whether to load data in any case (implied soft_fail=True)
     :param idx: index of tbt kick - overrides that of data
@@ -119,7 +120,7 @@ def load_data_tbt(fpath: Path,
         from .sequences import TBTData
         rowlist = []
         for i, file in enumerate(files):
-            data = TBTData.from_hdf5(file)
+            data = TBTData.from_hdf5(file, load_bpms=load_bpms)
             rowlist.append({'idx': idx or i,
                             'kick_v': data.metadata.get('kick_v', np.nan),
                             'kick_h': data.metadata.get('kick_h', np.nan),
@@ -135,15 +136,26 @@ def load_data_tbt(fpath: Path,
     else:
         raise Exception("Incorrect file version specified")
 
-
 def save_data_tbt(fpath: Path,
                   df: pd.DataFrame,
                   name_format: str = "iota_kicks_%Y%m%d-%H%M%S.hdf5",
                   verbose: bool = True,
                   version: int = 3
                   ):
+    """
+    Save TBT data
+    :param fpath: Path to hdf5
+    :param df: Dataframe with standard TBT fields
+    :param name_format: Format string
+    :param verbose:
+    :param version: [1|2]
+    :return:
+    """
     import h5py
+    from warnings import warn
+
     if version == 1:
+        warn('Saving v1 data is deprecated')
         if len(df) != 1:
             raise Exception('Cannot save multiple kicks')
         assert not fpath.exists() or fpath.is_dir()
@@ -179,7 +191,9 @@ def save_data_tbt(fpath: Path,
             f.attrs['datatype'] = 'TBT_R2V1'
             f.attrs['uuid'] = str(uuid.uuid4())
     elif version == 2:
-        pass
+        raise NotImplementedError
+    elif version == 3:
+        raise NotImplementedError
     else:
         raise Exception("Incorrect file version specified")
 

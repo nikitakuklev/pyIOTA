@@ -95,6 +95,7 @@ class DoubleDevice(Device):
     def __init__(self, name: str, adapter=None, history=10):
         self.setpoint = None
         self.readback = None
+        self.error = None
         drf2 = parse_request(name)
         assert drf2.property in [DRF_PROPERTY.READING, DRF_PROPERTY.SETTING]
         super().__init__(name, drf2, adapter, history)
@@ -116,6 +117,9 @@ class DoubleDevice(Device):
                 value = v.data
             else:
                 value = float(v.data)
+            self.error = None
+        elif isinstance(v, ACNETErrorResponse):
+            self.error = v
         # elif isinstance(v, AcnetStatusResponse):
         #     value = None
         if self.drf2.is_reading:
@@ -263,13 +267,16 @@ class StatusDevice(Device):
     def set_on(self):
         self.set('ON')
 
-    def set_on_and_verify(self, retries=3, delay=0.01, check_first=False):
+    def set_on_and_verify(self, retries=3, delay=0.02, check_first=False,
+                          no_initial_set=False, idelay=None):
+        idelay = idelay or delay
         if check_first:
             self.read()
             if self.is_on():
                 return
-        self.set('ON')
-        time.sleep(delay)
+        if not no_initial_set:
+            self.set('ON')
+        time.sleep(idelay)
         for i in range(retries):
             self.read()
             if self.is_on():
@@ -283,19 +290,24 @@ class StatusDevice(Device):
     def set_off(self):
         self.set('OFF')
 
-    def set_off_and_verify(self, retries=3, delay=0.01, check_first=False):
+    def set_off_and_verify(self, retries=3, delay=0.02, check_first=False,
+                           no_initial_set=False, idelay=None,
+                           resend_setpoint_after: Optional[int]=None):
+        idelay = idelay or delay
         if check_first:
             self.read()
             if self.is_off():
                 return
-        self.set('OFF')
-        time.sleep(delay)
+        if not no_initial_set:
+            self.set('OFF')
+        time.sleep(idelay)
+        resend_setpoint_after = resend_setpoint_after or retries / 4
         for i in range(retries):
             self.read()
             if self.is_off():
                 return
             else:
-                if i > retries / 2:
+                if i > resend_setpoint_after:
                     self.set('OFF')
             time.sleep(delay)
         raise Exception(f'{self.name} - OFF verification failure, value {self.value_string}')
@@ -303,13 +315,23 @@ class StatusDevice(Device):
     def reset(self):
         self.set('RESET')
 
-    def reset_and_verify(self, retries=3, delay=0.01):
-        self.set('RESET')
-        time.sleep(delay)
+    def reset_and_verify(self, retries=3, delay=0.02, check_first=False,
+                         no_initial_set=False, idelay=None):
+        idelay = idelay or delay
+        if check_first:
+            self.read()
+            if self.is_ready():
+                return
+        if not no_initial_set:
+            self.set('RESET')
+        time.sleep(idelay)
         for i in range(retries):
             self.read()
             if self.is_ready():
                 return
+            else:
+                if i > retries / 2:
+                    self.set('RESET')
             time.sleep(delay)
         raise Exception(f'{self.name} - OFF verification failure, value {self.value_string}')
 
@@ -324,6 +346,7 @@ class StatusDevice(Device):
 
 class ArrayDevice(Device):
     def __init__(self, name, adapter=None, history=10, auto_drf: bool = True):
+        self.error = None
         self.value = None
         drf2 = parse_request(name)
         assert drf2.property in [DRF_PROPERTY.READING, DRF_PROPERTY.SETTING]
@@ -349,8 +372,10 @@ class ArrayDevice(Device):
     def update(self, v: ArrayDataResponse, source: str):
         if isinstance(v, ArrayDataResponse):
             self.value = v.data
+            self.error = None
         elif isinstance(v, ACNETErrorResponse):
             self.value = None
+            self.error = v
         super().update(v, source)
 
     def __str__(self) -> str:
@@ -400,7 +425,7 @@ class DeviceSet:
                 raise ACNETConfigError(
                         f'Non-unique devices in the list: {un}, {un[uc > 1]}, {uc},'
                         f' {len(self.devices)}, {len(members)}')
-            #for d in members:
+            # for d in members:
             #    d._device_set = self
             self.children = None
             self.parent = None
@@ -495,7 +520,7 @@ class DeviceSet:
         return values
 
     def read(self, adapter: 'Adapter' = None, full: bool = False, verbose: bool = False,
-             split: bool = False
+             split: bool = False, accept_null: bool = True
              ) -> list:
         if not self.check_acquisition_supported(method='oneshot'):
             raise Exception(f'Acquisition not supported - have {self.adapter.supported}')
@@ -503,7 +528,7 @@ class DeviceSet:
             raise AttributeError("Cannot start acquisition on an empty set")
         if self.leaf:
             a = adapter or self.adapter
-            values = a.read(self, full=full, verbose=verbose, split=split)
+            values = a.read(self, full=full, verbose=verbose, split=split, accept_null=accept_null)
         else:
             values = []
             for c in self.children:
@@ -569,6 +594,9 @@ class DoubleDeviceSet(DeviceSet):
                     d.drf2.property = DRF_PROPERTY.SETTING
             else:
                 for d in members:
+                    if d.drf2.property == DRF_PROPERTY.SETTING:
+                        logger.warning(f'Device {d.name} is a SETTING, but read_many will force a READING unless'
+                                       f' settings=True is passed')
                     d.drf2.property = DRF_PROPERTY.READING
         super().__init__(members, name, adapter)
 

@@ -274,7 +274,7 @@ class __AcnetdProtocol(asyncio.Protocol):
 	# Send an error to all pending ACKs. The '\xde\x01' value is
 	# ACNET_DISCONNECTED.
 
-        msg = b'\x00\x00\xde\x01'
+        msg = b'\x00\x00\x00\x00\xde\x01'
         while not self.qCmd.empty():
             self.qCmd.get_nowait().set_result(msg)
 

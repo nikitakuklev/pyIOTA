@@ -11,6 +11,7 @@ import traceback
 from abc import ABC, abstractmethod
 from asyncio import AbstractEventLoop
 from enum import Enum
+from json import JSONDecodeError
 from typing import Callable, Optional
 
 import httpx
@@ -80,10 +81,10 @@ def _convert_devices_to_settings(device_list: list[Device]):
 
 class ACNETSettings:
     n_connect = 2
-    n_read = 2
-    n_set = 2
-    set_timeout = 5.0
-    read_timeout = 5.5
+    n_read = 10
+    n_set = 10
+    set_timeout = 15.0
+    read_timeout = 15.5
     connect_timeout = 1.0
     devices_chunk_size = 25
 
@@ -383,7 +384,8 @@ class ACL(Adapter):
     def __del__(self):
         try:
             if self.fallback:
-                self.client.close()
+                if hasattr(self, 'client'):
+                    self.client.close()
             else:
                 async def terminate():
                     if self.aclient:
@@ -699,11 +701,13 @@ class ACNETRelay(Adapter):
              ds: DeviceSet,
              full: bool = False,
              verbose: bool = False,
-             split: bool = True
+             split: bool = True,
+             accept_null: bool = True,
              ) -> list:
         if verbose or self.verbose:
             verbose = True
         retries = ACNETSettings.n_read
+        assert retries >= 0
         cs = ACNETSettings.devices_chunk_size
 
         assert ds.leaf
@@ -735,21 +739,22 @@ class ACNETRelay(Adapter):
             logger.debug(f'{self.name}: params {params}')
 
         try_cnt = 0
+        responses = None
         while True:
             try:
-                async def get(json_lists):
+                async def __get(json_lists):
                     try:
                         tasks = [c.post(self.address, json=p,
                                         timeout=ACNETSettings.read_timeout) for p in json_lists]
                         results = await asyncio.gather(*tasks)
                         return results
-                    except httpx.ReadTimeout as ex:
-                        raise ACNETTimeoutError(f'Proxy read timed out') from None
-                    except Exception as ex:
-                        raise ACNETError(f'Unexpected failure in proxy adapter')
+                    except httpx.ReadTimeout as exi:
+                        raise ACNETTimeoutError(f'Proxy read timed out, {exi=}, json={json_lists}') from None
+                    except Exception as exi:
+                        raise ACNETError(f'Unexpected failure in proxy adapter, {exi=}') from None
 
                 t1 = time.perf_counter()
-                responses = asyncio.run(get(params))
+                responses = asyncio.run(__get(params))
                 t_read = time.perf_counter() - t1
 
                 data = {}
@@ -763,15 +768,35 @@ class ACNETRelay(Adapter):
                     else:
                         if verbose:
                             logger.debug(f'{self.name}: result {r.content.decode()[:1000]}...')
+                        logger.warning(f'{self.name}: Bad status code {r.status_code}: {r.text=}')
                         raise ACNETProxyError(f'Bad status code {r.status_code}: {r.text=}')
 
-                assert len(data) == len(
-                        ds.devices), f'Length mismatch {len(data)} {len(ds.devices)}'
+                # assert len(data) == len(
+                #         ds.devices), f'Length mismatch {len(data)} {len(ds.devices)}'
+
+                devs_received = set(data.keys())
+                devs_wanted = set(ds.devices.keys())
+                if len(devs_received) != len(devs_wanted):
+                    logger.warning(f'{self.name}: device response mismatch: {devs_received} !='
+                                   f' {devs_wanted}')
+                    raise ACNETProxyError(
+                        f'Devices mismatch, not accepting because accept_null=False')
 
                 for i, (k, v) in enumerate(data.items()):
+                    if not accept_null:
+                        if v is None:
+                            logger.warning(f'{self.name}: None value returned for {k}')
+                            raise ACNETProxyError(f'None value returned for {k}')
                     dev_name = name_to_device_map[k]
                     dev = ds.devices[dev_name]
                     dev.update(v, source=self.name)
+
+                if not accept_null:
+                    for d in ds.devices.values():
+                        if d.value is None:
+                            logger.warning(f'{self.name}: {d.name}=None ({d.error=}), '
+                                           f'not accepting because accept_null=False')
+                            raise ACNETProxyError(f'None value for {d.name}')
 
                 values = []
                 if full:
@@ -784,9 +809,17 @@ class ACNETRelay(Adapter):
                     return values
             except Exception as ex:
                 try_cnt += 1
-                logger.warning(f'{self.name}: read failed ({try_cnt} of {retries}) | {ex=}')
+                logger.warning(f'{self.name}: read failed '
+                               f'({try_cnt} of'
+                               f' {retries}) |'
+                               f' {ex=}')
+                if isinstance(ex, JSONDecodeError):
+                    logger.warning(f'JSON debug: ')
+                    if responses is not None:
+                        for r in responses:
+                            logger.warning(f'  {r.text=}')
                 if try_cnt >= retries:
-                    logger.warning(f'{self.name}: out of retries - aborting read')
+                    logger.error(f'{self.name}: out of retries - aborting read')
                     raise ex
 
     def _process_settings(self, ds: DeviceSet, r):
@@ -845,6 +878,7 @@ class ACNETRelay(Adapter):
             logger.debug(f'{self.name}: SETTING : {verbose} : {self.verbose}')
             verbose = True
         retries = ACNETSettings.n_set
+        cs = ACNETSettings.devices_chunk_size
 
         assert ds.leaf
         assert len(values) == len(ds.devices) and np.ndim(values) == 1
@@ -876,7 +910,12 @@ class ACNETRelay(Adapter):
                             except httpx.TimeoutException as exi:
                                 try_cnt += 1
                                 logger.warning(
-                                        f'{self.name}: set failed ({try_cnt} of {retries}) | {exi=}')
+                                        f'{self.name}: set failed after '
+                                        f'{ACNETSettings.set_timeout} '
+                                        f'({try_cnt} of'
+                                        f' {retries}) |'
+                                        f' {exi=}')
+                                logger.warning(f'{self.name}: json {p=}')
                                 if try_cnt >= retries:
                                     logger.warning(f'{self.name}: out of retries - aborting read')
                                     raise exi
@@ -891,7 +930,7 @@ class ACNETRelay(Adapter):
                 devices = list(ds.devices.values())
                 params = []
                 if split:
-                    num_lists = min(len(ds.devices) // 20 + 1, 5) if len(ds.devices) > 20 else 1
+                    num_lists = min(len(ds.devices) // cs + 1, 5) if len(ds.devices) > cs else 1
                 else:
                     num_lists = 1
                 device_lists = [list(ll) for ll in np.array_split(devices, num_lists)]
@@ -1311,7 +1350,7 @@ class DPM(Adapter):
         self._monitor_thread(ds, sub, full)
         return sub
 
-    def _readonce_thread(self, requests):
+    def _readonce_thread(self, requests: list[str]):
         from .acsys.dpm import DPMContext
         from .acsys import run_client
         output_data = {}
@@ -1369,7 +1408,69 @@ class DPM(Adapter):
         final_data = {v: output_data[k] for k, v in tag_map.items()}
         return final_data
 
-    def read(self, ds: DeviceSet, full=False, verbose=False, split: bool = False) -> list:
+    def _readonce_chunked_thread(self, requests: list[str], n_responses: int = None):
+        from .acsys.dpm import DPMContext
+        from .acsys import run_client
+        assert len(requests) == 1, f'Only 1 request allowed for chunked read'
+        output_data = {}
+        tag_map = {}
+        cnt = 0
+
+        async def reader(con):
+            nonlocal cnt
+            async with DPMContext(con) as dpm:
+                for ii, dd in enumerate(requests):
+                    await dpm.add_entry(ii, dd)
+                    tag_map[ii] = dd
+                await dpm.start()
+                while True:
+                    try:
+                        ev = await asyncio.shield(asyncio.wait_for(dpm.__anext__(),
+                                                                   ACNETSettings.read_timeout))
+                        logger.debug(f'DPM {ev.tag}-{tag_map[ev.tag]}: {self._format_ev(ev)}')
+                        cnt += 1
+
+                        if ev.tag not in output_data:
+                            output_data[ev.tag] = []
+                        if ev.isReading:
+                            output_data[ev.tag].append(ev)
+                        else:
+                            output_data[ev.tag].append(ev)
+                        if n_responses is not None:
+                            if cnt >= n_responses:
+                                break
+                        else:
+                            if len(ev.data) == 0:
+                                break
+                    except StopAsyncIteration:
+                        break
+                    except TimeoutError:
+                        remaining = [x for x in requests if x not in output_data]
+                        n_t = len(requests)
+                        n_r = len(remaining)
+                        raise ACNETTimeoutError(f'DPM timeout waiting for ({remaining}) ({n_r} of'
+                                                f' {n_t})')
+        run_client(reader)
+        # logger.debug(f'DPM read finished in {(time.perf_counter() - t1)}')
+        final_data = {v: output_data[k] for k, v in tag_map.items()}
+        return final_data
+
+    def read_raw(self, request: str, chunks:int=1):
+        """
+        Read data from DPM, passing in request >>verbatim<<.
+        :param request: DPM request string
+        :param chunks: Number of chunks/responses to read. For most single-shot reads, this is 1.
+        Set to None to automatically detect based on empty response, such as for logger data.
+        :return:
+        """
+        if chunks == 1:
+            return self._readonce_thread([request])
+        else:
+            return self._readonce_chunked_thread([request], chunks)
+
+
+    def read(self, ds: DeviceSet, full=False, verbose=False, split: bool = False,
+             accept_null: bool = True) -> list:
         from .acsys.dpm import ItemStatus
         if verbose or self.verbose:
             verbose = True

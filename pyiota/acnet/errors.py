@@ -1,4 +1,4 @@
-class ACNETError(BaseException):
+class ACNETError(Exception):
     pass
 
 
