@@ -1,7 +1,7 @@
 import re
 
 from .device import get_qualified_device, parse_device
-from .event import DRF_EVENT, parse_event
+from .event import DRF_EVENT, DefaultEvent, parse_event
 from .extra import DRF_EXTRA, parse_extra
 from .field import DEFAULT_FIELD_FOR_PROPERTY, DRF_FIELD, get_default_field
 from .property import DRF_PROPERTY, DRF_PROPERTY_NAMES, get_default_property, \
@@ -25,12 +25,19 @@ class DiscreteRequest:
                  event: DRF_EVENT,
                  extra: DRF_EXTRA = None
                  ):
+        assert isinstance(raw_string, str)
         self.raw_string = raw_string
+        assert isinstance(device, str)
         self.device = device
+        assert property is None or isinstance(property, DRF_PROPERTY)
         self.property = property
+        assert range is None or isinstance(range, DRF_RANGE)
         self.range = range
+        assert field is None or isinstance(field, DRF_FIELD)
         self.field = field
+        assert event is None or isinstance(event, DRF_EVENT)
         self.event = event
+        assert extra is None or isinstance(extra, DRF_EXTRA)
         self.extra = extra
 
     def __eq__(self, other):
@@ -39,11 +46,11 @@ class DiscreteRequest:
             self.extra == other.extra
 
     def __str__(self):
-        return f'DiscreteRequest {self.raw_string} = {self.device=} {self.property=}' \
-               f' {self.range=}' \
-               f' {self.field=}' \
-               f' {self.event=}' \
-               f' {self.extra}'
+        return f'DiscreteRequest[{self.raw_string}] = [{self.device=}] [{self.property=}]' \
+               f' [{self.range=}]' \
+               f' [{self.field=}]' \
+               f' [{self.event=}]' \
+               f' [{self.extra=}]'
 
     def __repr__(self):
         return self.__str__()
@@ -160,10 +167,18 @@ def parse_request(device_str: str):
         prop_obj = get_default_property(device_str)
         field = prop
     rng = parse_range(rng)
+
     if field is None:
-        field = get_default_field(prop_obj)
-    event_obj = parse_event(event)
-    req = DiscreteRequest(device_str, dev_obj, prop_obj, rng, field, event_obj, extra_obj)
+        field_obj = get_default_field(prop_obj)
+    else:
+        field_obj = DRF_FIELD[field.upper()]
+
+    if event is None:
+        event_obj = DefaultEvent()
+    else:
+        event_obj = parse_event(event)
+
+    req = DiscreteRequest(device_str, dev_obj, prop_obj, rng, field_obj, event_obj, extra_obj)
     return req
 
 # class DeviceParser:

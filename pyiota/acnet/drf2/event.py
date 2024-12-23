@@ -22,7 +22,7 @@ def parse_event(parse_str: Optional[str]):
 
 
 class DRF_EVENT:
-    def __init__(self, raw_string, mode):
+    def __init__(self, raw_string: str, mode):
         self.raw_string = raw_string
         self.mode = mode
 

@@ -42,5 +42,5 @@ ALLOWED_FIELD_FOR_PROPERTY = {
 }
 
 
-def get_default_field(prop: DRF_PROPERTY):
+def get_default_field(prop: DRF_PROPERTY) -> DRF_FIELD:
     return DEFAULT_FIELD_FOR_PROPERTY[prop]

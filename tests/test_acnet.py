@@ -310,6 +310,13 @@ def test_drf_parse_full():
     assert f(d).to_canonical() == 'N:I2B1RI.SETTING[50:]@I'
     assert f(d).to_qualified() == 'N_I2B1RI[50:]@I'
 
+    d = 'N_I2B1RI.SETTING[50]@e,AE,e,1000'
+    r = f(d).parts
+    assert r == ('N:I2B1RI', DRF_PROPERTY.SETTING, DRF_RANGE('single', 50, None),
+                 DRF_FIELD.SCALED, ImmediateEvent('I', 'I'))
+    assert f(d).to_canonical() == 'N:I2B1RI.SETTING[50]@e,AE,e,1000'
+    assert f(d).to_qualified() == 'N_I2B1RI[50]@e,AE,e,1000'
+
     d = 'Z:CACHE[50:]'
     r = f(d).parts
     assert r == ('Z:CACHE', DRF_PROPERTY.READING, DRF_RANGE('std', 50, None),

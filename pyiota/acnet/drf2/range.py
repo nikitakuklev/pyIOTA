@@ -20,14 +20,19 @@ def parse_range(raw_string: Optional[str]):
         if idx1 is None and idx2 is None:
             # [:]
             return DRF_RANGE(mode='full')
+        if idx2 is None and ':' not in raw_string:
+            #print(f'detected singlet from {raw_string}')
+            return DRF_RANGE(mode='single', low=idx1, high=idx2)
         return DRF_RANGE(mode='std', low=idx1, high=idx2)
     else:
         raise Exception('Byte ranges not supported')
 
 
 class DRF_RANGE:
-    def __init__(self, mode: Literal['full', 'std'] = None,
-                 low: Optional[int] = None, high: Optional[int] = None):
+    def __init__(self,
+                 mode: Literal['full', 'std', 'single'] = None,
+                 low: Optional[int] = None,
+                 high: Optional[int] = None):
         self.low = low
         self.high = high
         self.mode = mode or ('full' if (low is None and high is None) else 'std')
@@ -38,6 +43,9 @@ class DRF_RANGE:
     def __str__(self):
         if self.mode == 'full':
             return '[:]'
+        elif self.mode == 'single':
+            s = f'[{self.low}]'
+            return s
         else:
             s = '['
             if self.low is not None:
