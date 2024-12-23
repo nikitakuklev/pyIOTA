@@ -426,23 +426,30 @@ one indirectly through `acsys.run_client()`.
             self._raw_handle = res[3]
             self.handle = Connection.__rtoa(res[3])
             _log.info('connected to ACSys with handle %s', self.handle)
-        else:
-            raise sts
+
+        return sts
 
     @staticmethod
     async def create():
-        proto = await _create_socket()
-        if proto is not None:
-            con = Connection()
-            try:
-                await con._connect(proto)
-                return con
-            except:
+        tries_left = 3
+
+        # Our proxy can return a connection to a broken ACNET
+        # service. Rather than have the user's script fail, we'll
+        # retry the connection to pick the next machine. If all are
+        # bad, then we don't want to infinitely loop, so there is a
+        # limit.
+
+        while tries_left > 0:
+            proto = await _create_socket()
+            if proto is not None:
+                con = Connection()
+                if (await con._connect(proto)).isSuccess:
+                    return con
                 del con
-                raise
-        else:
-            _log.error('*** unable to connect to ACSys')
-            raise ACNET_DISCONNECTED
+            tries_left -= 1
+            _log.debug('detected bad connection ... retrying')
+        _log.error('*** unable to connect to ACSys')
+        raise ACNET_DISCONNECTED
 
     async def get_name(self, addr):
         """Look-up node name.

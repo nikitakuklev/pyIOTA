@@ -9,8 +9,6 @@ __author__ = "Nikita Kuklev"
 import sys
 import os
 import logging
-#import numpy as np
-#import pandas as pd
 
 logging.basicConfig(  # format='[%(asctime)s] {%(name)s:%(funcName)s:%(lineno)d} %(levelname)s - %(message)s',
     #format='[%(asctime)s][%(funcName)s:%(lineno)d}] %(levelname)s - %(message)s',

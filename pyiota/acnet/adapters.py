@@ -27,6 +27,7 @@ from .drf2.event import ImmediateEvent
 from .errors import ACNETError, ACNETProxyError, ACNETTimeoutError
 
 logger = logging.getLogger(__name__)
+logging.getLogger('httpx').setLevel(logging.WARNING)
 
 
 class READ_METHOD(Enum):
@@ -1193,6 +1194,7 @@ class DPM(Adapter):
                     await dpm.add_entry(i, d)
                     tag_map[i] = d
                 await dpm.enable_settings(role=self.default_role)
+                await asyncio.sleep(1.0)
                 await dpm.start()
                 for i, (k, v) in enumerate(input_data.items()):
                     await dpm.apply_settings([(i, v)])
@@ -1234,8 +1236,10 @@ class DPM(Adapter):
             elif isinstance(device, StatusDevice):
                 req = f'{device.name}.STATUS@N'
             elif isinstance(device, DoubleDevice):
-                req = f'{device.name + postfix}@N'
-
+                if '.SETTING' in device.name:
+                    req = f'{device.name}@N'
+                else:
+                    req = f'{device.name + postfix}@N'
             else:
                 raise Exception(f'Unrecognized device type {device.__class__.__name__}')
             reqs.append(req)
@@ -1263,6 +1267,7 @@ class DPM(Adapter):
 
     def process_dpm_response(self, ds, k, v, t_read=None):
         from .acsys.dpm import ItemStatus
+
         def status(k, v):
             return ACNETErrorResponse(facility_code=v.status.facility,
                                       error_number=v.status.err_code,
@@ -1322,7 +1327,7 @@ class DPM(Adapter):
                     await dpm.start()
 
                     async for ev in dpm:
-                        logger.debug(f'DPM mon {ev.tag}-{tag_map[ev.tag]}: {self._format_ev(ev)}')
+                        logger.debug(f'DPM mon {ev.tag=}-{tag_map[ev.tag]=}: {self._format_ev(ev)=}')
                         if ev.isReading:
                             put_result(ev.tag, ev)
                         if sub.stop_requested:
@@ -1346,7 +1351,7 @@ class DPM(Adapter):
         sub = Subscription()
         if callback is not None:
             sub.register_callback(callback)
-        logger.debug(f'DPM sub start at {datetime.datetime.now()}')
+        logger.debug(f'DPM sub start for {ds.name=} at {datetime.datetime.now()}')
         self._monitor_thread(ds, sub, full)
         return sub
 
@@ -1455,7 +1460,7 @@ class DPM(Adapter):
         final_data = {v: output_data[k] for k, v in tag_map.items()}
         return final_data
 
-    def read_raw(self, request: str, chunks:int=1):
+    def read_raw(self, request: str, chunks: int = 1):
         """
         Read data from DPM, passing in request >>verbatim<<.
         :param request: DPM request string
@@ -1467,7 +1472,6 @@ class DPM(Adapter):
             return self._readonce_thread([request])
         else:
             return self._readonce_chunked_thread([request], chunks)
-
 
     def read(self, ds: DeviceSet, full=False, verbose=False, split: bool = False,
              accept_null: bool = True) -> list:
