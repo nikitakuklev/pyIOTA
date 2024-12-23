@@ -69,7 +69,7 @@ field matches the parameter 'tag'.
         warnings.warn(
             "deprecated in favor of the snake_case version, is_reading_for",
             DeprecationWarning)
-        return self.is_reading_for
+        return self.is_reading_for()
 
     def is_reading_for(self, *tags):
         """Returns True if this object is an ItemData object and its 'tag'
@@ -86,7 +86,7 @@ field matches the parameter 'tag'.
         warnings.warn(
             "deprecated in favor of the snake_case version, is_status_for",
             DeprecationWarning)
-        return self.is_status_for
+        return self.is_status_for()
 
     def is_status_for(self, *tags):
         """Returns True if this object is an ItemStatus object and its 'tag'
@@ -154,13 +154,20 @@ hold the engineering units of the reading.
     def micros(self):
         """Contains a list of microsecond timestamps for each datum in data.
 
-The index of each timestamp cooresponds to the same index in 'data'.
+The index of each timestamp corresponds to the same index in 'data'.
 
         """
         return self._micros
 
     @property
     def isReading(self):
+        warnings.warn(
+            "deprecated in favor of the snake_case version, is_reading",
+            DeprecationWarning)
+        return self.is_reading
+
+    @property
+    def is_reading(self):
         return True
 
     def __str__(self):
@@ -171,6 +178,12 @@ The index of each timestamp cooresponds to the same index in 'data'.
         return f'{guaranteed_fields}}}'
 
     def isReadingFor(self, *tags):
+        warnings.warn(
+            "deprecated in favor of the snake_case version, is_reading_for",
+            DeprecationWarning)
+        return self.is_reading_for(*tags)
+
+    def is_reading_for(self, *tags):
         return self.tag in tags
 
 
@@ -204,12 +217,25 @@ result of a setting.
 
     @property
     def isStatus(self):
+        warnings.warn(
+            "deprecated in favor of the snake_case version, is_status",
+            DeprecationWarning)
+        return self.is_status
+
+    @property
+    def is_status(self):
         return True
 
     def __str__(self):
         return f'{{ tag: {self.tag}, status: {self.status} }}'
 
     def isStatusFor(self, *tags):
+        warnings.warn(
+            "deprecated in favor of the snake_case version, is_status_for",
+            DeprecationWarning)
+        return self.is_status_for(*tags)
+
+    def is_status_for(self, *tags):
         return self.tag in tags
 
 
@@ -429,9 +455,10 @@ This method is the preferred way to iterate over DPM replies.
         self.gen = gen
         self.dpm_cancel = dpm_cancel
         self.list_id = msg.list_id
-        #await self._add_to_list(lock, 0, f'#USER:{getpass.getuser()}')
-        #await self._add_to_list(lock, 0, f'#PID:{os.getpid()}')
-        await self._add_to_list(lock, 0, '#TYPE:pyiota')
+
+        await self._add_to_list(lock, 0, '#USER:nkuklev')
+        await self._add_to_list(lock, 0, '#PID:9000')
+        await self._add_to_list(lock, 0, '#TYPE:Python3')
 
     def get_entry(self, tag):
         """Returns the DRF string associated with the 'tag'.
@@ -686,6 +713,7 @@ calling this method, a few readings may still get delivered.
                 msg.token = tok
 
             _, msg = await self.con.request_reply(self.dpm_task, msg,
+                                                  timeout=5000,
                                                   proto=acsys.dpm.dpm_protocol)
 
             if isinstance(msg, Authenticate_reply):

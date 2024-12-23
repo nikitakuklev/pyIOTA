@@ -5,7 +5,7 @@ import logging
 import time
 import uuid
 from abc import ABC
-from typing import Any, Optional, TYPE_CHECKING
+from typing import Any, Callable, Optional, TYPE_CHECKING
 
 import numpy as np
 import pandas as pd
@@ -85,11 +85,95 @@ class Device(ABC):
         return str(self.last_response)
 
     def __str__(self) -> str:
-        return f'Device {self.name}: {self.value_string}'
+        return f'Device [{self.name}]: {self.value_string=}'
 
     def __repr__(self) -> str:
-        return f'Device {self.name}: {self.value_string}'
+        return f'Device [{self.name}]: {self.value_string=}'
 
+class RawDevice(Device):
+    def __init__(self, name: str, adapter=None, history=10):
+        self.setpoint = None
+        self.readback = None
+        self.error = None
+        drf2 = parse_request(name)
+        assert drf2.property in [DRF_PROPERTY.READING, DRF_PROPERTY.SETTING]
+        super().__init__(name, drf2, adapter, history)
+
+    @property
+    def value(self):
+        if self.drf2.is_reading:
+            return self.readback
+        else:
+            return self.setpoint
+
+    def dump(self):
+        return self.value
+
+    def update(self, v: DoubleDataResponse, source: str):
+        value = None
+        if isinstance(v, DoubleDataResponse):
+            if isinstance(v.data, list):
+                value = v.data
+            else:
+                value = v.data
+            self.error = None
+        elif isinstance(v, ACNETErrorResponse):
+            self.error = v
+        if self.drf2.is_reading:
+            self.readback = value
+        else:
+            self.setpoint = value
+
+        super().update(v, source)
+
+    def update_log(self, df_log):
+        try:
+            self.log = pd.concat([self.log, df_log], axis=0, ignore_index=True)
+            duplicates = self.log.duplicated('time', keep=False)
+            duplicates_all = self.log.duplicated(keep=False)
+            assert duplicates.sum() == duplicates_all.sum()
+            self.log.drop_duplicates(inplace=True)
+            assert self.log.loc[:, 'time'].is_unique
+        except Exception as e:
+            raise ValueError(f'Device {self.name} - log {df_log} add failed - {e}')
+
+    def read(self, adapter=None, **kwargs):
+        adapter = adapter or self.adapter
+        ds = DoubleDeviceSet(members=[self], adapter=adapter)
+        return ds.read(**kwargs)[0]
+
+    def read_readback(self, adapter=None, **kwargs):
+        is_reading = self.drf2.is_reading
+        if not is_reading:
+            d = self.copy()
+            d.drf2.property = DRF_PROPERTY.READING
+        else:
+            d = self
+        ds = DoubleDeviceSet(members=[d], adapter=adapter, settings=False)
+        # if is_reading:
+        #     self.drf2.property = DRF_PROPERTY.READING
+        # else:
+        #     self.drf2.property = DRF_PROPERTY.SETTING
+        return ds.read(**kwargs)[0]
+
+    def read_setpoint(self, adapter=None, **kwargs):
+        is_reading = self.drf2.is_reading
+        if is_reading:
+            d = self.copy()
+            d.drf2.property = DRF_PROPERTY.READING
+        else:
+            d = self
+        ds = DoubleDeviceSet(members=[d], adapter=adapter, settings=True)
+        # if is_reading:
+        #     self.drf2.property = DRF_PROPERTY.READING
+        # else:
+        #     self.drf2.property = DRF_PROPERTY.SETTING
+        return ds.read(**kwargs)[0]
+
+    def set(self, value: Any, adapter=None, **kwargs):
+        ds = DoubleDeviceSet(members=[self], adapter=adapter)
+        r = ds.set([value], **kwargs)
+        return r
 
 class DoubleDevice(Device):
     def __init__(self, name: str, adapter=None, history=10):
@@ -268,7 +352,8 @@ class StatusDevice(Device):
         self.set('ON')
 
     def set_on_and_verify(self, retries=3, delay=0.02, check_first=False,
-                          no_initial_set=False, idelay=None):
+                          no_initial_set=False, idelay=None
+                          ):
         idelay = idelay or delay
         if check_first:
             self.read()
@@ -292,7 +377,8 @@ class StatusDevice(Device):
 
     def set_off_and_verify(self, retries=3, delay=0.02, check_first=False,
                            no_initial_set=False, idelay=None,
-                           resend_setpoint_after: Optional[int]=None):
+                           resend_setpoint_after: Optional[int] = None
+                           ):
         idelay = idelay or delay
         if check_first:
             self.read()
@@ -316,7 +402,8 @@ class StatusDevice(Device):
         self.set('RESET')
 
     def reset_and_verify(self, retries=3, delay=0.02, check_first=False,
-                         no_initial_set=False, idelay=None):
+                         no_initial_set=False, idelay=None
+                         ):
         idelay = idelay or delay
         if check_first:
             self.read()
@@ -386,6 +473,10 @@ class ArrayDevice(Device):
 
     def __repr__(self) -> str:
         return self.__str__()
+
+
+class RawArrayDevice(ArrayDevice):
+    pass
 
 
 #####
@@ -535,7 +626,12 @@ class DeviceSet:
                 values += c.update(c.adapter.oneshot())
         return values
 
-    def monitor(self, callback=None):
+    def monitor(self, callback: Callable = None):
+        """
+        Start monitoring the devices in the set. Depending on the DRF specification, either one or more
+        updates will arrive in response to each specification.
+        :param callback: callback for when new data arrives
+        """
         if not self.check_acquisition_supported('monitoring'):
             raise Exception('Acquisition is not supported for method: {}'.format('polling'))
         if not self.check_acquisition_available('monitoring'):
@@ -578,9 +674,12 @@ class DeviceSet:
 
 
 class DoubleDeviceSet(DeviceSet):
-    def __init__(self, members: list, name: str = None, adapter: 'Adapter' = None,
+    def __init__(self, members: list,
+                 name: str = None,
+                 adapter: 'Adapter' = None,
                  settings: Optional[bool] = None
                  ):
+        assert isinstance(members, list), 'a list of devices must be passed'
         if all([isinstance(d, str) for d in members]):
             members = [DoubleDevice(d) for d in members]
         elif all([isinstance(ds, DoubleDevice) for ds in members]):
@@ -608,11 +707,13 @@ class DoubleDeviceSet(DeviceSet):
 
     @staticmethod
     def read_many(devices: list[Device], setting=False):
+        """ Static method to read many devices as a single shot without creating a set """
         ds = DoubleDeviceSet(members=devices, settings=setting)
         return ds.read()
 
     @staticmethod
     def read_many_strings(device_strings: list[str], setting=False):
+        """ Static method to read many devices as a single shot without creating a set """
         devices = []
         for s in device_strings:
             devices.append(DoubleDevice(s))
