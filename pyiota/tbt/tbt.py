@@ -4,7 +4,7 @@ import itertools
 import json
 import logging
 from json import JSONDecodeError
-from typing import Union, Callable, Dict, List, Iterable, Tuple, Optional, Any, Set
+from typing import Union, Callable, Dict, List, Iterable, Tuple, Optional, Any, Set, TYPE_CHECKING
 
 import numpy as np
 import pandas as pd
@@ -13,7 +13,7 @@ from ..iota import run2 as iota
 from ..acnet import utils as acutils
 
 # special_keys = ['idx', 'kickv', 'kickh', 'state', 'custom']
-from ..lattice import LatticeContainer
+
 from ocelot import Twiss, Monitor
 # from pyIOTA.tbt.naff import NAFF
 from .naff import NAFF
@@ -24,7 +24,8 @@ special_keys = acutils.special_keys.copy()
 
 critical_keys = ['kickv', 'kickh', 'idx']
 
-
+if TYPE_CHECKING:
+    from ..lattice import LatticeContainer
 # def FilteredSignalButter(signal, fs, cutoff):
 #     B, A = butter(1, cutoff / (fs / 2), btype='low')
 #     filtered_signal = filtfilt(B, A, signal, axis=0)
@@ -481,7 +482,7 @@ class Kick:
         self.roll_bpm: Optional[str] = None
         self.box: Optional[LatticeContainer] = None
 
-    def upgrade(self, box: LatticeContainer, silent: bool = False):
+    def upgrade(self, box: "LatticeContainer", silent: bool = False):
         """ Upgrade this kick to v2 """
         if self.v2:
             # pass
