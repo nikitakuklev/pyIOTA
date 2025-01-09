@@ -8,7 +8,7 @@ from scipy import integrate
 from typing import Dict
 from ocelot import Twiss, MagneticLattice, Edge, twiss
 from ocelot.cpbd.elements import SBend, RBend, Bend, Quadrupole, Multipole, Sextupole
-from ..tbt import NAFF
+
 
 """
 Improved chromaticity calculations
@@ -63,7 +63,7 @@ def chromaticity(lattice: MagneticLattice,
     See CERN-THESIS-2018-300
     See Fringe Effects in MAD PART I https://frs.web.cern.ch/frs/report/fringe_part_I.pdf
     """
-
+    from ..tbt import NAFF
     method_kwargs = method_kwargs or {}
     n_superperiods = method_kwargs.get('n_superperiods', 1)
     chrom_1period = None
