@@ -14,17 +14,55 @@ class DRF_PROPERTY(Enum):
     ALARM_LIST_NAME = '!'
 
 
-DRF_PROPERTY_NAMES = [el.name for el in DRF_PROPERTY]
+DRF_PROPERTY_SHORTHANDS = {el.name: el.value for el in DRF_PROPERTY}
+
+DRF_PROPERTY_ALIASES = {
+    'READING': DRF_PROPERTY.READING,
+    'READ': DRF_PROPERTY.READING,
+    'PRREAD': DRF_PROPERTY.READING,
+    'SETTING': DRF_PROPERTY.SETTING,
+    'SET': DRF_PROPERTY.SETTING,
+    'PRSET': DRF_PROPERTY.SETTING,
+    'STATUS': DRF_PROPERTY.STATUS,
+    'BASIC_STATUS': DRF_PROPERTY.STATUS,
+    'STS': DRF_PROPERTY.STATUS,
+    'PRBSTS': DRF_PROPERTY.STATUS,
+    'CONTROL': DRF_PROPERTY.CONTROL,
+    'BASIC_CONTROL': DRF_PROPERTY.CONTROL,
+    'CTRL': DRF_PROPERTY.CONTROL,
+    'PRBCTL': DRF_PROPERTY.CONTROL,
+    'ANALOG': DRF_PROPERTY.ANALOG,
+    'ANALOG_ALARM': DRF_PROPERTY.ANALOG,
+    'AA': DRF_PROPERTY.ANALOG,
+    'PRANAB': DRF_PROPERTY.ANALOG,
+    'DIGITAL': DRF_PROPERTY.DIGITAL,
+    'DIGITAL_ALARM': DRF_PROPERTY.DIGITAL,
+    'DA': DRF_PROPERTY.DIGITAL,
+    'PRDABL': DRF_PROPERTY.DIGITAL,
+    'DESCRIPTION': DRF_PROPERTY.DESCRIPTION,
+    'DESC': DRF_PROPERTY.DESCRIPTION,
+    'PRDESC': DRF_PROPERTY.DESCRIPTION,
+    'INDEX': DRF_PROPERTY.INDEX,
+    'IDX': DRF_PROPERTY.INDEX,
+    'PRIDX': DRF_PROPERTY.INDEX,
+    'LONG_NAME': DRF_PROPERTY.LONG_NAME,
+    'LNGNAM': DRF_PROPERTY.LONG_NAME,
+    'PRLNAM': DRF_PROPERTY.LONG_NAME,
+    'ALARM_LIST_NAME': DRF_PROPERTY.ALARM_LIST_NAME,
+    'LSTNAM': DRF_PROPERTY.ALARM_LIST_NAME,
+    'PRALNM': DRF_PROPERTY.ALARM_LIST_NAME,
+}
 
 
-def parse_property(raw_string):
-    prop_map = {el.name: el for el in DRF_PROPERTY}
-    if raw_string not in prop_map:
+def parse_property(raw_string: str) -> DRF_PROPERTY:
+    rs_upper = raw_string.upper()
+    if rs_upper in DRF_PROPERTY_ALIASES:
+        return DRF_PROPERTY_ALIASES[rs_upper]
+    else:
         raise ValueError(f'Invalid property {raw_string}')
-    return prop_map[raw_string]
 
 
-def get_default_property(raw_string):
+def get_default_property(raw_string: str) -> DRF_PROPERTY:
     char = raw_string[1]
     if len(raw_string) > 2:
         values = [el.value for el in DRF_PROPERTY]

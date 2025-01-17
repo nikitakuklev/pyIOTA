@@ -3,10 +3,10 @@ import re
 from .device import get_qualified_device, parse_device
 from .event import DRF_EVENT, DefaultEvent, parse_event
 from .extra import DRF_EXTRA, parse_extra
-from .field import DEFAULT_FIELD_FOR_PROPERTY, DRF_FIELD, get_default_field
-from .property import DRF_PROPERTY, DRF_PROPERTY_NAMES, get_default_property, \
+from .field import DEFAULT_FIELD_FOR_PROPERTY, DRF_FIELD, get_default_field, parse_field
+from .property import DRF_PROPERTY, DRF_PROPERTY_ALIASES, get_default_property, \
     parse_property
-from .range import DRF_RANGE, parse_range
+from .range import BYTE_RANGE, ARRAY_RANGE, parse_range
 
 # 1=DEVIVE, 2=PROPERTY OR FIELD, 3=RANGE, 4=FIELD, 5=EVENT
 # PATTERN_FULL = re.compile("(?i)(.{3,}?)" + "(?:\\.(\\w+))?" + "(\\[[\\d:]*\\]|\\{[\\d:]*\\})?" + \
@@ -20,7 +20,7 @@ class DiscreteRequest:
                  raw_string: str,
                  device: str,
                  property: DRF_PROPERTY,
-                 range: DRF_RANGE,
+                 range: ARRAY_RANGE,
                  field: DRF_FIELD,
                  event: DRF_EVENT,
                  extra: DRF_EXTRA = None
@@ -31,7 +31,7 @@ class DiscreteRequest:
         self.device = device
         assert property is None or isinstance(property, DRF_PROPERTY)
         self.property = property
-        assert range is None or isinstance(range, DRF_RANGE)
+        assert range is None or isinstance(range, (ARRAY_RANGE, BYTE_RANGE))
         self.range = range
         assert field is None or isinstance(field, DRF_FIELD)
         self.field = field
@@ -142,6 +142,13 @@ class DiscreteRequest:
     def name_as(self, property: DRF_PROPERTY):
         return get_qualified_device(self.device, property)
 
+    def pretty_print(self):
+            return f'DiscreteRequest[{self.raw_string}]\n [{self.device=}]\n [{self.property=}]\n' \
+                   f' [{self.range=}]\n' \
+                   f' [{self.field=}]\n' \
+                   f' [{self.event=}]\n' \
+                   f' [{self.extra=}]\n'
+
 
 def parse_request(device_str: str):
     assert device_str is not None
@@ -159,19 +166,21 @@ def parse_request(device_str: str):
     # print(dev, prop, rng, field, event)
     dev_ovj = parse_device(dev)
     dev_obj = dev_ovj.canonical_string
+
     if prop is None:
         prop_obj = get_default_property(device_str)
-    elif prop.upper() in DRF_PROPERTY_NAMES:
+    elif prop.upper() in DRF_PROPERTY_ALIASES:
         prop_obj = parse_property(prop)
     else:
         prop_obj = get_default_property(device_str)
         field = prop
+
     rng = parse_range(rng)
 
     if field is None:
         field_obj = get_default_field(prop_obj)
     else:
-        field_obj = DRF_FIELD[field.upper()]
+        field_obj = parse_field(field.upper())
 
     if event is None:
         event_obj = DefaultEvent()
