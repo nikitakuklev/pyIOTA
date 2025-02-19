@@ -277,49 +277,49 @@ def test_drf_parse_full():
 
     d = 'N:I2B1RI[:]@p,500'
     r = f(d).parts
-    assert r == ('N:I2B1RI', DRF_PROPERTY.READING, DRF_RANGE('full', None, None),
+    assert r == ('N:I2B1RI', DRF_PROPERTY.READING, ARRAY_RANGE('full', None, None),
                  DRF_FIELD.SCALED, PeriodicEvent('p,500', 'P'))
     assert f(d).to_canonical() == 'N:I2B1RI.READING[:]@p,500'
     assert f(d).to_qualified() == 'N:I2B1RI[:]@p,500'
 
     d = 'N:I2B1RI[]@p,500'
     r = f(d).parts
-    assert r == ('N:I2B1RI', DRF_PROPERTY.READING, DRF_RANGE('full', None, None),
+    assert r == ('N:I2B1RI', DRF_PROPERTY.READING, ARRAY_RANGE('full', None, None),
                  DRF_FIELD.SCALED, PeriodicEvent('p,500', 'P'))
     assert f(d).to_canonical() == 'N:I2B1RI.READING[:]@p,500'
     assert f(d).to_qualified() == 'N:I2B1RI[:]@p,500'
 
     d = 'N:I2B1RI[:2048]@I'
     r = f(d).parts
-    assert r == ('N:I2B1RI', DRF_PROPERTY.READING, DRF_RANGE('std', None, 2048),
+    assert r == ('N:I2B1RI', DRF_PROPERTY.READING, ARRAY_RANGE('std', None, 2048),
                  DRF_FIELD.SCALED, ImmediateEvent('I', 'I'))
     assert f(d).to_canonical() == 'N:I2B1RI.READING[:2048]@I'
     assert f(d).to_qualified() == 'N:I2B1RI[:2048]@I'
 
     d = 'N:I2B1RI.SETTING[50:]@I'
     r = f(d).parts
-    assert r == ('N:I2B1RI', DRF_PROPERTY.SETTING, DRF_RANGE('std', 50, None),
+    assert r == ('N:I2B1RI', DRF_PROPERTY.SETTING, ARRAY_RANGE('std', 50, None),
                  DRF_FIELD.SCALED, ImmediateEvent('I', 'I'))
     assert f(d).to_canonical() == 'N:I2B1RI.SETTING[50:]@I'
     assert f(d).to_qualified() == 'N_I2B1RI[50:]@I'
 
     d = 'N_I2B1RI.SETTING[50:]@I'
     r = f(d).parts
-    assert r == ('N:I2B1RI', DRF_PROPERTY.SETTING, DRF_RANGE('std', 50, None),
+    assert r == ('N:I2B1RI', DRF_PROPERTY.SETTING, ARRAY_RANGE('std', 50, None),
                  DRF_FIELD.SCALED, ImmediateEvent('I', 'I'))
     assert f(d).to_canonical() == 'N:I2B1RI.SETTING[50:]@I'
     assert f(d).to_qualified() == 'N_I2B1RI[50:]@I'
 
     d = 'N_I2B1RI.SETTING[50]@e,AE,e,1000'
     r = f(d).parts
-    assert r == ('N:I2B1RI', DRF_PROPERTY.SETTING, DRF_RANGE('single', 50, None),
+    assert r == ('N:I2B1RI', DRF_PROPERTY.SETTING, ARRAY_RANGE('single', 50, None),
                  DRF_FIELD.SCALED, ImmediateEvent('I', 'I'))
     assert f(d).to_canonical() == 'N:I2B1RI.SETTING[50]@e,AE,e,1000'
     assert f(d).to_qualified() == 'N_I2B1RI[50]@e,AE,e,1000'
 
     d = 'Z:CACHE[50:]'
     r = f(d).parts
-    assert r == ('Z:CACHE', DRF_PROPERTY.READING, DRF_RANGE('std', 50, None),
+    assert r == ('Z:CACHE', DRF_PROPERTY.READING, ARRAY_RANGE('std', 50, None),
                  DRF_FIELD.SCALED, None)
     assert f(d).to_canonical() == 'Z:CACHE.READING[50:]'
     assert f(d).to_qualified() == 'Z:CACHE[50:]'
