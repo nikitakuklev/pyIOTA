@@ -19,10 +19,10 @@ import numpy as np
 import pandas as pd
 
 from .acsys.dpm import ItemData, ItemStatus
-from .data import ACNETErrorResponse, ArrayDataResponse, DoubleDataResponse, StatusDataResponse
+from .data import ACNETErrorResponse, ArrayDataResponse, DoubleDataResponse, RawDataResponse, StatusDataResponse
 from .devices import ArrayDevice, ArrayDeviceSet, Device, DeviceSet, DoubleDevice, DoubleDeviceSet, \
-    StatusDevice, StatusDeviceSet
-from .drf2 import DRF_PROPERTY, DRF_RANGE, parse_request
+    RawDevice, RawDeviceSet, StatusDevice, StatusDeviceSet
+from .drf2 import DRF_PROPERTY, ARRAY_RANGE, parse_request
 from .drf2.event import ImmediateEvent
 from .errors import ACNETError, ACNETProxyError, ACNETTimeoutError
 
@@ -49,8 +49,8 @@ def _convert_devices_to_immediate(device_list: list[Device], array_length=None):
     for device in device_list:
         if isinstance(device, ArrayDevice):
             if array_length is not None:
-                ds = device.drf2.to_canonical(range=DRF_RANGE('std', None,
-                                                              array_length),
+                ds = device.drf2.to_canonical(range=ARRAY_RANGE('std', None,
+                                                                array_length),
                                               event=ImmediateEvent())
             else:
                 ds = device.drf2.to_canonical(event=ImmediateEvent())
@@ -59,6 +59,8 @@ def _convert_devices_to_immediate(device_list: list[Device], array_length=None):
             reqs.append(device.drf2.to_canonical(property=DRF_PROPERTY.STATUS,
                                                  event=ImmediateEvent()))
         elif isinstance(device, DoubleDevice):
+            reqs.append(device.drf2.to_canonical(event=ImmediateEvent()))
+        elif isinstance(device, RawDevice):
             reqs.append(device.drf2.to_canonical(event=ImmediateEvent()))
         else:
             raise Exception(f'Unrecognized device type {device.__class__.__name__}')
@@ -69,11 +71,13 @@ def _convert_devices_to_settings(device_list: list[Device]):
     reqs = []
     for device in device_list:
         if isinstance(device, ArrayDevice):
-            ds = device.drf2.to_canonical(range=DRF_RANGE('full'), event=None)
+            ds = device.drf2.to_canonical(range=ARRAY_RANGE('full'), event=None)
             reqs.append(ds)
         elif isinstance(device, StatusDevice):
             reqs.append(device.drf2.to_canonical(property=DRF_PROPERTY.CONTROL, event=None))
         elif isinstance(device, DoubleDevice):
+            reqs.append(device.drf2.to_canonical(property=DRF_PROPERTY.SETTING, event=None))
+        elif isinstance(device, RawDevice):
             reqs.append(device.drf2.to_canonical(property=DRF_PROPERTY.SETTING, event=None))
         else:
             raise Exception(f'Unrecognized device type {device.__class__.__name__}')
@@ -107,7 +111,8 @@ class ACNETSettings:
 
     class Context:
         def __init__(self, n_read: int = 2, n_set: int = 2,
-                     read_timeout: float = 5.5, set_timeout: float = 5.0):
+                     read_timeout: float = 5.5, set_timeout: float = 5.0
+                     ):
             assert n_read >= 1
             assert n_set >= 1
             assert read_timeout >= 0.0
@@ -781,7 +786,7 @@ class ACNETRelay(Adapter):
                     logger.warning(f'{self.name}: device response mismatch: {devs_received} !='
                                    f' {devs_wanted}')
                     raise ACNETProxyError(
-                        f'Devices mismatch, not accepting because accept_null=False')
+                            f'Devices mismatch, not accepting because accept_null=False')
 
                 for i, (k, v) in enumerate(data.items()):
                     if not accept_null:
@@ -1161,27 +1166,6 @@ class DPM(Adapter):
         run_client(app)
         return {'ping_time': tping, 'acnet_id': task, 'dpm': task_name}
 
-        # def _start_acsys_thread(self, requests):
-
-    #     from .acsys.dpm import DPMContext
-    #     from .acsys import run_client
-    #     async def my_app(con):
-    #         # Setup context
-    #         async with DPMContext(con) as dpm:
-    #             await dpm.add_entry(0, 'Z:CUBE_X.SETTING')
-    #             await dpm.add_entry(1, 'Z:CUBE_Y.SETTING')
-    #             await dpm.start()
-    #             async for evt_res in dpm:
-    #                 if evt_res.is_reading_for(0):
-    #                     if evt_res.is_reading_for(0):
-    #                         print(evt_res)
-    #                     else:
-    #                         pass
-    #                 else:
-    #                     pass
-    #
-    #     run_client(my_app)
-
     def _settings_thread(self, input_data: dict):
         from .acsys.dpm import DPMContext
         from .acsys import run_client
@@ -1236,6 +1220,11 @@ class DPM(Adapter):
             elif isinstance(device, StatusDevice):
                 req = f'{device.name}.STATUS@N'
             elif isinstance(device, DoubleDevice):
+                if '.SETTING' in device.name:
+                    req = f'{device.name}@N'
+                else:
+                    req = f'{device.name + postfix}@N'
+            elif isinstance(device, RawDevice):
                 if '.SETTING' in device.name:
                     req = f'{device.name}@N'
                 else:
@@ -1455,6 +1444,7 @@ class DPM(Adapter):
                         n_r = len(remaining)
                         raise ACNETTimeoutError(f'DPM timeout waiting for ({remaining}) ({n_r} of'
                                                 f' {n_t})')
+
         run_client(reader)
         # logger.debug(f'DPM read finished in {(time.perf_counter() - t1)}')
         final_data = {v: output_data[k] for k, v in tag_map.items()}
@@ -1474,7 +1464,8 @@ class DPM(Adapter):
             return self._readonce_chunked_thread([request], chunks)
 
     def read(self, ds: DeviceSet, full=False, verbose=False, split: bool = False,
-             accept_null: bool = True) -> list:
+             accept_null: bool = True
+             ) -> list:
         from .acsys.dpm import ItemStatus
         if verbose or self.verbose:
             verbose = True
@@ -1527,6 +1518,14 @@ class DPM(Adapter):
                     data_resps[k] = DoubleDataResponse(data=v.data,
                                                        timestamp=v.stamp,
                                                        t_read=t_read)
+        elif isinstance(ds, RawDeviceSet):
+            for k, v in data.items():
+                if isinstance(v, ItemStatus):
+                    data_resps[k] = status(k, v)
+                else:
+                    data_resps[k] = RawDataResponse(data=v.data,
+                                                    timestamp=v.stamp,
+                                                    t_read=t_read)
         elif isinstance(ds, StatusDeviceSet):
             for k, v in data.items():
                 if isinstance(v, ItemStatus):
@@ -1536,7 +1535,7 @@ class DPM(Adapter):
                                                        timestamp=v.stamp,
                                                        t_read=t_read)
         else:
-            raise Exception
+            raise Exception(f'Unrecognized device set type {ds.__class__.__name__}')
 
         for i, (k, v) in enumerate(ds.devices.items()):
             req = reqs[i]

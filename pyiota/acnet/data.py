@@ -25,6 +25,8 @@ class DataResponse(ACNETResponse):
     def __str__(self):
         return f'{self.__class__.__name__}({self.data=},{self.timestamp=},t_read={self._format_t()})'
 
+class RawDataResponse(DataResponse):
+    pass
 
 class DoubleDataResponse(DataResponse):
     pass

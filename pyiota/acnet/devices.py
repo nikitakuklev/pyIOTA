@@ -10,9 +10,9 @@ from typing import Any, Callable, Optional, TYPE_CHECKING
 import numpy as np
 import pandas as pd
 
-from .data import ACNETResponse, ArrayDataResponse, DoubleDataResponse, StatusDataResponse, \
+from .data import ACNETResponse, ArrayDataResponse, DoubleDataResponse, RawDataResponse, StatusDataResponse, \
     ACNETErrorResponse
-from .drf2 import DRF_EXTRA, DRF_PROPERTY, DRF_RANGE, DiscreteRequest, get_default_field, \
+from .drf2 import DRF_EXTRA, DRF_PROPERTY, ARRAY_RANGE, DiscreteRequest, get_default_field, \
     get_qualified_device, \
     parse_request
 from .errors import ACNETConfigError
@@ -90,13 +90,44 @@ class Device(ABC):
     def __repr__(self) -> str:
         return f'Device [{self.name}]: {self.value_string=}'
 
+
+def set_bit_in_bytes(byte_obj: bytes, position: int):
+    byte_array = bytearray(byte_obj)
+    byte_index = position // 8
+    bit_offset = position % 8
+    byte_array[byte_index] |= 1 << bit_offset
+    return bytes(byte_array)
+
+
+def clear_bit_in_bytes(byte_obj: bytes, bit_position: int):
+    byte_array = bytearray(byte_obj)
+    byte_index = bit_position // 8
+    bit_offset = bit_position % 8
+    mask = ~(1 << bit_offset)  # Create a mask with 0 at the desired bit
+    byte_array[byte_index] &= mask
+    return bytes(byte_array)
+
+
+def bypass_alarm(byte_obj: bytes):
+    return clear_bit_in_bytes(byte_obj, 0)
+
+
+def enable_alarm(byte_obj: bytes):
+    return set_bit_in_bytes(byte_obj, 0)
+
+
+def print_as_bitfield(byte_obj: bytes):
+    for b in byte_obj:
+        print(f'{b:0>8b}', end=' ')
+
+
 class RawDevice(Device):
     def __init__(self, name: str, adapter=None, history=10):
         self.setpoint = None
         self.readback = None
         self.error = None
         drf2 = parse_request(name)
-        assert drf2.property in [DRF_PROPERTY.READING, DRF_PROPERTY.SETTING]
+        assert drf2.property in [DRF_PROPERTY.READING, DRF_PROPERTY.SETTING, DRF_PROPERTY.ANALOG, DRF_PROPERTY.DIGITAL]
         super().__init__(name, drf2, adapter, history)
 
     @property
@@ -109,9 +140,9 @@ class RawDevice(Device):
     def dump(self):
         return self.value
 
-    def update(self, v: DoubleDataResponse, source: str):
+    def update(self, v: RawDataResponse, source: str):
         value = None
-        if isinstance(v, DoubleDataResponse):
+        if isinstance(v, RawDataResponse):
             if isinstance(v.data, list):
                 value = v.data
             else:
@@ -139,7 +170,7 @@ class RawDevice(Device):
 
     def read(self, adapter=None, **kwargs):
         adapter = adapter or self.adapter
-        ds = DoubleDeviceSet(members=[self], adapter=adapter)
+        ds = RawDeviceSet(members=[self], adapter=adapter)
         return ds.read(**kwargs)[0]
 
     def read_readback(self, adapter=None, **kwargs):
@@ -149,7 +180,7 @@ class RawDevice(Device):
             d.drf2.property = DRF_PROPERTY.READING
         else:
             d = self
-        ds = DoubleDeviceSet(members=[d], adapter=adapter, settings=False)
+        ds = RawDeviceSet(members=[d], adapter=adapter, settings=False)
         # if is_reading:
         #     self.drf2.property = DRF_PROPERTY.READING
         # else:
@@ -163,7 +194,7 @@ class RawDevice(Device):
             d.drf2.property = DRF_PROPERTY.READING
         else:
             d = self
-        ds = DoubleDeviceSet(members=[d], adapter=adapter, settings=True)
+        ds = RawDeviceSet(members=[d], adapter=adapter, settings=True)
         # if is_reading:
         #     self.drf2.property = DRF_PROPERTY.READING
         # else:
@@ -171,9 +202,13 @@ class RawDevice(Device):
         return ds.read(**kwargs)[0]
 
     def set(self, value: Any, adapter=None, **kwargs):
-        ds = DoubleDeviceSet(members=[self], adapter=adapter)
+        ds = RawDeviceSet(members=[self], adapter=adapter)
         r = ds.set([value], **kwargs)
         return r
+
+    def read_analog_alarms(self):
+        pass
+
 
 class DoubleDevice(Device):
     def __init__(self, name: str, adapter=None, history=10):
@@ -439,7 +474,7 @@ class ArrayDevice(Device):
         assert drf2.property in [DRF_PROPERTY.READING, DRF_PROPERTY.SETTING]
         # Fix lack of range specifier
         if auto_drf and drf2.range is None:
-            drf2.range = DRF_RANGE('full')
+            drf2.range = ARRAY_RANGE('full')
         super().__init__(name, drf2, adapter, history)
 
     def read(self, adapter=None, **kwargs):
@@ -671,6 +706,54 @@ class DeviceSet:
             for c in self.children:
                 success &= c.adapter.stop()
             return success
+
+
+class RawDeviceSet(DeviceSet):
+    def __init__(self, members: list,
+                 name: str = None,
+                 adapter: 'Adapter' = None,
+                 settings: Optional[bool] = None
+                 ):
+        assert isinstance(members, list), 'a list of devices must be passed'
+        if all([isinstance(d, str) for d in members]):
+            members = [RawDevice(d) for d in members]
+        elif all([isinstance(ds, RawDevice) for ds in members]):
+            pass
+        else:
+            raise AttributeError(
+                    f'{self.__class__.__name__} can only contain devices - use DeviceSet')
+        if settings is not None:
+            if settings:
+                for d in members:
+                    d.drf2.property = DRF_PROPERTY.SETTING
+            else:
+                for d in members:
+                    if d.drf2.property == DRF_PROPERTY.SETTING:
+                        logger.warning(f'Device {d.name} is a SETTING, but read_many will force a READING unless'
+                                       f' settings=True is passed')
+                    d.drf2.property = DRF_PROPERTY.READING
+        super().__init__(members, name, adapter)
+
+    def add(self, device: RawDevice):
+        if isinstance(device, RawDevice):
+            super().add(device)
+        else:
+            raise Exception("Device is not a double!")
+
+    @staticmethod
+    def read_many(devices: list[Device], setting=False):
+        """ Static method to read many devices as a single shot without creating a set """
+        ds = RawDeviceSet(members=devices, settings=setting)
+        return ds.read()
+
+    @staticmethod
+    def read_many_strings(device_strings: list[str], setting=False):
+        """ Static method to read many devices as a single shot without creating a set """
+        devices = []
+        for s in device_strings:
+            devices.append(RawDevice(s))
+        ds = RawDeviceSet(members=devices, settings=setting)
+        return ds.read()
 
 
 class DoubleDeviceSet(DeviceSet):
