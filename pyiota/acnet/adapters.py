@@ -66,6 +66,26 @@ def _convert_devices_to_immediate(device_list: list[Device], array_length=None):
             raise Exception(f'Unrecognized device type {device.__class__.__name__}')
     return reqs
 
+def _convert_devices_for_reading(device_list: list[Device], array_length=None):
+    reqs = []
+    for device in device_list:
+        if isinstance(device, ArrayDevice):
+            if array_length is not None:
+                ds = device.drf2.to_canonical(range=ARRAY_RANGE('std', None,
+                                                                array_length))
+            else:
+                ds = device.drf2.to_canonical()
+            reqs.append(ds)
+        elif isinstance(device, StatusDevice):
+            reqs.append(device.drf2.to_canonical(property=DRF_PROPERTY.STATUS))
+        elif isinstance(device, DoubleDevice):
+            reqs.append(device.drf2.raw_string)
+        elif isinstance(device, RawDevice):
+            reqs.append(device.drf2.to_canonical())
+        else:
+            raise Exception(f'Unrecognized device type {device.__class__.__name__}')
+    return reqs
+
 
 def _convert_devices_to_settings(device_list: list[Device]):
     reqs = []
@@ -1138,6 +1158,7 @@ class DPM(Adapter):
     def __init__(self,
                  default_role: str = None,
                  verbose: bool = False,
+                 convert_reads_to_immediate: bool = False,
                  mock: FakeAdapter = None
                  ):
         super().__init__()
@@ -1145,6 +1166,7 @@ class DPM(Adapter):
         self.verbose = verbose
         self.mock = mock
         self.loop: AbstractEventLoop = None
+        self.convert_reads_to_immediate = convert_reads_to_immediate
         if default_role is not None:
             self.default_role = default_role
 
@@ -1471,8 +1493,12 @@ class DPM(Adapter):
             verbose = True
         retries = ACNETSettings.n_read
         devices = list(ds.devices.values())
-        al = ds.array_length if isinstance(ds, ArrayDeviceSet) else None
-        reqs = _convert_devices_to_immediate(devices, al)
+        if self.convert_reads_to_immediate:
+            al = ds.array_length if isinstance(ds, ArrayDeviceSet) else None
+            reqs = _convert_devices_to_immediate(devices, al)
+        else:
+            al = ds.array_length if isinstance(ds, ArrayDeviceSet) else None
+            reqs = _convert_devices_for_reading(devices, al)
 
         t1 = time.perf_counter()
         try_cnt = 0
