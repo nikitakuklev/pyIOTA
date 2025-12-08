@@ -425,7 +425,7 @@ one indirectly through `acsys.run_client()`.
             self.protocol = proto
             self._raw_handle = res[3]
             self.handle = Connection.__rtoa(res[3])
-            _log.info('connected to ACSys with handle %s', self.handle)
+            _log.debug('connected to ACSys with handle %s', self.handle)
 
         return sts
 
