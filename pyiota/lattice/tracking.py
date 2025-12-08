@@ -1157,7 +1157,10 @@ def tracking_step(lat: MagneticLattice, particle_list, dz: float, navi: Navigato
         tm.apply(particle_list)
 
 
-def tracking_step_element(lat: MagneticLattice, particle_list, el_type: Type[Element], navi: Navigator):
+def tracking_step_element(lat: MagneticLattice,
+                          particle_list: list[Particle] | ParticleArray,
+                          el_type: Type[Element],
+                          navi: Navigator):
     """ Tracking step until next element of given class or end of lattice """
     if navi.n_elem == len(lat.sequence):
         raise Exception("Tracking step called while already at end of lattice?")
@@ -1262,3 +1265,33 @@ def track_nturns_fast(lat: MagneticLattice, nturns: int, track_list: List[Track_
                 pxy.p_list.append(p_array.rparticles[:, n].copy())
     print(f'Perf: ({time.time() - start:.4e})s - ({(time.time() - start) / nturns:.4e})s per turn')
     return track_list_const
+
+
+def track_nturns_fast_with_bpms(box: LatticeContainer,
+                                n_turns: int = 1,
+                                parray: ParticleArray = None):
+    lat = box.lattice
+    bpms: list[Monitor] = box.get_elements(Monitor)
+    data = {bpm.id: [] for bpm in bpms}
+    for t in np.arange(n_turns):
+        navi = Navigator(box.lattice)
+        #L = 0.
+        for bpm in bpms:
+            #dz = bpm.s_mid - L
+            tracking_step_element(box.lattice, parray, Monitor, navi)
+            bpm = lat.sequence[navi.n_elem-1]
+            parraycopy = copy.copy(parray)
+            data[bpm.id].append(parraycopy)
+            if not hasattr(bpm, 'data'):
+                bpm.data = []
+            # ocelot.cpbd.beam.get_envelope
+            df = pd.DataFrame(data=parraycopy.rparticles.T)
+            bpm.data.append({"period": n_turns, "coordinates": df, "parameters": None})
+            #L = bpm.s_mid
+            # particles.append(copy.copy(p))
+        # Finish turn
+        # tracking_step(box.lattice, [p], box.lattice.totalLen - L, navi)
+        if navi.n_elem < len(lat.sequence):
+            tracking_step_element(box.lattice, parray, Monitor, navi)
+        if not np.isclose(navi.z0, box.lattice.totalLen, atol=1e-10):
+            print(f'End of turn navi length ({navi.z0}) not equal to lattice length ({box.lattice.totalLen})')
